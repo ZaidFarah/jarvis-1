@@ -2,3 +2,5 @@ PySide6>=6.8
 pydantic-settings>=2.14
 loguru>=0.7
 pytest>=9.0
+sounddevice>=0.5
+pyttsx3>=2.99

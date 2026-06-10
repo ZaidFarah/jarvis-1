@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Jarvis is being built as a production-quality Windows desktop assistant. Phase 1 creates only the safe foundation: a runnable desktop shell, configuration, logging, an assistant stub, and tests.
+Jarvis is being built as a production-quality Windows desktop assistant. Phase 1 created the safe desktop foundation. Phase 2 adds a limited local voice foundation for microphone diagnostics and provider interfaces.
 
 ## Phase 1 Components
 
@@ -22,6 +22,18 @@ Jarvis is being built as a production-quality Windows desktop assistant. Phase 1
 
 `assistant/core.py` is a stub. It accepts typed text commands and returns a safe placeholder response. It does not call OpenAI, run tools, access files, or store memory.
 
+### Voice Foundation
+
+`voice/` contains the Phase 2 audio layer:
+
+- `audio_diagnostics.py`: lists microphone devices and runs a short local stream test.
+- `interfaces.py`: defines VAD, speech-to-text, and text-to-speech provider contracts.
+- `vad.py`: provides a small RMS-based VAD implementation for diagnostics only.
+- `stt.py`: contains an interface-only placeholder STT provider.
+- `tts.py`: contains an optional local `pyttsx3` TTS provider.
+
+No wake word, continuous listening, Faster Whisper, cloud TTS, or OpenAI voice integration is implemented in Phase 2.
+
 ### GUI
 
 `gui/main_window.py` contains the PySide6 floating Jarvis shell:
@@ -30,6 +42,7 @@ Jarvis is being built as a production-quality Windows desktop assistant. Phase 1
 - animated orb
 - system tray icon
 - manual command input
+- microphone test button
 - transcript panel
 - status states: Sleeping, Listening, Thinking, Speaking, Error
 
@@ -39,7 +52,8 @@ The window can be hidden to the tray and safely exited from the tray menu.
 
 Future phases should add capabilities behind explicit approval gates:
 
-- Phase 2: voice input, wake word, speech-to-text, text-to-speech
+- Phase 2: microphone diagnostics and voice provider interfaces
+- Later voice phase: wake word, speech-to-text, text-to-speech loop
 - Phase 3: OpenAI provider, agent routing, typed tool interfaces
 - Phase 4: local memory and summaries
 - Phase 5: permission-gated file, browser, and desktop tools
@@ -49,4 +63,4 @@ Future phases should add capabilities behind explicit approval gates:
 
 ## Safety Boundary
 
-Phase 1 has no risky tools. It cannot access email, calendar, browser automation, desktop automation, memory, OpenAI, microphone, screenshots, or local file content. The assistant is intentionally limited to a local placeholder response.
+Phase 2 has no risky tools. It cannot access email, calendar, browser automation, desktop automation, memory, OpenAI, screenshots, or local file content. The microphone path is limited to local device detection and a short user-triggered test.

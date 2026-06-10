@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 
 from assistant.core import AssistantCore
 from config.settings import AppSettings
+from voice.audio_diagnostics import AudioDiagnostics
 
 
 class AssistantStatus(str, Enum):
@@ -113,7 +114,9 @@ class JarvisMainWindow(QMainWindow):
         self.status_label = QLabel(self.status.value)
         self.transcript = QTextEdit()
         self.command_input = QLineEdit()
+        self.mic_test_button = QPushButton("Mic Test")
         self.send_button = QPushButton("Send")
+        self.audio_diagnostics = AudioDiagnostics(settings)
         self.tray_icon = self._create_tray_icon()
 
         self._build_ui()
@@ -160,10 +163,12 @@ class JarvisMainWindow(QMainWindow):
 
         self.command_input.setPlaceholderText("Type a command...")
         self.command_input.setObjectName("commandInput")
+        self.mic_test_button.setObjectName("secondaryButton")
         self.send_button.setObjectName("sendButton")
 
         input_row = QHBoxLayout()
         input_row.addWidget(self.command_input)
+        input_row.addWidget(self.mic_test_button)
         input_row.addWidget(self.send_button)
 
         layout = QVBoxLayout(shell)
@@ -246,12 +251,24 @@ class JarvisMainWindow(QMainWindow):
             #sendButton:hover {
                 background: #a5f3fc;
             }
+            #secondaryButton {
+                color: #dff9ff;
+                background: rgba(15, 23, 42, 210);
+                border: 1px solid rgba(125, 211, 252, 100);
+                border-radius: 12px;
+                padding: 11px 14px;
+                font-weight: 600;
+            }
+            #secondaryButton:hover {
+                background: rgba(34, 211, 238, 55);
+            }
             """
         )
 
     def _connect_signals(self) -> None:
         self.command_input.returnPressed.connect(self.handle_command)
         self.send_button.clicked.connect(self.handle_command)
+        self.mic_test_button.clicked.connect(self.run_microphone_test)
 
     def _create_tray_icon(self) -> QSystemTrayIcon:
         tray = QSystemTrayIcon(self._make_icon(), self)
@@ -260,9 +277,12 @@ class JarvisMainWindow(QMainWindow):
         menu = QMenu()
         show_action = QAction("Show Jarvis", self)
         show_action.triggered.connect(self.show_from_tray)
+        mic_test_action = QAction("Microphone Test", self)
+        mic_test_action.triggered.connect(self.run_microphone_test)
         exit_action = QAction("Exit Jarvis", self)
         exit_action.triggered.connect(self.request_quit)
         menu.addAction(show_action)
+        menu.addAction(mic_test_action)
         menu.addSeparator()
         menu.addAction(exit_action)
         tray.setContextMenu(menu)
@@ -313,6 +333,30 @@ class JarvisMainWindow(QMainWindow):
             return
 
         QTimer.singleShot(1200, lambda: self.set_status(AssistantStatus.SLEEPING))
+
+    def run_microphone_test(self) -> None:
+        self._append_message("Jarvis", "Running a short local microphone test...")
+        self.set_status(AssistantStatus.LISTENING)
+        QApplication.processEvents()
+
+        result = self.audio_diagnostics.run_microphone_test()
+        if result.stream_opened:
+            crossed = "yes" if result.vad_threshold_crossed else "no"
+            self._append_message(
+                "Jarvis",
+                (
+                    "Microphone stream opened. "
+                    f"RMS level: {result.rms:.6f}. "
+                    f"VAD threshold crossed: {crossed}."
+                ),
+            )
+            self.set_status(AssistantStatus.SPEAKING)
+        else:
+            error = result.error or "Unknown microphone error"
+            self._append_message("Jarvis", f"Microphone test failed: {error}")
+            self.set_status(AssistantStatus.ERROR)
+
+        QTimer.singleShot(1600, lambda: self.set_status(AssistantStatus.SLEEPING))
 
     def set_status(self, status: AssistantStatus) -> None:
         self.status = status

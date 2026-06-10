@@ -1,6 +1,6 @@
 # Jarvis
 
-Jarvis is a Windows desktop AI assistant foundation. Phase 1 provides the application shell only: configuration, logging, a modern PySide6 floating window, tray support, status states, and a safe assistant stub.
+Jarvis is a Windows desktop AI assistant foundation. Phase 1 provides the application shell. Phase 2 adds a safe voice foundation for local microphone diagnostics and provider interfaces only.
 
 ## Phase 1 Scope
 
@@ -12,6 +12,18 @@ Jarvis is a Windows desktop AI assistant foundation. Phase 1 provides the applic
 - Loguru logging to `logs/jarvis.log`.
 - Assistant core stub that returns a safe placeholder response.
 - Basic pytest coverage.
+
+## Phase 2 Scope
+
+- Microphone device detection using `sounddevice`.
+- Short local microphone stream test with RMS level reporting.
+- RMS-based VAD interface for diagnostics only.
+- Speech-to-text provider interface only.
+- Text-to-speech provider interface.
+- Optional local `pyttsx3` placeholder TTS provider.
+- `py main.py --audio-check` diagnostic command.
+- GUI `Mic Test` button and tray menu action.
+- Audio logging through Loguru.
 
 ## Setup
 
@@ -37,6 +49,16 @@ py main.py
 
 Type a command in the input box and press Enter or Send. Jarvis will echo a safe placeholder response until the real assistant runtime is added in a later phase.
 
+Use the `Mic Test` button or tray menu action to run a short local microphone test.
+
+## Audio Check
+
+```powershell
+py main.py --audio-check
+```
+
+The diagnostic prints available input devices, the default input device, whether the microphone stream opened, RMS level, VAD threshold result, and whether local `pyttsx3` TTS is available.
+
 ## Test
 
 ```powershell
@@ -45,7 +67,7 @@ py -m pytest
 
 ## Not Implemented Yet
 
-Phase 1 intentionally does not include voice, wake word detection, OpenAI calls, memory, Gmail, Calendar, browser automation, desktop automation, file tools, or vision.
+Jarvis still does not include wake word detection, Faster Whisper, OpenAI calls, memory, Gmail, Calendar, browser automation, desktop automation, file tools, or vision.
 
 ## Project Layout
 
@@ -56,6 +78,7 @@ Jarvis/
   assistant/
   config/
   gui/
+  voice/
   services/
   docs/
   tests/
