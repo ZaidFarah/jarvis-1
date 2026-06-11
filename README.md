@@ -16,14 +16,14 @@ Jarvis is a Windows desktop AI assistant foundation. Phase 1 provides the applic
 ## Phase 2 Scope
 
 - Microphone device detection using `sounddevice`.
-- Short local microphone stream test with RMS level reporting.
+- Short local microphone stream test with average and max RMS level reporting.
 - RMS-based VAD interface for diagnostics only.
 - Speech-to-text provider interface only.
 - Text-to-speech provider interface.
 - Optional local `pyttsx3` placeholder TTS provider.
 - `py main.py --audio-check` diagnostic command.
 - GUI `Mic Test` button and tray menu action.
-- Audio logging through Loguru.
+- Audio logging through Loguru, including `logs/audio_diagnostics.log`.
 
 ## Setup
 
@@ -57,7 +57,21 @@ Use the `Mic Test` button or tray menu action to run a short local microphone te
 py main.py --audio-check
 ```
 
-The diagnostic prints available input devices, the default input device, whether the microphone stream opened, RMS level, VAD threshold result, and whether local `pyttsx3` TTS is available.
+The diagnostic prints available input devices, default microphone name, configured sample rate, whether the microphone stream opened, max RMS level, VAD threshold result, suggestions, and whether local `pyttsx3` TTS is available.
+
+Voice diagnostic settings:
+
+```dotenv
+VOICE_SAMPLE_RATE=16000
+VOICE_RECORD_SECONDS=5
+VOICE_VAD_THRESHOLD=0.0015
+```
+
+Detailed audio diagnostic logs are saved to:
+
+```text
+logs/audio_diagnostics.log
+```
 
 ## Test
 

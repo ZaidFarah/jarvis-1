@@ -12,7 +12,7 @@ def main(argv: list[str] | None = None) -> int:
     args = list(argv if argv is not None else sys.argv[1:])
     if "--audio-check" in args:
         settings = load_settings()
-        configure_logging(settings)
+        configure_logging(settings, console=False)
         report = AudioDiagnostics(settings).run_full_check()
         print(format_audio_check_report(report))
         return 0 if report.is_successful else 1

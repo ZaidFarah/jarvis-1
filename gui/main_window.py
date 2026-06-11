@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
 
 from assistant.core import AssistantCore
 from config.settings import AppSettings
-from voice.audio_diagnostics import AudioDiagnostics
+from voice.audio_diagnostics import AudioDiagnostics, format_microphone_test_summary
 
 
 class AssistantStatus(str, Enum):
@@ -339,21 +339,11 @@ class JarvisMainWindow(QMainWindow):
         self.set_status(AssistantStatus.LISTENING)
         QApplication.processEvents()
 
-        result = self.audio_diagnostics.run_microphone_test()
-        if result.stream_opened:
-            crossed = "yes" if result.vad_threshold_crossed else "no"
-            self._append_message(
-                "Jarvis",
-                (
-                    "Microphone stream opened. "
-                    f"RMS level: {result.rms:.6f}. "
-                    f"VAD threshold crossed: {crossed}."
-                ),
-            )
+        report = self.audio_diagnostics.run_full_check()
+        self._append_message("Jarvis", format_microphone_test_summary(report))
+        if report.microphone_test and report.microphone_test.stream_opened:
             self.set_status(AssistantStatus.SPEAKING)
         else:
-            error = result.error or "Unknown microphone error"
-            self._append_message("Jarvis", f"Microphone test failed: {error}")
             self.set_status(AssistantStatus.ERROR)
 
         QTimer.singleShot(1600, lambda: self.set_status(AssistantStatus.SLEEPING))

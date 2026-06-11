@@ -7,19 +7,20 @@ from loguru import logger
 from config.settings import AppSettings
 
 
-def configure_logging(settings: AppSettings):
+def configure_logging(settings: AppSettings, console: bool = True):
     """Configure Loguru for console and file logging."""
 
     settings.log_dir.mkdir(parents=True, exist_ok=True)
     log_file = settings.log_dir / "jarvis.log"
 
     logger.remove()
-    logger.add(
-        sys.stderr,
-        level=settings.log_level,
-        colorize=True,
-        format="<green>{time:HH:mm:ss}</green> | <level>{level}</level> | {message}",
-    )
+    if console:
+        logger.add(
+            sys.stderr,
+            level=settings.log_level,
+            colorize=True,
+            format="<green>{time:HH:mm:ss}</green> | <level>{level}</level> | {message}",
+        )
     logger.add(
         log_file,
         level=settings.log_level,
