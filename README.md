@@ -34,6 +34,15 @@ Jarvis is a Windows desktop AI assistant foundation. Phase 1 provides the applic
 - STT diagnostic logging to `logs/stt_diagnostics.log`.
 - Graceful error output if Faster Whisper or the model cannot load.
 
+## Phase 4 Scope
+
+- Wake phrase configuration.
+- Wake phrase aliases.
+- Fuzzy wake phrase matching with `difflib.SequenceMatcher`.
+- Wake detection utility class.
+- One-shot `py main.py --wake-test` diagnostic command.
+- Wake diagnostic logging to `logs/wake_diagnostics.log`.
+
 ## Setup
 
 Install dependencies:
@@ -105,6 +114,29 @@ Detailed STT diagnostics are saved to:
 logs/stt_diagnostics.log
 ```
 
+## Wake Test
+
+```powershell
+py main.py --wake-test
+```
+
+The command records one short microphone clip, transcribes it with Faster Whisper, and checks whether the transcript matches the configured wake phrase or aliases.
+
+Wake settings:
+
+```dotenv
+WAKE_PHRASE=hey jarvis
+WAKE_ALIASES=hey jarvis,hi jarvis,wake up jarvis,jarvis wake up,okay jarvis,yo jarvis
+WAKE_MATCH_THRESHOLD=0.72
+WAKE_LISTEN_SECONDS=5
+```
+
+Detailed wake diagnostics are saved to:
+
+```text
+logs/wake_diagnostics.log
+```
+
 ## Test
 
 ```powershell
@@ -113,7 +145,7 @@ py -m pytest
 
 ## Not Implemented Yet
 
-Jarvis still does not include wake word detection, continuous listening, OpenAI calls, memory, Gmail, Calendar, browser automation, desktop automation, file tools, or vision.
+Jarvis still does not include continuous always-on listening, OpenAI calls, memory, Gmail, Calendar, browser automation, desktop automation, file tools, or vision.
 
 ## Project Layout
 

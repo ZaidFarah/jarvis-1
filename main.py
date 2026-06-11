@@ -7,6 +7,7 @@ from config.settings import load_settings
 from services.logging_service import configure_logging
 from voice.audio_diagnostics import AudioDiagnostics, format_audio_check_report
 from voice.transcription_diagnostics import TranscriptionDiagnostics, format_transcription_report
+from voice.wake_diagnostics import WakeDiagnostics, format_wake_report
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -23,6 +24,13 @@ def main(argv: list[str] | None = None) -> int:
         configure_logging(settings, console=False)
         report = TranscriptionDiagnostics(settings).run_transcribe_test()
         print(format_transcription_report(report))
+        return 0 if report.is_successful else 1
+
+    if "--wake-test" in args:
+        settings = load_settings()
+        configure_logging(settings, console=False)
+        report = WakeDiagnostics(settings).run_wake_test()
+        print(format_wake_report(report))
         return 0 if report.is_successful else 1
 
     application = JarvisApplication()

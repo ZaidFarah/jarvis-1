@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Jarvis is being built as a production-quality Windows desktop assistant. Phase 1 created the safe desktop foundation. Phase 2 added a limited local voice foundation for microphone diagnostics and provider interfaces. Phase 2.5 improved diagnostic reliability and reporting. Phase 3 adds one-shot Faster Whisper transcription testing.
+Jarvis is being built as a production-quality Windows desktop assistant. Phase 1 created the safe desktop foundation. Phase 2 added a limited local voice foundation for microphone diagnostics and provider interfaces. Phase 2.5 improved diagnostic reliability and reporting. Phase 3 added one-shot Faster Whisper transcription testing. Phase 4 adds controlled wake phrase detection as a test mode only.
 
 ## Phase 1 Components
 
@@ -32,8 +32,10 @@ Jarvis is being built as a production-quality Windows desktop assistant. Phase 1
 - `stt.py`: contains the interface-only provider, Faster Whisper provider, and STT provider factory.
 - `transcription_diagnostics.py`: records one microphone clip, transcribes it through Faster Whisper, and writes `logs/stt_diagnostics.log`.
 - `tts.py`: contains an optional local `pyttsx3` TTS provider.
+- `wake.py`: detects the configured wake phrase, aliases, and close fuzzy matches using `difflib.SequenceMatcher`.
+- `wake_diagnostics.py`: records one microphone clip, transcribes it, runs wake detection, and writes `logs/wake_diagnostics.log`.
 
-No wake word, continuous listening, cloud TTS, or OpenAI voice integration is implemented in Phase 3.
+No continuous listening, cloud TTS, or OpenAI voice integration is implemented in Phase 4.
 
 ### GUI
 
@@ -56,7 +58,8 @@ Future phases should add capabilities behind explicit approval gates:
 - Phase 2: microphone diagnostics and voice provider interfaces
 - Phase 2.5: clearer diagnostics, dedicated audio log, stronger microphone suggestions
 - Phase 3: one-shot Faster Whisper speech-to-text diagnostic
-- Later voice phase: wake word and continuous speech loop
+- Phase 4: one-shot wake phrase detection diagnostic
+- Later voice phase: continuous speech loop
 - Phase 3: OpenAI provider, agent routing, typed tool interfaces
 - Phase 4: local memory and summaries
 - Phase 5: permission-gated file, browser, and desktop tools
@@ -66,4 +69,4 @@ Future phases should add capabilities behind explicit approval gates:
 
 ## Safety Boundary
 
-Phase 3 has no risky tools. It cannot access email, calendar, browser automation, desktop automation, memory, OpenAI, screenshots, or local file content. The microphone path is limited to local user-triggered diagnostics and one-shot transcription testing.
+Phase 4 has no risky tools. It cannot access email, calendar, browser automation, desktop automation, memory, OpenAI, screenshots, or local file content. The microphone path is limited to local user-triggered diagnostics, one-shot transcription testing, and one-shot wake phrase testing.

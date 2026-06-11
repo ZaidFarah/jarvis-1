@@ -16,6 +16,17 @@ def test_voice_settings_defaults_are_lightweight() -> None:
     assert settings.whisper_model == "base.en"
     assert settings.whisper_device == "cpu"
     assert settings.whisper_compute_type == "int8"
+    assert settings.wake_phrase == "hey jarvis"
+    assert settings.wake_alias_list == [
+        "hey jarvis",
+        "hi jarvis",
+        "wake up jarvis",
+        "jarvis wake up",
+        "okay jarvis",
+        "yo jarvis",
+    ]
+    assert settings.wake_match_threshold == 0.72
+    assert settings.wake_listen_seconds == 5.0
     assert settings.text_to_speech_provider == "pyttsx3"
 
 
@@ -55,3 +66,17 @@ def test_stt_settings_read_environment(monkeypatch) -> None:
     assert settings.whisper_model == "tiny.en"
     assert settings.whisper_device == "cpu"
     assert settings.whisper_compute_type == "float32"
+
+
+def test_wake_settings_read_environment(monkeypatch) -> None:
+    monkeypatch.setenv("WAKE_PHRASE", "hello jarvis")
+    monkeypatch.setenv("WAKE_ALIASES", "hello jarvis,jarvis hello")
+    monkeypatch.setenv("WAKE_MATCH_THRESHOLD", "0.8")
+    monkeypatch.setenv("WAKE_LISTEN_SECONDS", "4")
+
+    settings = AppSettings(_env_file=None)
+
+    assert settings.wake_phrase == "hello jarvis"
+    assert settings.wake_alias_list == ["hello jarvis", "jarvis hello"]
+    assert settings.wake_match_threshold == 0.8
+    assert settings.wake_listen_seconds == 4.0

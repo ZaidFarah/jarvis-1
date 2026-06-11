@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -72,6 +73,26 @@ class AppSettings(BaseSettings):
         default="int8",
         validation_alias=AliasChoices("WHISPER_COMPUTE_TYPE", "JARVIS_WHISPER_COMPUTE_TYPE"),
     )
+    wake_phrase: str = Field(
+        default="hey jarvis",
+        validation_alias=AliasChoices("WAKE_PHRASE", "JARVIS_WAKE_PHRASE"),
+    )
+    wake_aliases: str = Field(
+        default="hey jarvis,hi jarvis,wake up jarvis,jarvis wake up,okay jarvis,yo jarvis",
+        validation_alias=AliasChoices("WAKE_ALIASES", "JARVIS_WAKE_ALIASES"),
+    )
+    wake_match_threshold: float = Field(
+        default=0.72,
+        ge=0.0,
+        le=1.0,
+        validation_alias=AliasChoices("WAKE_MATCH_THRESHOLD", "JARVIS_WAKE_MATCH_THRESHOLD"),
+    )
+    wake_listen_seconds: float = Field(
+        default=5.0,
+        ge=0.25,
+        le=10.0,
+        validation_alias=AliasChoices("WAKE_LISTEN_SECONDS", "JARVIS_WAKE_LISTEN_SECONDS"),
+    )
     text_to_speech_provider: str = "pyttsx3"
 
     @field_validator("log_level")
@@ -93,9 +114,29 @@ class AppSettings(BaseSettings):
     def normalize_provider_name(cls, value: str) -> str:
         return value.strip().lower()
 
+    @field_validator("wake_phrase")
+    @classmethod
+    def normalize_wake_phrase(cls, value: str) -> str:
+        cleaned = value.strip().lower()
+        if not cleaned:
+            raise ValueError("Wake phrase cannot be empty.")
+        return cleaned
+
+    @field_validator("wake_aliases", mode="before")
+    @classmethod
+    def normalize_wake_aliases(cls, value: Any) -> str:
+        if isinstance(value, (list, tuple)):
+            return ",".join(str(item) for item in value)
+        return str(value)
+
     @property
     def voice_microphone_test_seconds(self) -> float:
         return self.voice_record_seconds
+
+    @property
+    def wake_alias_list(self) -> list[str]:
+        aliases = [item.strip().lower() for item in self.wake_aliases.split(",")]
+        return [alias for alias in aliases if alias]
 
 
 def load_settings() -> AppSettings:
