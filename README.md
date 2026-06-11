@@ -43,6 +43,16 @@ Jarvis is a Windows desktop AI assistant foundation. Phase 1 provides the applic
 - One-shot `py main.py --wake-test` diagnostic command.
 - Wake diagnostic logging to `logs/wake_diagnostics.log`.
 
+## Phase 5 Scope
+
+- Controlled voice command test mode.
+- One wake phrase recording.
+- One command recording only after wake detection succeeds.
+- Command transcription routed to the existing `AssistantCore` stub.
+- CLI command: `py main.py --voice-command-test`.
+- GUI and tray action: `Voice Command Test`.
+- Voice command logs saved to `logs/voice_command_test.log`.
+
 ## Setup
 
 Install dependencies:
@@ -135,6 +145,28 @@ Detailed wake diagnostics are saved to:
 
 ```text
 logs/wake_diagnostics.log
+```
+
+## Voice Command Test
+
+```powershell
+py main.py --voice-command-test
+```
+
+The command runs one controlled voice command flow:
+
+1. Records a wake phrase clip.
+2. Transcribes the wake phrase.
+3. Checks the transcript against the wake phrase and aliases.
+4. If wake is detected, records one command clip.
+5. Transcribes the command.
+6. Sends the command text to the existing `AssistantCore` stub.
+7. Prints the placeholder Jarvis response.
+
+Detailed voice command logs are saved to:
+
+```text
+logs/voice_command_test.log
 ```
 
 ## Test
