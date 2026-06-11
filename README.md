@@ -53,6 +53,15 @@ Jarvis is a Windows desktop AI assistant foundation. Phase 1 provides the applic
 - GUI and tray action: `Voice Command Test`.
 - Voice command logs saved to `logs/voice_command_test.log`.
 
+## Phase 6 Scope
+
+- OpenAI dependency support.
+- Safe OpenAI configuration diagnostics.
+- CLI command: `py main.py --openai-check`.
+- Optional small Responses API test request only when OpenAI is enabled and an API key is present.
+- OpenAI logs saved to `logs/openai_diagnostics.log`.
+- OpenAI is not connected to `AssistantCore` yet.
+
 ## Setup
 
 Install dependencies:
@@ -170,6 +179,28 @@ Detailed voice command logs are saved to:
 logs/voice_command_test.log
 ```
 
+## OpenAI Check
+
+```powershell
+py main.py --openai-check
+```
+
+OpenAI settings:
+
+```dotenv
+OPENAI_ENABLED=false
+OPENAI_API_KEY=
+OPENAI_MODEL=gpt-4o-mini
+```
+
+The check reports whether OpenAI is enabled, whether an API key is present, the selected model, and whether a test request was attempted. It never prints the API key. A network request is made only when `OPENAI_ENABLED=true` and `OPENAI_API_KEY` is set.
+
+Detailed OpenAI diagnostic logs are saved to:
+
+```text
+logs/openai_diagnostics.log
+```
+
 ## Test
 
 ```powershell
@@ -178,7 +209,7 @@ py -m pytest
 
 ## Not Implemented Yet
 
-Jarvis still does not include continuous always-on listening, OpenAI calls, memory, Gmail, Calendar, browser automation, desktop automation, file tools, or vision.
+Jarvis still does not connect OpenAI to the assistant conversation flow. It also does not include continuous always-on listening, LangGraph, memory, Gmail, Calendar, browser automation, desktop automation, file tools, or vision.
 
 ## Project Layout
 

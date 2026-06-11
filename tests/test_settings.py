@@ -30,3 +30,24 @@ def test_invalid_log_level_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
 
     with pytest.raises(ValueError):
         AppSettings(_env_file=None)
+
+
+def test_openai_settings_defaults_are_safe() -> None:
+    settings = AppSettings(_env_file=None)
+
+    assert settings.openai_enabled is False
+    assert settings.has_openai_api_key is False
+    assert settings.openai_model == "gpt-4o-mini"
+
+
+def test_openai_settings_read_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OPENAI_ENABLED", "true")
+    monkeypatch.setenv("OPENAI_API_KEY", "  sk-test  ")
+    monkeypatch.setenv("OPENAI_MODEL", "gpt-test")
+
+    settings = AppSettings(_env_file=None)
+
+    assert settings.openai_enabled is True
+    assert settings.openai_api_key == "sk-test"
+    assert settings.has_openai_api_key is True
+    assert settings.openai_model == "gpt-test"

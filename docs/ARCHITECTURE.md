@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Jarvis is being built as a production-quality Windows desktop assistant. Phase 1 created the safe desktop foundation. Phase 2 added a limited local voice foundation for microphone diagnostics and provider interfaces. Phase 2.5 improved diagnostic reliability and reporting. Phase 3 added one-shot Faster Whisper transcription testing. Phase 4 added controlled wake phrase detection as a test mode only. Phase 5 adds a controlled one-shot voice command test mode.
+Jarvis is being built as a production-quality Windows desktop assistant. Phase 1 created the safe desktop foundation. Phase 2 added a limited local voice foundation for microphone diagnostics and provider interfaces. Phase 2.5 improved diagnostic reliability and reporting. Phase 3 added one-shot Faster Whisper transcription testing. Phase 4 added controlled wake phrase detection as a test mode only. Phase 5 added a controlled one-shot voice command test mode. Phase 6 adds OpenAI connection diagnostics only.
 
 ## Phase 1 Components
 
@@ -16,7 +16,19 @@ Jarvis is being built as a production-quality Windows desktop assistant. Phase 1
 
 ### Logging
 
-`services/logging_service.py` configures Loguru for console logs and `logs/jarvis.log`. Detailed provider, tool, and security audit logging will be added in later approved phases.
+`services/logging_service.py` configures Loguru for console logs and `logs/jarvis.log`. Diagnostic logs are written separately for audio, STT, wake, voice command, and OpenAI checks. Detailed provider, tool, and security audit logging will be added in later approved phases.
+
+### OpenAI Diagnostics
+
+`services/openai_service.py` performs safe OpenAI configuration and connectivity checks:
+
+- reports whether OpenAI is enabled
+- reports whether an API key exists without printing the key
+- reports the selected model
+- sends a tiny Responses API request only when enabled and keyed
+- writes `logs/openai_diagnostics.log`
+
+OpenAI is not wired into `AssistantCore` in Phase 6.
 
 ### Assistant Core
 
@@ -61,6 +73,7 @@ Future phases should add capabilities behind explicit approval gates:
 - Phase 3: one-shot Faster Whisper speech-to-text diagnostic
 - Phase 4: one-shot wake phrase detection diagnostic
 - Phase 5: controlled one-shot voice command test
+- Phase 6: OpenAI connection diagnostics only
 - Later voice phase: continuous speech loop
 - Phase 3: OpenAI provider, agent routing, typed tool interfaces
 - Phase 4: local memory and summaries
@@ -71,4 +84,4 @@ Future phases should add capabilities behind explicit approval gates:
 
 ## Safety Boundary
 
-Phase 5 has no risky tools. It cannot access email, calendar, browser automation, desktop automation, memory, OpenAI, screenshots, or local file content. The microphone path is limited to local user-triggered diagnostics, one-shot transcription testing, one-shot wake phrase testing, and one controlled voice command test that routes only to the placeholder assistant stub.
+Phase 6 has no risky tools. It cannot access email, calendar, browser automation, desktop automation, memory, screenshots, or local file content. OpenAI usage is limited to a user-configured diagnostic request and is not connected to the assistant runtime.

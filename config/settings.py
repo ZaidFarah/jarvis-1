@@ -93,6 +93,19 @@ class AppSettings(BaseSettings):
         le=10.0,
         validation_alias=AliasChoices("WAKE_LISTEN_SECONDS", "JARVIS_WAKE_LISTEN_SECONDS"),
     )
+    openai_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("OPENAI_ENABLED", "JARVIS_OPENAI_ENABLED"),
+    )
+    openai_api_key: str = Field(
+        default="",
+        repr=False,
+        validation_alias=AliasChoices("OPENAI_API_KEY", "JARVIS_OPENAI_API_KEY"),
+    )
+    openai_model: str = Field(
+        default="gpt-4o-mini",
+        validation_alias=AliasChoices("OPENAI_MODEL", "JARVIS_OPENAI_MODEL"),
+    )
     text_to_speech_provider: str = "pyttsx3"
 
     @field_validator("log_level")
@@ -129,6 +142,19 @@ class AppSettings(BaseSettings):
             return ",".join(str(item) for item in value)
         return str(value)
 
+    @field_validator("openai_api_key")
+    @classmethod
+    def strip_openai_api_key(cls, value: str) -> str:
+        return value.strip()
+
+    @field_validator("openai_model")
+    @classmethod
+    def normalize_openai_model(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("OpenAI model cannot be empty.")
+        return cleaned
+
     @property
     def voice_microphone_test_seconds(self) -> float:
         return self.voice_record_seconds
@@ -137,6 +163,10 @@ class AppSettings(BaseSettings):
     def wake_alias_list(self) -> list[str]:
         aliases = [item.strip().lower() for item in self.wake_aliases.split(",")]
         return [alias for alias in aliases if alias]
+
+    @property
+    def has_openai_api_key(self) -> bool:
+        return bool(self.openai_api_key)
 
 
 def load_settings() -> AppSettings:

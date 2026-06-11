@@ -5,6 +5,7 @@ import sys
 from app.application import JarvisApplication
 from config.settings import load_settings
 from services.logging_service import configure_logging
+from services.openai_service import OpenAIService, format_openai_check_report
 from voice.audio_diagnostics import AudioDiagnostics, format_audio_check_report
 from voice.transcription_diagnostics import TranscriptionDiagnostics, format_transcription_report
 from voice.voice_command_test import VoiceCommandTestRunner, format_voice_command_report
@@ -39,6 +40,13 @@ def main(argv: list[str] | None = None) -> int:
         configure_logging(settings, console=False)
         report = VoiceCommandTestRunner(settings).run()
         print(format_voice_command_report(report))
+        return 0 if report.is_successful else 1
+
+    if "--openai-check" in args:
+        settings = load_settings()
+        configure_logging(settings, console=False)
+        report = OpenAIService(settings).run_check()
+        print(format_openai_check_report(report))
         return 0 if report.is_successful else 1
 
     application = JarvisApplication()
