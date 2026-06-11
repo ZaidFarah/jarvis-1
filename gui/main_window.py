@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import threading
 from enum import Enum
+from queue import Empty, Queue
 
 from PySide6.QtCore import QPoint, Qt, QTimer
 from PySide6.QtGui import QAction, QColor, QIcon, QLinearGradient, QMouseEvent, QPainter, QPixmap, QRadialGradient
@@ -24,7 +26,13 @@ from PySide6.QtWidgets import (
 from assistant.core import AssistantCore
 from config.settings import AppSettings
 from voice.audio_diagnostics import AudioDiagnostics, format_microphone_test_summary
-from voice.voice_command_test import VoiceCommandTestRunner, format_voice_command_report
+from voice.voice_command_test import COMMAND_PROMPT, LISTENING_FOR_COMMAND_PROMPT, VoiceCommandTestRunner, format_voice_command_report
+from voice.voice_loop import (
+    STOP_COMMAND_DETECTED_MESSAGE,
+    VOICE_LOOP_STARTED_MESSAGE,
+    VOICE_LOOP_STOPPED_MESSAGE,
+    VoiceLoopRunner,
+)
 
 
 class AssistantStatus(str, Enum):
@@ -119,8 +127,15 @@ class JarvisMainWindow(QMainWindow):
         self.command_input = QLineEdit()
         self.mic_test_button = QPushButton("Mic Test")
         self.voice_command_button = QPushButton("Voice Test")
+        self.start_voice_loop_button = QPushButton("Start Loop")
+        self.stop_voice_loop_button = QPushButton("Stop Loop")
         self.send_button = QPushButton("Send")
         self.audio_diagnostics = AudioDiagnostics(settings)
+        self.voice_loop_runner: VoiceLoopRunner | None = None
+        self.voice_loop_thread: threading.Thread | None = None
+        self.voice_loop_events: Queue[str] = Queue()
+        self.voice_loop_event_timer = QTimer(self)
+        self.voice_loop_event_timer.timeout.connect(self._drain_voice_loop_events)
         self.tray_icon = self._create_tray_icon()
 
         self._build_ui()
@@ -169,12 +184,17 @@ class JarvisMainWindow(QMainWindow):
         self.command_input.setObjectName("commandInput")
         self.mic_test_button.setObjectName("secondaryButton")
         self.voice_command_button.setObjectName("secondaryButton")
+        self.start_voice_loop_button.setObjectName("secondaryButton")
+        self.stop_voice_loop_button.setObjectName("secondaryButton")
+        self.stop_voice_loop_button.setEnabled(False)
         self.send_button.setObjectName("sendButton")
 
         input_row = QHBoxLayout()
         input_row.addWidget(self.command_input)
         input_row.addWidget(self.mic_test_button)
         input_row.addWidget(self.voice_command_button)
+        input_row.addWidget(self.start_voice_loop_button)
+        input_row.addWidget(self.stop_voice_loop_button)
         input_row.addWidget(self.send_button)
 
         layout = QVBoxLayout(shell)
@@ -276,6 +296,8 @@ class JarvisMainWindow(QMainWindow):
         self.send_button.clicked.connect(self.handle_command)
         self.mic_test_button.clicked.connect(self.run_microphone_test)
         self.voice_command_button.clicked.connect(self.run_voice_command_test)
+        self.start_voice_loop_button.clicked.connect(self.start_voice_loop)
+        self.stop_voice_loop_button.clicked.connect(self.stop_voice_loop)
 
     def _create_tray_icon(self) -> QSystemTrayIcon:
         tray = QSystemTrayIcon(self._make_icon(), self)
@@ -288,11 +310,17 @@ class JarvisMainWindow(QMainWindow):
         mic_test_action.triggered.connect(self.run_microphone_test)
         voice_command_action = QAction("Voice Command Test", self)
         voice_command_action.triggered.connect(self.run_voice_command_test)
+        start_voice_loop_action = QAction("Start Voice Loop", self)
+        start_voice_loop_action.triggered.connect(self.start_voice_loop)
+        stop_voice_loop_action = QAction("Stop Voice Loop", self)
+        stop_voice_loop_action.triggered.connect(self.stop_voice_loop)
         exit_action = QAction("Exit Jarvis", self)
         exit_action.triggered.connect(self.request_quit)
         menu.addAction(show_action)
         menu.addAction(mic_test_action)
         menu.addAction(voice_command_action)
+        menu.addAction(start_voice_loop_action)
+        menu.addAction(stop_voice_loop_action)
         menu.addSeparator()
         menu.addAction(exit_action)
         tray.setContextMenu(menu)
@@ -385,6 +413,76 @@ class JarvisMainWindow(QMainWindow):
         self._append_message("Jarvis", status)
         QApplication.processEvents()
 
+    def start_voice_loop(self) -> None:
+        if self.voice_loop_thread is not None and self.voice_loop_thread.is_alive():
+            self._append_message("Jarvis", "Voice loop is already running.")
+            return
+
+        self._append_message("Jarvis", "Starting continuous voice loop...")
+        self.voice_loop_runner = VoiceLoopRunner(
+            settings=self.settings,
+            assistant=self.assistant,
+            status_callback=self.voice_loop_events.put,
+        )
+        self.voice_loop_thread = threading.Thread(target=self._run_voice_loop_worker, daemon=True)
+        self._set_voice_loop_running(True)
+        self.voice_loop_event_timer.start(250)
+        self.voice_loop_thread.start()
+
+    def stop_voice_loop(self) -> None:
+        if self.voice_loop_runner is None:
+            self._append_message("Jarvis", "Voice loop is not running.")
+            self._set_voice_loop_running(False)
+            return
+
+        self._append_message("Jarvis", "Stopping voice loop...")
+        self.voice_loop_runner.request_stop()
+
+    def _run_voice_loop_worker(self) -> None:
+        try:
+            if self.voice_loop_runner is not None:
+                self.voice_loop_runner.run()
+        except Exception as exc:  # pragma: no cover - defensive GUI boundary
+            self.voice_loop_events.put(f"Voice loop error: {exc}")
+            self.voice_loop_events.put(VOICE_LOOP_STOPPED_MESSAGE)
+
+    def _drain_voice_loop_events(self) -> None:
+        while True:
+            try:
+                status = self.voice_loop_events.get_nowait()
+            except Empty:
+                break
+            self._handle_voice_loop_status(status)
+
+        if self.voice_loop_thread is not None and not self.voice_loop_thread.is_alive():
+            self._set_voice_loop_running(False)
+            self.voice_loop_event_timer.stop()
+            self.voice_loop_runner = None
+            self.voice_loop_thread = None
+
+    def _handle_voice_loop_status(self, status: str) -> None:
+        status_map = {
+            VOICE_LOOP_STARTED_MESSAGE: AssistantStatus.SLEEPING,
+            "Sleeping": AssistantStatus.SLEEPING,
+            "Listening for wake phrase": AssistantStatus.LISTENING,
+            "Wake detected": AssistantStatus.WAKE_DETECTED,
+            COMMAND_PROMPT: AssistantStatus.WAKE_DETECTED,
+            LISTENING_FOR_COMMAND_PROMPT: AssistantStatus.LISTENING,
+            "Thinking": AssistantStatus.THINKING,
+            "Speaking": AssistantStatus.SPEAKING,
+            STOP_COMMAND_DETECTED_MESSAGE: AssistantStatus.SLEEPING,
+            VOICE_LOOP_STOPPED_MESSAGE: AssistantStatus.SLEEPING,
+        }
+        if status.startswith("Voice loop error:"):
+            self.set_status(AssistantStatus.ERROR)
+        else:
+            self.set_status(status_map.get(status, AssistantStatus.SLEEPING))
+        self._append_message("Jarvis", status)
+
+    def _set_voice_loop_running(self, running: bool) -> None:
+        self.start_voice_loop_button.setEnabled(not running)
+        self.stop_voice_loop_button.setEnabled(running)
+
     def set_status(self, status: AssistantStatus) -> None:
         self.status = status
         self.status_label.setText(status.value)
@@ -398,6 +496,8 @@ class JarvisMainWindow(QMainWindow):
         self.transcript.append(f"\n{speaker}: {message}")
 
     def request_quit(self) -> None:
+        if self.voice_loop_runner is not None:
+            self.voice_loop_runner.request_stop()
         self._allow_close = True
         self.tray_icon.hide()
         app = QApplication.instance()

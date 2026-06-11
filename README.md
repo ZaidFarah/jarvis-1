@@ -94,6 +94,16 @@ Jarvis is a Windows desktop AI assistant foundation. Phase 1 provides the applic
 - Windows may play a short local beep before command recording; beep failures are ignored.
 - Punctuation-only command transcriptions are treated as empty and reported cleanly.
 
+## Phase 9 Scope
+
+- Continuous one-command-at-a-time voice loop.
+- CLI command: `py main.py --voice-loop`.
+- Loop flow: sleep, listen for wake phrase, prompt/beep, record one command, transcribe, route to `AssistantCore`, speak the response, return to sleep.
+- Stop commands: `stop listening`, `sleep jarvis`, `jarvis sleep`, `exit jarvis`, and `shutdown jarvis`.
+- Ctrl+C exits the CLI loop cleanly.
+- GUI and tray actions: `Start Voice Loop` and `Stop Voice Loop`.
+- Voice loop logs are saved to `logs/voice_loop.log`.
+
 ## Setup
 
 Install dependencies:
@@ -235,6 +245,31 @@ To speak the Jarvis response after a successful command, pass `--speak`:
 py main.py --voice-command-test --speak
 ```
 
+## Voice Loop
+
+```powershell
+py main.py --voice-loop
+```
+
+The voice loop keeps Jarvis running until stopped:
+
+1. Sleeps while waiting for the wake phrase.
+2. Records one wake phrase clip.
+3. Transcribes and checks the wake phrase.
+4. Prompts and optionally beeps after wake detection.
+5. Records one command clip.
+6. Cleans the command text.
+7. Stops cleanly if the command is `stop listening`, `sleep jarvis`, `jarvis sleep`, `exit jarvis`, or `shutdown jarvis`.
+8. Sends valid commands to `AssistantCore`.
+9. Speaks accepted responses using the configured TTS provider.
+10. Returns to sleeping and repeats.
+
+Press Ctrl+C to stop the CLI loop. Detailed voice loop logs are saved to:
+
+```text
+logs/voice_loop.log
+```
+
 ## OpenAI Check
 
 ```powershell
@@ -334,7 +369,7 @@ py -m pytest
 
 ## Not Implemented Yet
 
-Jarvis still does not include ElevenLabs, continuous always-on listening, LangGraph, memory, Gmail, Calendar, browser automation, desktop automation, file tools, or vision.
+Jarvis still does not include ElevenLabs, startup background service, LangGraph, memory, Gmail, Calendar, browser automation, desktop automation, file tools, permissions system, or vision.
 
 ## Project Layout
 

@@ -16,6 +16,7 @@ from voice.voice_command_test import (
     VoiceCommandTestRunner,
     format_voice_command_report,
 )
+from voice.voice_loop import VoiceLoopRunner, VOICE_LOOP_STARTED_MESSAGE, VOICE_LOOP_STOPPED_MESSAGE
 from voice.wake_diagnostics import WakeDiagnostics, format_wake_report
 
 
@@ -52,6 +53,17 @@ def main(argv: list[str] | None = None) -> int:
         ).run()
         print(format_voice_command_report(report))
         return 0 if report.is_successful else 1
+
+    if "--voice-loop" in args:
+        settings = load_settings()
+        configure_logging(settings, console=False)
+        runner = VoiceLoopRunner(settings, status_callback=_voice_loop_status_callback)
+        try:
+            runner.run()
+        except KeyboardInterrupt:
+            runner.request_stop()
+            print("\nJarvis voice loop interrupted. Exiting cleanly.", flush=True)
+        return 0
 
     if "--openai-check" in args:
         settings = load_settings()
@@ -126,6 +138,24 @@ def _flag_value(args: list[str], flag: str) -> str | None:
 
 def _voice_command_status_callback(status: str) -> None:
     if status in {COMMAND_PROMPT, LISTENING_FOR_COMMAND_PROMPT}:
+        print(status, flush=True)
+
+
+def _voice_loop_status_callback(status: str) -> None:
+    visible_statuses = {
+        VOICE_LOOP_STARTED_MESSAGE,
+        "Sleeping",
+        "Listening for wake phrase",
+        "Wake detected",
+        COMMAND_PROMPT,
+        LISTENING_FOR_COMMAND_PROMPT,
+        "No command detected. Please try again and speak after the prompt.",
+        "Stop command detected. Exiting voice loop.",
+        "Thinking",
+        "Speaking",
+        VOICE_LOOP_STOPPED_MESSAGE,
+    }
+    if status in visible_statuses:
         print(status, flush=True)
 
 
