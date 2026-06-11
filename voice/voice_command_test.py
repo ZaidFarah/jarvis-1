@@ -315,11 +315,17 @@ def format_voice_command_report(report: VoiceCommandTestReport) -> str:
                 "",
                 "Text-to-speech:",
                 f"  provider: {report.tts_result.provider_name}",
+                f"  requested provider: {report.tts_result.requested_provider_name or report.tts_result.provider_name}",
                 f"  provider available: {_yes_no(report.tts_result.provider_available)}",
+                f"  fallback used: {_yes_no(report.tts_result.fallback_used)}",
                 f"  spoken: {_yes_no(report.tts_result.spoken)}",
                 f"  diagnostic log: {report.tts_result.log_file}",
             ]
         )
+        if report.tts_result.audio_file:
+            lines.append(f"  audio file: {report.tts_result.audio_file}")
+        if report.tts_result.fallback_reason:
+            lines.extend(["", "TTS fallback reason:", f"  {report.tts_result.fallback_reason}"])
 
     if report.errors:
         lines.append("")

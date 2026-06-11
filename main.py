@@ -55,7 +55,12 @@ def main(argv: list[str] | None = None) -> int:
         settings = load_settings()
         configure_logging(settings, console=False)
         message = _message_after_flag(args, "--tts-test")
-        result = speak_text(message, settings, speak_requested=True)
+        result = speak_text(
+            message,
+            settings,
+            speak_requested=True,
+            provider_name=_flag_value(args, "--provider"),
+        )
         print(format_tts_result(result))
         return 0 if result.spoken else 1
 
@@ -96,6 +101,20 @@ def _has_flag(args: list[str], flag: str) -> bool:
     return flag in args
 
 
+def _flag_value(args: list[str], flag: str) -> str | None:
+    if flag not in args:
+        return None
+
+    index = args.index(flag)
+    if index + 1 >= len(args):
+        return None
+
+    value = args[index + 1]
+    if value.startswith("--"):
+        return None
+    return value
+
+
 def _format_chat_test_report(
     message: str,
     response: AssistantResponse,
@@ -118,11 +137,17 @@ def _format_chat_test_report(
                 "",
                 "Text-to-speech:",
                 f"  provider: {tts_result.provider_name}",
+                f"  requested provider: {tts_result.requested_provider_name or tts_result.provider_name}",
                 f"  provider available: {_yes_no(tts_result.provider_available)}",
+                f"  fallback used: {_yes_no(tts_result.fallback_used)}",
                 f"  spoken: {_yes_no(tts_result.spoken)}",
                 f"  diagnostic log: {tts_result.log_file}",
             ]
         )
+        if tts_result.audio_file:
+            lines.append(f"  audio file: {tts_result.audio_file}")
+        if tts_result.fallback_reason:
+            lines.extend(["", "TTS fallback reason:", f"  {tts_result.fallback_reason}"])
         if tts_result.error:
             lines.extend(["", "TTS error:", f"  {tts_result.error}"])
     return "\n".join(lines)

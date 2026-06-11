@@ -115,7 +115,7 @@ class AppSettings(BaseSettings):
         validation_alias=AliasChoices("TTS_ENABLED", "JARVIS_TTS_ENABLED"),
     )
     tts_provider: str = Field(
-        default="pyttsx3",
+        default="openai",
         validation_alias=AliasChoices(
             "TTS_PROVIDER",
             "JARVIS_TTS_PROVIDER",
@@ -138,6 +138,26 @@ class AppSettings(BaseSettings):
         ge=0.0,
         le=1.0,
         validation_alias=AliasChoices("TTS_VOLUME", "JARVIS_TTS_VOLUME"),
+    )
+    openai_tts_model: str = Field(
+        default="gpt-4o-mini-tts",
+        validation_alias=AliasChoices("OPENAI_TTS_MODEL", "JARVIS_OPENAI_TTS_MODEL"),
+    )
+    openai_tts_voice: str = Field(
+        default="cedar",
+        validation_alias=AliasChoices("OPENAI_TTS_VOICE", "JARVIS_OPENAI_TTS_VOICE"),
+    )
+    openai_tts_format: str = Field(
+        default="mp3",
+        validation_alias=AliasChoices("OPENAI_TTS_FORMAT", "JARVIS_OPENAI_TTS_FORMAT"),
+    )
+    openai_tts_instructions: str = Field(
+        default=(
+            "Speak as a calm, mature, professional British-inspired desktop AI assistant. "
+            "Use a confident, clear, cinematic tone. Do not sound childish. "
+            "Keep the pace natural and efficient."
+        ),
+        validation_alias=AliasChoices("OPENAI_TTS_INSTRUCTIONS", "JARVIS_OPENAI_TTS_INSTRUCTIONS"),
     )
 
     @field_validator("log_level")
@@ -166,6 +186,23 @@ class AppSettings(BaseSettings):
     @classmethod
     def normalize_tts_voice_name(cls, value: str) -> str:
         return value.strip()
+
+    @field_validator("openai_tts_model", "openai_tts_voice", "openai_tts_instructions")
+    @classmethod
+    def normalize_openai_tts_text(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("OpenAI TTS setting cannot be empty.")
+        return cleaned
+
+    @field_validator("openai_tts_format")
+    @classmethod
+    def normalize_openai_tts_format(cls, value: str) -> str:
+        cleaned = value.strip().lower()
+        allowed = {"mp3", "opus", "aac", "flac", "wav", "pcm"}
+        if cleaned not in allowed:
+            raise ValueError(f"Unsupported OpenAI TTS format: {value}")
+        return cleaned
 
     @field_validator("wake_phrase")
     @classmethod

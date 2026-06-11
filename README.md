@@ -78,6 +78,14 @@ Jarvis is a Windows desktop AI assistant foundation. Phase 1 provides the applic
 - Chat and voice command tests can speak responses with `--speak`.
 - TTS logs are saved to `logs/tts.log`.
 
+## Phase 8.5 Scope
+
+- OpenAI TTS is the preferred provider with `pyttsx3` fallback.
+- Generated OpenAI speech audio is stored temporarily under `logs/audio/`.
+- CLI command: `py main.py --tts-test "Hello sir, Jarvis is online." --provider openai`.
+- Chat and voice command speech uses OpenAI TTS when `TTS_PROVIDER=openai`.
+- The configured voice direction is original: mature, calm, confident, professional, British-inspired, deep but clear, slightly cinematic, natural paced, and not an imitation of a real actor or copyrighted movie character.
+
 ## Setup
 
 Install dependencies:
@@ -260,20 +268,36 @@ logs/chat.log
 py main.py --tts-test "Hello, I am Jarvis."
 ```
 
+OpenAI TTS can be selected explicitly:
+
+```powershell
+py main.py --tts-test "Hello sir, Jarvis is online." --provider openai
+```
+
 Text-to-speech settings:
 
 ```dotenv
 TTS_ENABLED=false
-TTS_PROVIDER=pyttsx3
+TTS_PROVIDER=openai
 TTS_VOICE_NAME=
 TTS_RATE=175
 TTS_VOLUME=1.0
+OPENAI_TTS_MODEL=gpt-4o-mini-tts
+OPENAI_TTS_VOICE=cedar
+OPENAI_TTS_FORMAT=mp3
+OPENAI_TTS_INSTRUCTIONS=Speak as a calm, mature, professional British-inspired desktop AI assistant. Use a confident, clear, cinematic tone. Do not sound childish. Keep the pace natural and efficient.
 ```
 
-Only the local `pyttsx3` provider is implemented. No OpenAI TTS or ElevenLabs provider is configured in Phase 8. Detailed TTS logs are saved to:
+OpenAI TTS requires `OPENAI_ENABLED=true` and a configured `OPENAI_API_KEY`. If OpenAI TTS is unavailable or fails, Jarvis falls back to local `pyttsx3`. No API keys are printed. Detailed TTS logs are saved to:
 
 ```text
 logs/tts.log
+```
+
+Generated OpenAI audio files are saved temporarily in:
+
+```text
+logs/audio/
 ```
 
 ## Test
@@ -284,7 +308,7 @@ py -m pytest
 
 ## Not Implemented Yet
 
-Jarvis still does not include OpenAI TTS, ElevenLabs, continuous always-on listening, LangGraph, memory, Gmail, Calendar, browser automation, desktop automation, file tools, or vision.
+Jarvis still does not include ElevenLabs, continuous always-on listening, LangGraph, memory, Gmail, Calendar, browser automation, desktop automation, file tools, or vision.
 
 ## Project Layout
 

@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import ctypes
 import importlib
+import re
+import sys
+import uuid
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from loguru import logger
 
@@ -15,6 +20,11 @@ _TTS_LOG_SINK_ID: int | None = None
 _TTS_LOG_FILE: Path | None = None
 
 
+class AudioPlayer(Protocol):
+    def play(self, path: Path, audio_format: str) -> None:
+        """Play a generated audio file and return only after playback finishes."""
+
+
 @dataclass(frozen=True)
 class TextToSpeechResult:
     provider_name: str
@@ -22,7 +32,42 @@ class TextToSpeechResult:
     requested: bool
     spoken: bool
     log_file: Path
+    requested_provider_name: str | None = None
+    fallback_used: bool = False
+    fallback_reason: str | None = None
+    audio_file: Path | None = None
     error: str | None = None
+
+
+class WindowsMciAudioPlayer:
+    """Small blocking audio player for local generated audio on Windows."""
+
+    def play(self, path: Path, audio_format: str) -> None:
+        if sys.platform != "win32":
+            raise RuntimeError("Generated audio playback is currently supported only on Windows.")
+
+        if not path.exists():
+            raise RuntimeError(f"Generated audio file does not exist: {path}")
+
+        alias = f"jarvis_tts_{uuid.uuid4().hex}"
+        file_path = str(path.resolve()).replace('"', "")
+        media_type = " type mpegvideo" if audio_format.lower() in {"mp3", "aac"} else ""
+        self._mci(f'open "{file_path}"{media_type} alias {alias}')
+        try:
+            self._mci(f"play {alias} wait")
+        finally:
+            self._mci(f"close {alias}", raise_on_error=False)
+
+    @staticmethod
+    def _mci(command: str, raise_on_error: bool = True) -> None:
+        error_code = ctypes.windll.winmm.mciSendStringW(command, None, 0, None)
+        if error_code == 0 or not raise_on_error:
+            return
+
+        buffer = ctypes.create_unicode_buffer(255)
+        ctypes.windll.winmm.mciGetErrorStringW(error_code, buffer, len(buffer))
+        message = buffer.value or f"MCI error {error_code}"
+        raise RuntimeError(message)
 
 
 class Pyttsx3TextToSpeechProvider:
@@ -43,6 +88,7 @@ class Pyttsx3TextToSpeechProvider:
         self.rate = rate
         self.volume = volume
         self.comtypes_cache_dir = comtypes_cache_dir
+        self.last_audio_file: Path | None = None
         self._pyttsx3 = pyttsx3_module
         self._import_error = import_error
 
@@ -110,16 +156,109 @@ class Pyttsx3TextToSpeechProvider:
                 return
 
 
-def create_text_to_speech_provider(settings: AppSettings) -> TextToSpeechProvider:
-    provider = settings.tts_provider.replace("-", "_")
-    if provider == "pyttsx3":
-        return Pyttsx3TextToSpeechProvider(
-            voice_name=settings.tts_voice_name,
-            rate=settings.tts_rate,
-            volume=settings.tts_volume,
-            comtypes_cache_dir=settings.log_dir / "comtypes_gen",
+class OpenAITextToSpeechProvider:
+    """OpenAI TTS provider that generates temporary audio and plays it locally."""
+
+    name = "openai"
+
+    def __init__(
+        self,
+        settings: AppSettings,
+        client_factory: Any | None = None,
+        audio_player: AudioPlayer | None = None,
+    ) -> None:
+        self.settings = settings
+        self.client_factory = client_factory or self._default_client_factory
+        self.audio_player = audio_player or WindowsMciAudioPlayer()
+        self.audio_dir = self.settings.log_dir / "audio"
+        self.last_audio_file: Path | None = None
+
+    @property
+    def available(self) -> bool:
+        return bool(self.settings.openai_enabled and self.settings.has_openai_api_key)
+
+    def speak(self, text: str) -> None:
+        cleaned = text.strip()
+        if not cleaned:
+            raise ValueError("TTS text cannot be empty.")
+
+        if not self.settings.openai_enabled:
+            raise RuntimeError("OpenAI TTS is disabled because OpenAI is disabled.")
+
+        if not self.settings.has_openai_api_key:
+            raise RuntimeError("OpenAI TTS requires an API key, but no API key is configured.")
+
+        self.audio_dir.mkdir(parents=True, exist_ok=True)
+        audio_file = self._next_audio_file()
+        client = self.client_factory(api_key=self.settings.openai_api_key)
+        request = {
+            "model": self.settings.openai_tts_model,
+            "voice": self.settings.openai_tts_voice,
+            "input": cleaned,
+            "response_format": self.settings.openai_tts_format,
+        }
+        if self.settings.openai_tts_model not in {"tts-1", "tts-1-hd"}:
+            request["instructions"] = self.settings.openai_tts_instructions
+
+        response = client.audio.speech.create(**request)
+        self._write_response_to_file(response, audio_file)
+        if not audio_file.exists() or audio_file.stat().st_size == 0:
+            raise RuntimeError("OpenAI TTS returned an empty audio file.")
+
+        self.last_audio_file = audio_file
+        self.audio_player.play(audio_file, self.settings.openai_tts_format)
+
+    def _next_audio_file(self) -> Path:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        suffix = self.settings.openai_tts_format
+        return self.audio_dir / f"jarvis_tts_{timestamp}_{uuid.uuid4().hex}.{suffix}"
+
+    @staticmethod
+    def _write_response_to_file(response: Any, path: Path) -> None:
+        if hasattr(response, "write_to_file"):
+            response.write_to_file(path)
+            return
+
+        content = getattr(response, "content", None)
+        if content is None and hasattr(response, "read"):
+            content = response.read()
+        if not content:
+            raise RuntimeError("OpenAI TTS response did not include audio bytes.")
+        path.write_bytes(bytes(content))
+
+    @staticmethod
+    def _default_client_factory(api_key: str) -> Any:
+        from openai import OpenAI
+
+        return OpenAI(api_key=api_key)
+
+
+def create_text_to_speech_provider(
+    settings: AppSettings,
+    provider_name: str | None = None,
+    *,
+    client_factory: Any | None = None,
+    audio_player: AudioPlayer | None = None,
+) -> TextToSpeechProvider:
+    provider = _normalize_provider_name(provider_name or settings.tts_provider)
+    if provider == "openai":
+        return OpenAITextToSpeechProvider(
+            settings=settings,
+            client_factory=client_factory,
+            audio_player=audio_player,
         )
-    raise ValueError(f"Unsupported TTS provider: {settings.tts_provider}")
+    if provider == "pyttsx3":
+        return create_pyttsx3_text_to_speech_provider(settings)
+    raise ValueError(f"Unsupported TTS provider: {provider_name or settings.tts_provider}")
+
+
+def create_pyttsx3_text_to_speech_provider(settings: AppSettings) -> Pyttsx3TextToSpeechProvider:
+    return Pyttsx3TextToSpeechProvider(
+        voice_name=settings.tts_voice_name,
+        rate=settings.tts_rate,
+        volume=settings.tts_volume,
+        comtypes_cache_dir=settings.log_dir / "comtypes_gen",
+    )
 
 
 def should_speak(settings: AppSettings, speak_requested: bool = False) -> bool:
@@ -131,19 +270,25 @@ def speak_text(
     settings: AppSettings,
     speak_requested: bool = False,
     provider: TextToSpeechProvider | None = None,
+    fallback_provider: TextToSpeechProvider | None = None,
+    provider_name: str | None = None,
 ) -> TextToSpeechResult:
     log_file = ensure_tts_log_sink(settings)
     tts_logger = logger.bind(tts=True)
+    requested_provider_name = _normalize_provider_name(
+        provider_name or (provider.name if provider is not None else settings.tts_provider)
+    )
     requested = should_speak(settings, speak_requested)
 
     if not requested:
         tts_logger.info("TTS skipped because it is disabled and no explicit speak flag was provided")
         return TextToSpeechResult(
-            provider_name=settings.tts_provider,
+            provider_name=requested_provider_name,
             provider_available=False,
             requested=False,
             spoken=False,
             log_file=log_file,
+            requested_provider_name=requested_provider_name,
         )
 
     cleaned = text.strip()
@@ -151,53 +296,80 @@ def speak_text(
         message = "TTS failed: no text was supplied."
         tts_logger.error(message)
         return TextToSpeechResult(
-            provider_name=settings.tts_provider,
+            provider_name=requested_provider_name,
             provider_available=False,
             requested=True,
             spoken=False,
             log_file=log_file,
+            requested_provider_name=requested_provider_name,
             error=message,
         )
 
     try:
-        tts_provider = provider or create_text_to_speech_provider(settings)
+        tts_provider = provider or create_text_to_speech_provider(settings, provider_name=provider_name)
     except Exception as exc:
-        message = f"TTS provider selection failed: {type(exc).__name__}: {exc}"
+        message = _format_safe_exception("TTS provider selection failed", exc)
         tts_logger.error(message)
         return TextToSpeechResult(
-            provider_name=settings.tts_provider,
+            provider_name=requested_provider_name,
             provider_available=False,
             requested=True,
             spoken=False,
             log_file=log_file,
+            requested_provider_name=requested_provider_name,
             error=message,
         )
 
     provider_available = bool(tts_provider.available)
     if not provider_available:
-        message = f"TTS provider '{tts_provider.name}' is not available. Install pyttsx3 and verify local audio output."
-        tts_logger.error(message)
+        message = f"TTS provider '{tts_provider.name}' is not available."
+        if _can_fallback_to_pyttsx3(tts_provider, requested_provider_name):
+            return _speak_with_fallback(
+                cleaned,
+                settings,
+                log_file,
+                tts_logger,
+                requested_provider_name,
+                message,
+                fallback_provider=fallback_provider,
+            )
+
+        tts_logger.error("{} Install pyttsx3 and verify local audio output.", message)
         return TextToSpeechResult(
             provider_name=tts_provider.name,
             provider_available=False,
             requested=True,
             spoken=False,
             log_file=log_file,
-            error=message,
+            requested_provider_name=requested_provider_name,
+            error=f"{message} Install pyttsx3 and verify local audio output.",
         )
 
     try:
         tts_logger.info("Speaking response through provider={}", tts_provider.name)
         tts_provider.speak(cleaned)
     except Exception as exc:
-        message = f"TTS audio output failed: {type(exc).__name__}: {exc}"
-        tts_logger.exception(message)
+        message = _format_safe_exception("TTS audio output failed", exc)
+        if _can_fallback_to_pyttsx3(tts_provider, requested_provider_name):
+            return _speak_with_fallback(
+                cleaned,
+                settings,
+                log_file,
+                tts_logger,
+                requested_provider_name,
+                message,
+                fallback_provider=fallback_provider,
+            )
+
+        tts_logger.error(message)
         return TextToSpeechResult(
             provider_name=tts_provider.name,
             provider_available=provider_available,
             requested=True,
             spoken=False,
             log_file=log_file,
+            requested_provider_name=requested_provider_name,
+            audio_file=getattr(tts_provider, "last_audio_file", None),
             error=message,
         )
 
@@ -208,6 +380,68 @@ def speak_text(
         requested=True,
         spoken=True,
         log_file=log_file,
+        requested_provider_name=requested_provider_name,
+        audio_file=getattr(tts_provider, "last_audio_file", None),
+    )
+
+
+def _speak_with_fallback(
+    text: str,
+    settings: AppSettings,
+    log_file: Path,
+    tts_logger: Any,
+    requested_provider_name: str,
+    fallback_reason: str,
+    fallback_provider: TextToSpeechProvider | None = None,
+) -> TextToSpeechResult:
+    tts_logger.warning("Falling back to pyttsx3 TTS: {}", fallback_reason)
+    provider = fallback_provider or create_pyttsx3_text_to_speech_provider(settings)
+
+    if not provider.available:
+        message = f"{fallback_reason}; fallback provider 'pyttsx3' is not available."
+        tts_logger.error(message)
+        return TextToSpeechResult(
+            provider_name=provider.name,
+            provider_available=False,
+            requested=True,
+            spoken=False,
+            log_file=log_file,
+            requested_provider_name=requested_provider_name,
+            fallback_used=True,
+            fallback_reason=fallback_reason,
+            error=message,
+        )
+
+    try:
+        provider.speak(text)
+    except Exception as exc:
+        fallback_error = _format_safe_exception("pyttsx3 fallback failed", exc)
+        message = f"{fallback_reason}; {fallback_error}"
+        tts_logger.error(message)
+        return TextToSpeechResult(
+            provider_name=provider.name,
+            provider_available=True,
+            requested=True,
+            spoken=False,
+            log_file=log_file,
+            requested_provider_name=requested_provider_name,
+            fallback_used=True,
+            fallback_reason=fallback_reason,
+            audio_file=getattr(provider, "last_audio_file", None),
+            error=message,
+        )
+
+    tts_logger.info("TTS completed through fallback provider={}", provider.name)
+    return TextToSpeechResult(
+        provider_name=provider.name,
+        provider_available=True,
+        requested=True,
+        spoken=True,
+        log_file=log_file,
+        requested_provider_name=requested_provider_name,
+        fallback_used=True,
+        fallback_reason=fallback_reason,
+        audio_file=getattr(provider, "last_audio_file", None),
     )
 
 
@@ -216,11 +450,17 @@ def format_tts_result(result: TextToSpeechResult) -> str:
         "Jarvis TTS Test",
         "===============",
         f"provider: {result.provider_name}",
+        f"requested provider: {result.requested_provider_name or result.provider_name}",
         f"provider available: {_yes_no(result.provider_available)}",
+        f"fallback used: {_yes_no(result.fallback_used)}",
         f"requested: {_yes_no(result.requested)}",
         f"spoken: {_yes_no(result.spoken)}",
         f"diagnostic log: {result.log_file}",
     ]
+    if result.audio_file:
+        lines.append(f"audio file: {result.audio_file}")
+    if result.fallback_reason:
+        lines.extend(["", "Fallback reason:", f"  {result.fallback_reason}"])
     if result.error:
         lines.extend(["", "Errors:", f"  - {result.error}"])
     return "\n".join(lines)
@@ -251,6 +491,24 @@ def ensure_tts_log_sink(settings: AppSettings) -> Path:
     )
     _TTS_LOG_FILE = log_file
     return log_file
+
+
+def _can_fallback_to_pyttsx3(provider: TextToSpeechProvider, requested_provider_name: str) -> bool:
+    return provider.name == "openai" or requested_provider_name == "openai"
+
+
+def _normalize_provider_name(value: str) -> str:
+    return value.strip().lower().replace("-", "_")
+
+
+def _format_safe_exception(prefix: str, error: Exception) -> str:
+    message = str(error).strip() or "No error details provided."
+    return f"{prefix}: {type(error).__name__}: {_redact_secret_like_text(message)}"
+
+
+def _redact_secret_like_text(text: str) -> str:
+    redacted = re.sub(r"sk-[A-Za-z0-9_\-]+", "[redacted]", text)
+    return redacted.replace("OPENAI_API_KEY", "[redacted]")
 
 
 def _yes_no(value: bool) -> str:

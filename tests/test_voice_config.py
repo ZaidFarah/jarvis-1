@@ -28,11 +28,19 @@ def test_voice_settings_defaults_are_lightweight() -> None:
     assert settings.wake_match_threshold == 0.72
     assert settings.wake_listen_seconds == 5.0
     assert settings.tts_enabled is False
-    assert settings.tts_provider == "pyttsx3"
+    assert settings.tts_provider == "openai"
     assert settings.tts_voice_name == ""
     assert settings.tts_rate == 175
     assert settings.tts_volume == 1.0
-    assert settings.text_to_speech_provider == "pyttsx3"
+    assert settings.openai_tts_model == "gpt-4o-mini-tts"
+    assert settings.openai_tts_voice == "cedar"
+    assert settings.openai_tts_format == "mp3"
+    assert settings.openai_tts_instructions == (
+        "Speak as a calm, mature, professional British-inspired desktop AI assistant. "
+        "Use a confident, clear, cinematic tone. Do not sound childish. "
+        "Keep the pace natural and efficient."
+    )
+    assert settings.text_to_speech_provider == "openai"
 
 
 def test_voice_settings_read_environment(monkeypatch) -> None:
@@ -79,6 +87,10 @@ def test_tts_settings_read_environment(monkeypatch) -> None:
     monkeypatch.setenv("TTS_VOICE_NAME", " David ")
     monkeypatch.setenv("TTS_RATE", "190")
     monkeypatch.setenv("TTS_VOLUME", "0.75")
+    monkeypatch.setenv("OPENAI_TTS_MODEL", "gpt-test-tts")
+    monkeypatch.setenv("OPENAI_TTS_VOICE", "cedar")
+    monkeypatch.setenv("OPENAI_TTS_FORMAT", "wav")
+    monkeypatch.setenv("OPENAI_TTS_INSTRUCTIONS", "  Speak clearly.  ")
 
     settings = AppSettings(_env_file=None)
 
@@ -87,6 +99,10 @@ def test_tts_settings_read_environment(monkeypatch) -> None:
     assert settings.tts_voice_name == "David"
     assert settings.tts_rate == 190
     assert settings.tts_volume == 0.75
+    assert settings.openai_tts_model == "gpt-test-tts"
+    assert settings.openai_tts_voice == "cedar"
+    assert settings.openai_tts_format == "wav"
+    assert settings.openai_tts_instructions == "Speak clearly."
 
 
 def test_wake_settings_read_environment(monkeypatch) -> None:

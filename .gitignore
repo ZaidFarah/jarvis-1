@@ -9,6 +9,7 @@ __pycache__/
 .ruff_cache/
 logs/*.log
 logs/*.txt
+logs/audio/
 logs/comtypes_gen/
 build/
 dist/
