@@ -31,6 +31,17 @@ class SpyAssistant(AssistantCore):
         return super().handle_command(command)
 
 
+class FakeTtsProvider:
+    name = "fake_tts"
+    available = True
+
+    def __init__(self) -> None:
+        self.spoken: list[str] = []
+
+    def speak(self, text: str) -> None:
+        self.spoken.append(text)
+
+
 def fake_recorder(duration: float) -> list[float]:
     assert duration > 0
     return [0.1, -0.1, 0.0]
@@ -55,6 +66,33 @@ def test_voice_command_wake_detected_path_passes_command_to_assistant() -> None:
     assert report.assistant_response is not None
     assert "Jarvis foundation is running" in report.assistant_response.text
     assert report.assistant_response.source == "fallback"
+    assert report.statuses == [
+        "Listening for wake phrase",
+        "Wake detected",
+        "Listening for command",
+        "Thinking",
+        "Sleeping",
+    ]
+    assert report.tts_result is None
+
+
+def test_voice_command_speak_flag_speaks_response() -> None:
+    settings = AppSettings(_env_file=None)
+    provider = FakeProvider(["hey jarvis", "say hello"])
+    tts_provider = FakeTtsProvider()
+
+    report = VoiceCommandTestRunner(
+        settings=settings,
+        assistant=AssistantCore(settings=settings),
+        provider=provider,
+        tts_provider=tts_provider,
+        speak_requested=True,
+        recorder=fake_recorder,
+    ).run()
+
+    assert report.tts_result is not None
+    assert report.tts_result.spoken is True
+    assert tts_provider.spoken
     assert report.statuses == [
         "Listening for wake phrase",
         "Wake detected",

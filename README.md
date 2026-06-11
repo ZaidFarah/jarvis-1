@@ -70,6 +70,14 @@ Jarvis is a Windows desktop AI assistant foundation. Phase 1 provides the applic
 - Voice command test sends the cleaned command through `AssistantCore`, so it can use OpenAI or fallback.
 - Chat logs are saved to `logs/chat.log`.
 
+## Phase 8 Scope
+
+- Safe local text-to-speech through `pyttsx3`.
+- TTS is disabled by default unless `TTS_ENABLED=true` or a CLI command explicitly uses `--speak`.
+- CLI command: `py main.py --tts-test "Hello, I am Jarvis."`.
+- Chat and voice command tests can speak responses with `--speak`.
+- TTS logs are saved to `logs/tts.log`.
+
 ## Setup
 
 Install dependencies:
@@ -187,6 +195,12 @@ Detailed voice command logs are saved to:
 logs/voice_command_test.log
 ```
 
+To speak the Jarvis response after a successful command, pass `--speak`:
+
+```powershell
+py main.py --voice-command-test --speak
+```
+
 ## OpenAI Check
 
 ```powershell
@@ -222,6 +236,12 @@ You can also pass a message inline:
 py main.py --chat-test "What can you do?"
 ```
 
+To print and speak the response:
+
+```powershell
+py main.py --chat-test "Say hello as Jarvis" --speak
+```
+
 When OpenAI is enabled and an API key exists, Jarvis sends the message to OpenAI with this system prompt:
 
 ```text
@@ -234,6 +254,28 @@ If OpenAI is disabled or unavailable, Jarvis returns the local fallback response
 logs/chat.log
 ```
 
+## Text To Speech Test
+
+```powershell
+py main.py --tts-test "Hello, I am Jarvis."
+```
+
+Text-to-speech settings:
+
+```dotenv
+TTS_ENABLED=false
+TTS_PROVIDER=pyttsx3
+TTS_VOICE_NAME=
+TTS_RATE=175
+TTS_VOLUME=1.0
+```
+
+Only the local `pyttsx3` provider is implemented. No OpenAI TTS or ElevenLabs provider is configured in Phase 8. Detailed TTS logs are saved to:
+
+```text
+logs/tts.log
+```
+
 ## Test
 
 ```powershell
@@ -242,7 +284,7 @@ py -m pytest
 
 ## Not Implemented Yet
 
-Jarvis still does not include continuous always-on listening, LangGraph, memory, Gmail, Calendar, browser automation, desktop automation, file tools, or vision.
+Jarvis still does not include OpenAI TTS, ElevenLabs, continuous always-on listening, LangGraph, memory, Gmail, Calendar, browser automation, desktop automation, file tools, or vision.
 
 ## Project Layout
 

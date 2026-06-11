@@ -27,6 +27,11 @@ def test_voice_settings_defaults_are_lightweight() -> None:
     ]
     assert settings.wake_match_threshold == 0.72
     assert settings.wake_listen_seconds == 5.0
+    assert settings.tts_enabled is False
+    assert settings.tts_provider == "pyttsx3"
+    assert settings.tts_voice_name == ""
+    assert settings.tts_rate == 175
+    assert settings.tts_volume == 1.0
     assert settings.text_to_speech_provider == "pyttsx3"
 
 
@@ -66,6 +71,22 @@ def test_stt_settings_read_environment(monkeypatch) -> None:
     assert settings.whisper_model == "tiny.en"
     assert settings.whisper_device == "cpu"
     assert settings.whisper_compute_type == "float32"
+
+
+def test_tts_settings_read_environment(monkeypatch) -> None:
+    monkeypatch.setenv("TTS_ENABLED", "true")
+    monkeypatch.setenv("TTS_PROVIDER", "pyttsx3")
+    monkeypatch.setenv("TTS_VOICE_NAME", " David ")
+    monkeypatch.setenv("TTS_RATE", "190")
+    monkeypatch.setenv("TTS_VOLUME", "0.75")
+
+    settings = AppSettings(_env_file=None)
+
+    assert settings.tts_enabled is True
+    assert settings.tts_provider == "pyttsx3"
+    assert settings.tts_voice_name == "David"
+    assert settings.tts_rate == 190
+    assert settings.tts_volume == 0.75
 
 
 def test_wake_settings_read_environment(monkeypatch) -> None:

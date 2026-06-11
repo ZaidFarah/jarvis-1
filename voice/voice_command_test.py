@@ -12,6 +12,7 @@ from assistant.core import AssistantCore, AssistantResponse
 from config.settings import AppSettings
 from voice.interfaces import TranscriptionResult
 from voice.stt import create_speech_to_text_provider
+from voice.tts import TextToSpeechResult, speak_text
 from voice.wake import WakeDetectionResult, WakeDetector, remove_wake_phrase_prefix
 
 
@@ -31,6 +32,7 @@ class VoiceCommandTestReport:
     raw_command_transcription: str
     cleaned_command: str
     assistant_response: AssistantResponse | None
+    tts_result: TextToSpeechResult | None
     statuses: list[str]
     log_file: Path
     errors: list[str] = field(default_factory=list)
@@ -56,12 +58,16 @@ class VoiceCommandTestRunner:
         settings: AppSettings,
         assistant: AssistantCore | None = None,
         provider: Any | None = None,
+        tts_provider: Any | None = None,
+        speak_requested: bool = False,
         recorder: Recorder | None = None,
         status_callback: StatusCallback | None = None,
     ) -> None:
         self.settings = settings
         self.assistant = assistant or AssistantCore()
         self.provider = provider or create_speech_to_text_provider(settings)
+        self.tts_provider = tts_provider
+        self.speak_requested = speak_requested
         self.recorder = recorder or self._record_microphone
         self.status_callback = status_callback
         self.log_file = self.settings.log_dir / "voice_command_test.log"
@@ -75,6 +81,7 @@ class VoiceCommandTestRunner:
         raw_command_transcription = ""
         cleaned_command = ""
         assistant_response: AssistantResponse | None = None
+        tts_result: TextToSpeechResult | None = None
         detector = WakeDetector(
             wake_phrase=self.settings.wake_phrase,
             aliases=self.settings.wake_alias_list,
@@ -95,6 +102,7 @@ class VoiceCommandTestRunner:
                 raw_command_transcription,
                 cleaned_command,
                 assistant_response,
+                tts_result,
                 statuses,
                 errors,
             )
@@ -121,6 +129,7 @@ class VoiceCommandTestRunner:
                 raw_command_transcription,
                 cleaned_command,
                 assistant_response,
+                tts_result,
                 statuses,
                 errors,
             )
@@ -133,6 +142,7 @@ class VoiceCommandTestRunner:
                 raw_command_transcription,
                 cleaned_command,
                 assistant_response,
+                tts_result,
                 statuses,
                 errors,
             )
@@ -164,6 +174,7 @@ class VoiceCommandTestRunner:
                 raw_command_transcription,
                 cleaned_command,
                 assistant_response,
+                tts_result,
                 statuses,
                 errors,
             )
@@ -171,7 +182,16 @@ class VoiceCommandTestRunner:
         self._status("Thinking", statuses)
         assistant_response = self.assistant.handle_command(cleaned_command)
         self.voice_logger.info("Assistant response={}", assistant_response.text)
-        self._status("Speaking", statuses)
+        if assistant_response.accepted and (self.speak_requested or self.settings.tts_enabled):
+            self._status("Speaking", statuses)
+            tts_result = speak_text(
+                assistant_response.text,
+                self.settings,
+                speak_requested=self.speak_requested,
+                provider=self.tts_provider,
+            )
+            if tts_result.error:
+                errors.append(tts_result.error)
         self._status("Sleeping", statuses)
         return self._report(
             wake_transcription,
@@ -179,6 +199,7 @@ class VoiceCommandTestRunner:
             raw_command_transcription,
             cleaned_command,
             assistant_response,
+            tts_result,
             statuses,
             errors,
         )
@@ -195,6 +216,7 @@ class VoiceCommandTestRunner:
         raw_command_transcription: str,
         cleaned_command: str,
         assistant_response: AssistantResponse | None,
+        tts_result: TextToSpeechResult | None,
         statuses: list[str],
         errors: list[str],
     ) -> VoiceCommandTestReport:
@@ -206,6 +228,7 @@ class VoiceCommandTestRunner:
             raw_command_transcription=raw_command_transcription,
             cleaned_command=cleaned_command,
             assistant_response=assistant_response,
+            tts_result=tts_result,
             statuses=statuses,
             log_file=self.log_file,
             errors=errors,
@@ -285,6 +308,18 @@ def format_voice_command_report(report: VoiceCommandTestReport) -> str:
 
     if report.assistant_response is not None:
         lines.extend(["", "Jarvis response:", f"  {report.assistant_response.text}"])
+
+    if report.tts_result is not None:
+        lines.extend(
+            [
+                "",
+                "Text-to-speech:",
+                f"  provider: {report.tts_result.provider_name}",
+                f"  provider available: {_yes_no(report.tts_result.provider_available)}",
+                f"  spoken: {_yes_no(report.tts_result.spoken)}",
+                f"  diagnostic log: {report.tts_result.log_file}",
+            ]
+        )
 
     if report.errors:
         lines.append("")

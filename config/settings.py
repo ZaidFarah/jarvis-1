@@ -110,7 +110,35 @@ class AppSettings(BaseSettings):
         default="You are Jarvis, a helpful personal desktop AI assistant.",
         validation_alias=AliasChoices("SYSTEM_PROMPT", "JARVIS_SYSTEM_PROMPT"),
     )
-    text_to_speech_provider: str = "pyttsx3"
+    tts_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("TTS_ENABLED", "JARVIS_TTS_ENABLED"),
+    )
+    tts_provider: str = Field(
+        default="pyttsx3",
+        validation_alias=AliasChoices(
+            "TTS_PROVIDER",
+            "JARVIS_TTS_PROVIDER",
+            "JARVIS_TEXT_TO_SPEECH_PROVIDER",
+            "text_to_speech_provider",
+        ),
+    )
+    tts_voice_name: str = Field(
+        default="",
+        validation_alias=AliasChoices("TTS_VOICE_NAME", "JARVIS_TTS_VOICE_NAME"),
+    )
+    tts_rate: int = Field(
+        default=175,
+        ge=80,
+        le=400,
+        validation_alias=AliasChoices("TTS_RATE", "JARVIS_TTS_RATE"),
+    )
+    tts_volume: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=1.0,
+        validation_alias=AliasChoices("TTS_VOLUME", "JARVIS_TTS_VOLUME"),
+    )
 
     @field_validator("log_level")
     @classmethod
@@ -126,10 +154,18 @@ class AppSettings(BaseSettings):
     def expand_log_dir(cls, value: Path) -> Path:
         return value.expanduser().resolve()
 
-    @field_validator("speech_to_text_provider", "text_to_speech_provider", "whisper_device", "whisper_compute_type")
+    @field_validator("speech_to_text_provider", "tts_provider", "whisper_device", "whisper_compute_type")
     @classmethod
     def normalize_provider_name(cls, value: str) -> str:
-        return value.strip().lower()
+        cleaned = value.strip().lower()
+        if not cleaned:
+            raise ValueError("Provider name cannot be empty.")
+        return cleaned
+
+    @field_validator("tts_voice_name")
+    @classmethod
+    def normalize_tts_voice_name(cls, value: str) -> str:
+        return value.strip()
 
     @field_validator("wake_phrase")
     @classmethod
@@ -170,6 +206,10 @@ class AppSettings(BaseSettings):
     @property
     def voice_microphone_test_seconds(self) -> float:
         return self.voice_record_seconds
+
+    @property
+    def text_to_speech_provider(self) -> str:
+        return self.tts_provider
 
     @property
     def wake_alias_list(self) -> list[str]:
