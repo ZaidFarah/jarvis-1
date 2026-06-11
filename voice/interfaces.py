@@ -22,6 +22,8 @@ class VoiceActivityDetector(Protocol):
 class TranscriptionResult:
     text: str
     confidence: float | None = None
+    duration_seconds: float | None = None
+    language: str | None = None
 
 
 class SpeechToTextProvider(Protocol):

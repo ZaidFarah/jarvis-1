@@ -25,6 +25,15 @@ Jarvis is a Windows desktop AI assistant foundation. Phase 1 provides the applic
 - GUI `Mic Test` button and tray menu action.
 - Audio logging through Loguru, including `logs/audio_diagnostics.log`.
 
+## Phase 3 Scope
+
+- Faster Whisper dependency support.
+- `faster_whisper` speech-to-text provider.
+- One-shot transcription diagnostic command.
+- Short microphone recording using configured voice settings.
+- STT diagnostic logging to `logs/stt_diagnostics.log`.
+- Graceful error output if Faster Whisper or the model cannot load.
+
 ## Setup
 
 Install dependencies:
@@ -73,6 +82,29 @@ Detailed audio diagnostic logs are saved to:
 logs/audio_diagnostics.log
 ```
 
+## Transcription Test
+
+```powershell
+py main.py --transcribe-test
+```
+
+The command records one short microphone clip and sends it to Faster Whisper. It prints the provider, model, device, compute type, recording level, VAD result, transcription text, and any errors.
+
+Speech-to-text settings:
+
+```dotenv
+STT_PROVIDER=faster_whisper
+WHISPER_MODEL=base.en
+WHISPER_DEVICE=cpu
+WHISPER_COMPUTE_TYPE=int8
+```
+
+Detailed STT diagnostics are saved to:
+
+```text
+logs/stt_diagnostics.log
+```
+
 ## Test
 
 ```powershell
@@ -81,7 +113,7 @@ py -m pytest
 
 ## Not Implemented Yet
 
-Jarvis still does not include wake word detection, Faster Whisper, OpenAI calls, memory, Gmail, Calendar, browser automation, desktop automation, file tools, or vision.
+Jarvis still does not include wake word detection, continuous listening, OpenAI calls, memory, Gmail, Calendar, browser automation, desktop automation, file tools, or vision.
 
 ## Project Layout
 

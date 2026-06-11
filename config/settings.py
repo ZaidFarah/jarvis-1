@@ -56,7 +56,22 @@ class AppSettings(BaseSettings):
         le=1.0,
         validation_alias=AliasChoices("VOICE_VAD_THRESHOLD", "JARVIS_VOICE_VAD_THRESHOLD"),
     )
-    speech_to_text_provider: str = "interface-only"
+    speech_to_text_provider: str = Field(
+        default="faster_whisper",
+        validation_alias=AliasChoices("STT_PROVIDER", "JARVIS_STT_PROVIDER", "JARVIS_SPEECH_TO_TEXT_PROVIDER"),
+    )
+    whisper_model: str = Field(
+        default="base.en",
+        validation_alias=AliasChoices("WHISPER_MODEL", "JARVIS_WHISPER_MODEL"),
+    )
+    whisper_device: str = Field(
+        default="cpu",
+        validation_alias=AliasChoices("WHISPER_DEVICE", "JARVIS_WHISPER_DEVICE"),
+    )
+    whisper_compute_type: str = Field(
+        default="int8",
+        validation_alias=AliasChoices("WHISPER_COMPUTE_TYPE", "JARVIS_WHISPER_COMPUTE_TYPE"),
+    )
     text_to_speech_provider: str = "pyttsx3"
 
     @field_validator("log_level")
@@ -73,7 +88,7 @@ class AppSettings(BaseSettings):
     def expand_log_dir(cls, value: Path) -> Path:
         return value.expanduser().resolve()
 
-    @field_validator("speech_to_text_provider", "text_to_speech_provider")
+    @field_validator("speech_to_text_provider", "text_to_speech_provider", "whisper_device", "whisper_compute_type")
     @classmethod
     def normalize_provider_name(cls, value: str) -> str:
         return value.strip().lower()

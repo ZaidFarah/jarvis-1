@@ -2,6 +2,7 @@
 
 from voice.audio_diagnostics import AudioDiagnostics, AudioDiagnosticsReport, MicrophoneTestResult
 from voice.interfaces import SpeechToTextProvider, TextToSpeechProvider, VoiceActivityDetector
+from voice.transcription_diagnostics import TranscriptionDiagnostics, TranscriptionDiagnosticReport
 
 __all__ = [
     "AudioDiagnostics",
@@ -9,5 +10,7 @@ __all__ = [
     "MicrophoneTestResult",
     "SpeechToTextProvider",
     "TextToSpeechProvider",
+    "TranscriptionDiagnostics",
+    "TranscriptionDiagnosticReport",
     "VoiceActivityDetector",
 ]
