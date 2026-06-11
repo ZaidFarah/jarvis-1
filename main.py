@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 
 from app.application import JarvisApplication
+from assistant.core import AssistantCore, AssistantResponse
 from config.settings import load_settings
 from services.logging_service import configure_logging
 from services.openai_service import OpenAIService, format_openai_check_report
@@ -49,8 +50,40 @@ def main(argv: list[str] | None = None) -> int:
         print(format_openai_check_report(report))
         return 0 if report.is_successful else 1
 
+    if "--chat-test" in args:
+        settings = load_settings()
+        configure_logging(settings, console=False)
+        message = _chat_test_message(args)
+        assistant = AssistantCore(settings=settings, openai_service=OpenAIService(settings))
+        response = assistant.handle_command(message)
+        print(_format_chat_test_report(message, response))
+        return 0 if response.accepted else 1
+
     application = JarvisApplication()
     return application.run()
+
+
+def _chat_test_message(args: list[str]) -> str:
+    index = args.index("--chat-test")
+    inline_message = " ".join(args[index + 1 :]).strip()
+    if inline_message:
+        return inline_message
+    return input("You: ").strip()
+
+
+def _format_chat_test_report(message: str, response: AssistantResponse) -> str:
+    lines = [
+        "Jarvis Chat Test",
+        "================",
+        f"user: {message}",
+        f"response source: {response.source}",
+        "",
+        "Jarvis response:",
+        f"  {response.text}",
+    ]
+    if response.error:
+        lines.extend(["", "Fallback reason:", f"  {response.error}"])
+    return "\n".join(lines)
 
 
 if __name__ == "__main__":

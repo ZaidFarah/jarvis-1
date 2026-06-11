@@ -62,6 +62,14 @@ Jarvis is a Windows desktop AI assistant foundation. Phase 1 provides the applic
 - OpenAI logs saved to `logs/openai_diagnostics.log`.
 - OpenAI is not connected to `AssistantCore` yet.
 
+## Phase 7 Scope
+
+- `AssistantCore` routes commands to OpenAI when enabled and configured.
+- The local placeholder remains as fallback when OpenAI is disabled, missing a key, or errors.
+- CLI command: `py main.py --chat-test`.
+- Voice command test sends the cleaned command through `AssistantCore`, so it can use OpenAI or fallback.
+- Chat logs are saved to `logs/chat.log`.
+
 ## Setup
 
 Install dependencies:
@@ -191,6 +199,7 @@ OpenAI settings:
 OPENAI_ENABLED=false
 OPENAI_API_KEY=
 OPENAI_MODEL=gpt-4o-mini
+SYSTEM_PROMPT=You are Jarvis, a helpful personal desktop AI assistant.
 ```
 
 The check reports whether OpenAI is enabled, whether an API key is present, the selected model, and whether a test request was attempted. It never prints the API key. A network request is made only when `OPENAI_ENABLED=true` and `OPENAI_API_KEY` is set.
@@ -201,6 +210,30 @@ Detailed OpenAI diagnostic logs are saved to:
 logs/openai_diagnostics.log
 ```
 
+## Chat Test
+
+```powershell
+py main.py --chat-test
+```
+
+You can also pass a message inline:
+
+```powershell
+py main.py --chat-test "What can you do?"
+```
+
+When OpenAI is enabled and an API key exists, Jarvis sends the message to OpenAI with this system prompt:
+
+```text
+You are Jarvis, a helpful personal desktop AI assistant.
+```
+
+If OpenAI is disabled or unavailable, Jarvis returns the local fallback response. Chat logs are saved to:
+
+```text
+logs/chat.log
+```
+
 ## Test
 
 ```powershell
@@ -209,7 +242,7 @@ py -m pytest
 
 ## Not Implemented Yet
 
-Jarvis still does not connect OpenAI to the assistant conversation flow. It also does not include continuous always-on listening, LangGraph, memory, Gmail, Calendar, browser automation, desktop automation, file tools, or vision.
+Jarvis still does not include continuous always-on listening, LangGraph, memory, Gmail, Calendar, browser automation, desktop automation, file tools, or vision.
 
 ## Project Layout
 

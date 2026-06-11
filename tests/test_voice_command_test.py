@@ -23,6 +23,7 @@ class FakeProvider:
 
 class SpyAssistant(AssistantCore):
     def __init__(self) -> None:
+        super().__init__(settings=AppSettings(_env_file=None))
         self.commands: list[str] = []
 
     def handle_command(self, command: str):
@@ -53,6 +54,7 @@ def test_voice_command_wake_detected_path_passes_command_to_assistant() -> None:
     assert assistant.commands == ["status report"]
     assert report.assistant_response is not None
     assert "Jarvis foundation is running" in report.assistant_response.text
+    assert report.assistant_response.source == "fallback"
     assert report.statuses == [
         "Listening for wake phrase",
         "Wake detected",
@@ -89,7 +91,7 @@ def test_voice_command_report_includes_safe_placeholder_response() -> None:
 
     report = VoiceCommandTestRunner(
         settings=settings,
-        assistant=AssistantCore(),
+        assistant=AssistantCore(settings=settings),
         provider=provider,
         recorder=fake_recorder,
     ).run()

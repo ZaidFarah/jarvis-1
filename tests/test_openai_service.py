@@ -84,3 +84,58 @@ def test_openai_safe_error_formatting_redacts_key_like_text() -> None:
     assert "sk-test-secret" not in text
     assert "OPENAI_API_KEY" not in text
     assert "[redacted]" in text
+
+
+def test_openai_chat_disabled_returns_safe_fallback_result() -> None:
+    settings = AppSettings(_env_file=None, openai_enabled=False, openai_api_key="", openai_model="gpt-test")
+    result = OpenAIService(settings).chat("hello")
+
+    assert result.success is False
+    assert result.used_openai is False
+    assert result.safe_error == "OpenAI is disabled."
+
+
+def test_openai_chat_success_uses_configured_model_and_prompt() -> None:
+    captured: dict[str, str] = {}
+
+    class ChatResponses:
+        def create(self, **kwargs):
+            captured.update(kwargs)
+            return FakeResponse()
+
+    class ChatClient:
+        responses = ChatResponses()
+
+    settings = AppSettings(
+        _env_file=None,
+        openai_enabled=True,
+        openai_api_key="sk-secret",
+        openai_model="gpt-test",
+        system_prompt="You are Jarvis.",
+    )
+    service = OpenAIService(settings, client_factory=lambda api_key: ChatClient())
+
+    result = service.chat("hello")
+
+    assert result.success is True
+    assert result.text == "Jarvis OpenAI check OK."
+    assert captured["model"] == "gpt-test"
+    assert captured["instructions"] == "You are Jarvis."
+    assert captured["input"] == "hello"
+
+
+def test_openai_chat_error_is_safe() -> None:
+    class FailingResponses:
+        def create(self, **kwargs):
+            del kwargs
+            raise RuntimeError("bad key sk-secret")
+
+    class FailingClient:
+        responses = FailingResponses()
+
+    settings = AppSettings(_env_file=None, openai_enabled=True, openai_api_key="sk-secret", openai_model="gpt-test")
+    result = OpenAIService(settings, client_factory=lambda api_key: FailingClient()).chat("hello")
+
+    assert result.success is False
+    assert result.safe_error is not None
+    assert "sk-secret" not in result.safe_error

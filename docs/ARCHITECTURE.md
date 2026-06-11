@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Jarvis is being built as a production-quality Windows desktop assistant. Phase 1 created the safe desktop foundation. Phase 2 added a limited local voice foundation for microphone diagnostics and provider interfaces. Phase 2.5 improved diagnostic reliability and reporting. Phase 3 added one-shot Faster Whisper transcription testing. Phase 4 added controlled wake phrase detection as a test mode only. Phase 5 added a controlled one-shot voice command test mode. Phase 6 adds OpenAI connection diagnostics only.
+Jarvis is being built as a production-quality Windows desktop assistant. Phase 1 created the safe desktop foundation. Phase 2 added a limited local voice foundation for microphone diagnostics and provider interfaces. Phase 2.5 improved diagnostic reliability and reporting. Phase 3 added one-shot Faster Whisper transcription testing. Phase 4 added controlled wake phrase detection as a test mode only. Phase 5 added a controlled one-shot voice command test mode. Phase 6 added OpenAI connection diagnostics. Phase 7 connects `AssistantCore` to OpenAI chat with local fallback.
 
 ## Phase 1 Components
 
@@ -18,21 +18,23 @@ Jarvis is being built as a production-quality Windows desktop assistant. Phase 1
 
 `services/logging_service.py` configures Loguru for console logs and `logs/jarvis.log`. Diagnostic logs are written separately for audio, STT, wake, voice command, and OpenAI checks. Detailed provider, tool, and security audit logging will be added in later approved phases.
 
-### OpenAI Diagnostics
+### OpenAI Service
 
-`services/openai_service.py` performs safe OpenAI configuration and connectivity checks:
+`services/openai_service.py` performs safe OpenAI configuration checks and chat requests:
 
 - reports whether OpenAI is enabled
 - reports whether an API key exists without printing the key
 - reports the selected model
 - sends a tiny Responses API request only when enabled and keyed
 - writes `logs/openai_diagnostics.log`
+- sends chat requests for `AssistantCore`
+- writes `logs/chat.log`
 
-OpenAI is not wired into `AssistantCore` in Phase 6.
+OpenAI chat uses the configured `SYSTEM_PROMPT`. The default is: `You are Jarvis, a helpful personal desktop AI assistant.`
 
 ### Assistant Core
 
-`assistant/core.py` is a stub. It accepts typed text commands and returns a safe placeholder response. It does not call OpenAI, run tools, access files, or store memory.
+`assistant/core.py` accepts text commands and routes them to OpenAI when enabled and configured. If OpenAI is disabled, missing a key, or errors, it returns the local placeholder fallback. It does not run tools, access files, or store memory.
 
 ### Voice Foundation
 
@@ -74,6 +76,7 @@ Future phases should add capabilities behind explicit approval gates:
 - Phase 4: one-shot wake phrase detection diagnostic
 - Phase 5: controlled one-shot voice command test
 - Phase 6: OpenAI connection diagnostics only
+- Phase 7: OpenAI-backed AssistantCore responses with fallback
 - Later voice phase: continuous speech loop
 - Phase 3: OpenAI provider, agent routing, typed tool interfaces
 - Phase 4: local memory and summaries
@@ -84,4 +87,4 @@ Future phases should add capabilities behind explicit approval gates:
 
 ## Safety Boundary
 
-Phase 6 has no risky tools. It cannot access email, calendar, browser automation, desktop automation, memory, screenshots, or local file content. OpenAI usage is limited to a user-configured diagnostic request and is not connected to the assistant runtime.
+Phase 7 has no tools. It cannot access email, calendar, browser automation, desktop automation, memory, screenshots, or local file content. OpenAI usage is limited to plain text chat responses from the user command text.

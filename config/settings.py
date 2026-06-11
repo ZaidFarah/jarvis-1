@@ -106,6 +106,10 @@ class AppSettings(BaseSettings):
         default="gpt-4o-mini",
         validation_alias=AliasChoices("OPENAI_MODEL", "JARVIS_OPENAI_MODEL"),
     )
+    system_prompt: str = Field(
+        default="You are Jarvis, a helpful personal desktop AI assistant.",
+        validation_alias=AliasChoices("SYSTEM_PROMPT", "JARVIS_SYSTEM_PROMPT"),
+    )
     text_to_speech_provider: str = "pyttsx3"
 
     @field_validator("log_level")
@@ -153,6 +157,14 @@ class AppSettings(BaseSettings):
         cleaned = value.strip()
         if not cleaned:
             raise ValueError("OpenAI model cannot be empty.")
+        return cleaned
+
+    @field_validator("system_prompt")
+    @classmethod
+    def normalize_system_prompt(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("System prompt cannot be empty.")
         return cleaned
 
     @property

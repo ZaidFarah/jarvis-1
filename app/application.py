@@ -9,6 +9,7 @@ from assistant.core import AssistantCore
 from config.settings import AppSettings, load_settings
 from gui.main_window import JarvisMainWindow
 from services.logging_service import configure_logging
+from services.openai_service import OpenAIService
 
 
 class JarvisApplication:
@@ -25,7 +26,7 @@ class JarvisApplication:
         self.qt_app.setQuitOnLastWindowClosed(False)
         self.qt_app.aboutToQuit.connect(self.shutdown)
 
-        self.assistant = AssistantCore()
+        self.assistant = AssistantCore(settings=self.settings, openai_service=OpenAIService(self.settings))
         self.window = JarvisMainWindow(settings=self.settings, assistant=self.assistant)
 
     def run(self) -> int:

@@ -11,6 +11,7 @@ from config.settings import AppSettings
 
 
 _OPENAI_LOG_SINK_ID: int | None = None
+_CHAT_LOG_SINK_ID: int | None = None
 
 
 @dataclass(frozen=True)
@@ -34,6 +35,14 @@ class OpenAICheckReport:
         return self.success
 
 
+@dataclass(frozen=True)
+class OpenAIChatResult:
+    success: bool
+    text: str
+    used_openai: bool
+    safe_error: str | None = None
+
+
 class OpenAIService:
     """OpenAI diagnostics service.
 
@@ -48,8 +57,11 @@ class OpenAIService:
         self.settings = settings
         self.client_factory = client_factory or self._default_client_factory
         self.log_file = self.settings.log_dir / "openai_diagnostics.log"
+        self.chat_log_file = self.settings.log_dir / "chat.log"
         self.openai_logger = logger.bind(openai_diagnostics=True)
+        self.chat_logger = logger.bind(chat=True)
         self._ensure_openai_log_sink()
+        self._ensure_chat_log_sink()
 
     def run_check(self) -> OpenAICheckReport:
         enabled = self.settings.openai_enabled
@@ -122,6 +134,59 @@ class OpenAIService:
                 errors=[safe_error],
             )
 
+    def chat(self, user_text: str, system_prompt: str | None = None) -> OpenAIChatResult:
+        cleaned = user_text.strip()
+        if not cleaned:
+            return OpenAIChatResult(
+                success=False,
+                text="",
+                used_openai=False,
+                safe_error="Cannot send an empty message to OpenAI.",
+            )
+
+        if not self.settings.openai_enabled:
+            self.chat_logger.info("OpenAI chat fallback: OpenAI disabled")
+            return OpenAIChatResult(
+                success=False,
+                text="",
+                used_openai=False,
+                safe_error="OpenAI is disabled.",
+            )
+
+        if not self.settings.has_openai_api_key:
+            self.chat_logger.warning("OpenAI chat fallback: missing API key")
+            return OpenAIChatResult(
+                success=False,
+                text="",
+                used_openai=False,
+                safe_error="OpenAI is enabled, but OPENAI_API_KEY is not set.",
+            )
+
+        prompt = system_prompt or self.settings.system_prompt
+        try:
+            client = self.client_factory(api_key=self.settings.openai_api_key)
+            self.chat_logger.info(
+                "Sending OpenAI chat request model={} prompt_chars={} user_chars={}",
+                self.settings.openai_model,
+                len(prompt),
+                len(cleaned),
+            )
+            response = client.responses.create(
+                model=self.settings.openai_model,
+                instructions=prompt,
+                input=cleaned,
+                max_output_tokens=400,
+            )
+            text = self._extract_response_text(response)
+            if not text:
+                raise RuntimeError("OpenAI returned an empty response.")
+            self.chat_logger.info("OpenAI chat request succeeded response_chars={}", len(text))
+            return OpenAIChatResult(success=True, text=text, used_openai=True)
+        except Exception as exc:
+            safe_error = format_openai_error(exc)
+            self.chat_logger.error("OpenAI chat request failed: {}", safe_error)
+            return OpenAIChatResult(success=False, text="", used_openai=False, safe_error=safe_error)
+
     def _report(
         self,
         enabled: bool,
@@ -173,6 +238,23 @@ class OpenAIService:
             backtrace=False,
             diagnose=False,
             filter=lambda record: bool(record["extra"].get("openai_diagnostics")),
+        )
+
+    def _ensure_chat_log_sink(self) -> None:
+        global _CHAT_LOG_SINK_ID
+        if _CHAT_LOG_SINK_ID is not None:
+            return
+
+        self.settings.log_dir.mkdir(parents=True, exist_ok=True)
+        _CHAT_LOG_SINK_ID = logger.add(
+            self.chat_log_file,
+            level="DEBUG",
+            rotation="1 MB",
+            retention="7 days",
+            encoding="utf-8",
+            backtrace=False,
+            diagnose=False,
+            filter=lambda record: bool(record["extra"].get("chat")),
         )
 
 
