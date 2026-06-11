@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Jarvis is being built as a production-quality Windows desktop assistant. Phase 1 created the safe desktop foundation. Phase 2 added a limited local voice foundation for microphone diagnostics and provider interfaces. Phase 2.5 improved diagnostic reliability and reporting. Phase 3 added one-shot Faster Whisper transcription testing. Phase 4 added controlled wake phrase detection as a test mode only. Phase 5 added a controlled one-shot voice command test mode. Phase 6 added OpenAI connection diagnostics. Phase 7 connects `AssistantCore` to OpenAI chat with local fallback. Phase 8 adds safe local text-to-speech for Jarvis responses. Phase 8.5 adds OpenAI TTS as the preferred voice provider with local `pyttsx3` fallback.
+Jarvis is being built as a production-quality Windows desktop assistant. Phase 1 created the safe desktop foundation. Phase 2 added a limited local voice foundation for microphone diagnostics and provider interfaces. Phase 2.5 improved diagnostic reliability and reporting. Phase 3 added one-shot Faster Whisper transcription testing. Phase 4 added controlled wake phrase detection as a test mode only. Phase 5 added a controlled one-shot voice command test mode. Phase 6 added OpenAI connection diagnostics. Phase 7 connects `AssistantCore` to OpenAI chat with local fallback. Phase 8 adds safe local text-to-speech for Jarvis responses. Phase 8.5 adds OpenAI TTS as the preferred voice provider with local `pyttsx3` fallback. Phase 8.6 improves one-shot command capture timing after wake detection.
 
 ## Phase 1 Components
 
@@ -48,9 +48,9 @@ OpenAI chat uses the configured `SYSTEM_PROMPT`. The default is: `You are Jarvis
 - `tts.py`: contains the OpenAI TTS provider, safe local `pyttsx3` fallback, provider factory, generated audio playback, TTS result formatting, `logs/audio/` output, and `logs/tts.log` sink.
 - `wake.py`: detects the configured wake phrase, aliases, and close fuzzy matches using `difflib.SequenceMatcher`.
 - `wake_diagnostics.py`: records one microphone clip, transcribes it, runs wake detection, and writes `logs/wake_diagnostics.log`.
-- `voice_command_test.py`: records one wake phrase clip, records one command clip only when wake is detected, sends the command transcript to `AssistantCore`, optionally speaks the response, and writes `logs/voice_command_test.log`.
+- `voice_command_test.py`: records one wake phrase clip, waits briefly after wake detection, optionally plays a Windows beep, records one command clip using the command duration setting, treats punctuation-only command transcripts as empty, sends valid command text to `AssistantCore`, optionally speaks the response, and writes `logs/voice_command_test.log`.
 
-No continuous listening, ElevenLabs, voice cloning, or real-time OpenAI voice conversation is implemented in Phase 8.5.
+No continuous listening, ElevenLabs, voice cloning, or real-time OpenAI voice conversation is implemented in Phase 8.6.
 
 ### GUI
 
@@ -79,6 +79,7 @@ Future phases should add capabilities behind explicit approval gates:
 - Phase 7: OpenAI-backed AssistantCore responses with fallback
 - Phase 8: safe local pyttsx3 text-to-speech output
 - Phase 8.5: OpenAI text-to-speech output with pyttsx3 fallback
+- Phase 8.6: clearer one-shot command capture timing after wake detection
 - Later voice phase: continuous speech loop
 - Phase 3: OpenAI provider, agent routing, typed tool interfaces
 - Phase 4: local memory and summaries
@@ -89,4 +90,4 @@ Future phases should add capabilities behind explicit approval gates:
 
 ## Safety Boundary
 
-Phase 8.5 has no tools. It cannot access email, calendar, browser automation, desktop automation, memory, screenshots, or local file content. OpenAI usage is limited to plain text chat responses and text-to-speech from the user command text or assistant response. The OpenAI TTS voice direction is an original assistant voice: calm, mature, professional, British-inspired, deep but clear, slightly cinematic, and natural paced. It must not clone or imitate a real actor or copyrighted movie character.
+Phase 8.6 has no tools and no continuous voice loop. It cannot access email, calendar, browser automation, desktop automation, memory, screenshots, or local file content. OpenAI usage is limited to plain text chat responses and text-to-speech from the user command text or assistant response. The OpenAI TTS voice direction is an original assistant voice: calm, mature, professional, British-inspired, deep but clear, slightly cinematic, and natural paced. It must not clone or imitate a real actor or copyrighted movie character.

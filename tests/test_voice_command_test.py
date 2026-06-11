@@ -3,7 +3,13 @@ from __future__ import annotations
 from assistant.core import AssistantCore
 from config.settings import AppSettings
 from voice.interfaces import TranscriptionResult
-from voice.voice_command_test import VoiceCommandTestRunner, format_voice_command_report
+from voice.voice_command_test import (
+    COMMAND_PROMPT,
+    LISTENING_FOR_COMMAND_PROMPT,
+    NO_COMMAND_DETECTED_MESSAGE,
+    VoiceCommandTestRunner,
+    format_voice_command_report,
+)
 
 
 class FakeProvider:
@@ -47,6 +53,14 @@ def fake_recorder(duration: float) -> list[float]:
     return [0.1, -0.1, 0.0]
 
 
+def no_sleep(duration: float) -> None:
+    assert duration >= 0
+
+
+def no_beep() -> None:
+    return None
+
+
 def test_voice_command_wake_detected_path_passes_command_to_assistant() -> None:
     settings = AppSettings(_env_file=None)
     assistant = SpyAssistant()
@@ -57,6 +71,8 @@ def test_voice_command_wake_detected_path_passes_command_to_assistant() -> None:
         assistant=assistant,
         provider=provider,
         recorder=fake_recorder,
+        sleeper=no_sleep,
+        beeper=no_beep,
     ).run()
 
     assert report.wake_detected is True
@@ -69,7 +85,8 @@ def test_voice_command_wake_detected_path_passes_command_to_assistant() -> None:
     assert report.statuses == [
         "Listening for wake phrase",
         "Wake detected",
-        "Listening for command",
+        COMMAND_PROMPT,
+        LISTENING_FOR_COMMAND_PROMPT,
         "Thinking",
         "Sleeping",
     ]
@@ -88,6 +105,8 @@ def test_voice_command_speak_flag_speaks_response() -> None:
         tts_provider=tts_provider,
         speak_requested=True,
         recorder=fake_recorder,
+        sleeper=no_sleep,
+        beeper=no_beep,
     ).run()
 
     assert report.tts_result is not None
@@ -96,7 +115,8 @@ def test_voice_command_speak_flag_speaks_response() -> None:
     assert report.statuses == [
         "Listening for wake phrase",
         "Wake detected",
-        "Listening for command",
+        COMMAND_PROMPT,
+        LISTENING_FOR_COMMAND_PROMPT,
         "Thinking",
         "Speaking",
         "Sleeping",
@@ -113,6 +133,8 @@ def test_voice_command_wake_not_detected_path_does_not_record_command() -> None:
         assistant=assistant,
         provider=provider,
         recorder=fake_recorder,
+        sleeper=no_sleep,
+        beeper=no_beep,
     ).run()
 
     assert report.wake_detected is False
@@ -132,6 +154,8 @@ def test_voice_command_report_includes_safe_placeholder_response() -> None:
         assistant=AssistantCore(settings=settings),
         provider=provider,
         recorder=fake_recorder,
+        sleeper=no_sleep,
+        beeper=no_beep,
     ).run()
     text = format_voice_command_report(report)
 
@@ -140,3 +164,53 @@ def test_voice_command_report_includes_safe_placeholder_response() -> None:
     assert "raw command transcription: open settings" in text
     assert "cleaned command: open settings" in text
     assert "Jarvis foundation is running" in text
+
+
+def test_voice_command_punctuation_only_transcription_is_empty() -> None:
+    settings = AppSettings(_env_file=None)
+    assistant = SpyAssistant()
+    provider = FakeProvider(["hey jarvis", ". . . . ."])
+
+    report = VoiceCommandTestRunner(
+        settings=settings,
+        assistant=assistant,
+        provider=provider,
+        recorder=fake_recorder,
+        sleeper=no_sleep,
+        beeper=no_beep,
+    ).run()
+
+    text = format_voice_command_report(report)
+
+    assert report.raw_command_transcription == ". . . . ."
+    assert report.cleaned_command == ""
+    assert assistant.commands == []
+    assert NO_COMMAND_DETECTED_MESSAGE in report.errors
+    assert NO_COMMAND_DETECTED_MESSAGE in text
+
+
+def test_voice_command_uses_separate_wake_and_command_durations() -> None:
+    durations: list[float] = []
+
+    def recorder(duration: float) -> list[float]:
+        durations.append(duration)
+        return [0.1, -0.1]
+
+    settings = AppSettings(
+        _env_file=None,
+        wake_listen_seconds=2.0,
+        voice_command_record_seconds=7.0,
+    )
+    provider = FakeProvider(["hey jarvis", "status report"])
+
+    report = VoiceCommandTestRunner(
+        settings=settings,
+        assistant=AssistantCore(settings=settings),
+        provider=provider,
+        recorder=recorder,
+        sleeper=no_sleep,
+        beeper=no_beep,
+    ).run()
+
+    assert report.cleaned_command == "status report"
+    assert durations == [2.0, 7.0]

@@ -86,6 +86,14 @@ Jarvis is a Windows desktop AI assistant foundation. Phase 1 provides the applic
 - Chat and voice command speech uses OpenAI TTS when `TTS_PROVIDER=openai`.
 - The configured voice direction is original: mature, calm, confident, professional, British-inspired, deep but clear, slightly cinematic, natural paced, and not an imitation of a real actor or copyrighted movie character.
 
+## Phase 8.6 Scope
+
+- Voice command capture waits briefly after wake detection before recording the command.
+- Wake listening and command recording durations are configured separately.
+- CLI voice command test prints a clear prompt before command recording.
+- Windows may play a short local beep before command recording; beep failures are ignored.
+- Punctuation-only command transcriptions are treated as empty and reported cleanly.
+
 ## Setup
 
 Install dependencies:
@@ -191,11 +199,29 @@ The command runs one controlled voice command flow:
 1. Records a wake phrase clip.
 2. Transcribes the wake phrase.
 3. Checks the transcript against the wake phrase and aliases.
-4. If wake is detected, records one command clip.
-5. Transcribes the command.
-6. Removes a wake phrase prefix from the command transcript when present.
-7. Sends the cleaned command text to the existing `AssistantCore` stub.
-8. Prints the raw command transcript, cleaned command, and placeholder Jarvis response.
+4. If wake is detected, prints `Wake detected. Speak your command after the beep/prompt.`
+5. Waits for `VOICE_COMMAND_START_DELAY_SECONDS`.
+6. Plays a short Windows beep when available.
+7. Prints `Listening for command...`.
+8. Records one command clip using `VOICE_COMMAND_RECORD_SECONDS`.
+9. Transcribes the command.
+10. Removes a wake phrase prefix from the command transcript when present.
+11. Sends the cleaned command text to the existing `AssistantCore` stub.
+12. Prints the raw command transcript, cleaned command, and placeholder Jarvis response.
+
+Voice command capture settings:
+
+```dotenv
+WAKE_LISTEN_SECONDS=5
+VOICE_COMMAND_START_DELAY_SECONDS=1.0
+VOICE_COMMAND_RECORD_SECONDS=7
+```
+
+If the command transcription is empty or punctuation-only, Jarvis prints:
+
+```text
+No command detected. Please try again and speak after the prompt.
+```
 
 Detailed voice command logs are saved to:
 

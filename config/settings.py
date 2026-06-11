@@ -93,6 +93,21 @@ class AppSettings(BaseSettings):
         le=10.0,
         validation_alias=AliasChoices("WAKE_LISTEN_SECONDS", "JARVIS_WAKE_LISTEN_SECONDS"),
     )
+    voice_command_start_delay_seconds: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=5.0,
+        validation_alias=AliasChoices(
+            "VOICE_COMMAND_START_DELAY_SECONDS",
+            "JARVIS_VOICE_COMMAND_START_DELAY_SECONDS",
+        ),
+    )
+    voice_command_record_seconds: float = Field(
+        default=7.0,
+        ge=0.25,
+        le=30.0,
+        validation_alias=AliasChoices("VOICE_COMMAND_RECORD_SECONDS", "JARVIS_VOICE_COMMAND_RECORD_SECONDS"),
+    )
     openai_enabled: bool = Field(
         default=False,
         validation_alias=AliasChoices("OPENAI_ENABLED", "JARVIS_OPENAI_ENABLED"),

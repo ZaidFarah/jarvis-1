@@ -27,6 +27,8 @@ def test_voice_settings_defaults_are_lightweight() -> None:
     ]
     assert settings.wake_match_threshold == 0.72
     assert settings.wake_listen_seconds == 5.0
+    assert settings.voice_command_start_delay_seconds == 1.0
+    assert settings.voice_command_record_seconds == 7.0
     assert settings.tts_enabled is False
     assert settings.tts_provider == "openai"
     assert settings.tts_voice_name == ""
@@ -110,6 +112,8 @@ def test_wake_settings_read_environment(monkeypatch) -> None:
     monkeypatch.setenv("WAKE_ALIASES", "hello jarvis,jarvis hello")
     monkeypatch.setenv("WAKE_MATCH_THRESHOLD", "0.8")
     monkeypatch.setenv("WAKE_LISTEN_SECONDS", "4")
+    monkeypatch.setenv("VOICE_COMMAND_START_DELAY_SECONDS", "1.25")
+    monkeypatch.setenv("VOICE_COMMAND_RECORD_SECONDS", "8")
 
     settings = AppSettings(_env_file=None)
 
@@ -117,3 +121,5 @@ def test_wake_settings_read_environment(monkeypatch) -> None:
     assert settings.wake_alias_list == ["hello jarvis", "jarvis hello"]
     assert settings.wake_match_threshold == 0.8
     assert settings.wake_listen_seconds == 4.0
+    assert settings.voice_command_start_delay_seconds == 1.25
+    assert settings.voice_command_record_seconds == 8.0

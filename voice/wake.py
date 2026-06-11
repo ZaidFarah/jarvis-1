@@ -97,6 +97,8 @@ def remove_wake_phrase_prefix(command_text: str, wake_phrase: str, aliases: list
 
 def clean_command_text(command_text: str) -> str:
     cleaned = re.sub(r"\s+", " ", command_text).strip()
+    if not re.search(r"[a-zA-Z0-9]", cleaned):
+        return ""
     cleaned = re.sub(r"\s+([?.!,;:])", r"\1", cleaned)
     cleaned = re.sub(r"^[\s,.;:!?\"'()\[\]-]+", "", cleaned)
     cleaned = re.sub(r"[\s,.;:!\"'()\[\]-]+$", "", cleaned)

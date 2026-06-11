@@ -10,7 +10,12 @@ from services.openai_service import OpenAIService, format_openai_check_report
 from voice.audio_diagnostics import AudioDiagnostics, format_audio_check_report
 from voice.tts import TextToSpeechResult, format_tts_result, speak_text
 from voice.transcription_diagnostics import TranscriptionDiagnostics, format_transcription_report
-from voice.voice_command_test import VoiceCommandTestRunner, format_voice_command_report
+from voice.voice_command_test import (
+    COMMAND_PROMPT,
+    LISTENING_FOR_COMMAND_PROMPT,
+    VoiceCommandTestRunner,
+    format_voice_command_report,
+)
 from voice.wake_diagnostics import WakeDiagnostics, format_wake_report
 
 
@@ -40,7 +45,11 @@ def main(argv: list[str] | None = None) -> int:
     if "--voice-command-test" in args:
         settings = load_settings()
         configure_logging(settings, console=False)
-        report = VoiceCommandTestRunner(settings, speak_requested=_has_flag(args, "--speak")).run()
+        report = VoiceCommandTestRunner(
+            settings,
+            speak_requested=_has_flag(args, "--speak"),
+            status_callback=_voice_command_status_callback,
+        ).run()
         print(format_voice_command_report(report))
         return 0 if report.is_successful else 1
 
@@ -113,6 +122,11 @@ def _flag_value(args: list[str], flag: str) -> str | None:
     if value.startswith("--"):
         return None
     return value
+
+
+def _voice_command_status_callback(status: str) -> None:
+    if status in {COMMAND_PROMPT, LISTENING_FOR_COMMAND_PROMPT}:
+        print(status, flush=True)
 
 
 def _format_chat_test_report(

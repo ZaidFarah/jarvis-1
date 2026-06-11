@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -21,6 +22,13 @@ _VOICE_COMMAND_LOG_SINK_ID: int | None = None
 
 StatusCallback = Callable[[str], None]
 Recorder = Callable[[float], list[float]]
+Sleeper = Callable[[float], None]
+Beeper = Callable[[], None]
+
+
+COMMAND_PROMPT = "Wake detected. Speak your command after the beep/prompt."
+LISTENING_FOR_COMMAND_PROMPT = "Listening for command..."
+NO_COMMAND_DETECTED_MESSAGE = "No command detected. Please try again and speak after the prompt."
 
 
 @dataclass(frozen=True)
@@ -61,6 +69,8 @@ class VoiceCommandTestRunner:
         tts_provider: Any | None = None,
         speak_requested: bool = False,
         recorder: Recorder | None = None,
+        sleeper: Sleeper | None = None,
+        beeper: Beeper | None = None,
         status_callback: StatusCallback | None = None,
     ) -> None:
         self.settings = settings
@@ -69,6 +79,8 @@ class VoiceCommandTestRunner:
         self.tts_provider = tts_provider
         self.speak_requested = speak_requested
         self.recorder = recorder or self._record_microphone
+        self.sleeper = sleeper or time.sleep
+        self.beeper = beeper or self._safe_beep
         self.status_callback = status_callback
         self.log_file = self.settings.log_dir / "voice_command_test.log"
         self.voice_logger = logger.bind(voice_command_test=True)
@@ -148,10 +160,14 @@ class VoiceCommandTestRunner:
             )
 
         self._status("Wake detected", statuses)
+        self._status(COMMAND_PROMPT, statuses)
+        if self.settings.voice_command_start_delay_seconds > 0:
+            self.sleeper(self.settings.voice_command_start_delay_seconds)
+        self.beeper()
 
         try:
-            self._status("Listening for command", statuses)
-            command_samples = self.recorder(self.settings.voice_record_seconds)
+            self._status(LISTENING_FOR_COMMAND_PROMPT, statuses)
+            command_samples = self.recorder(self.settings.voice_command_record_seconds)
             raw_command_transcription = self.provider.transcribe(command_samples, self.settings.voice_sample_rate).text.strip()
             cleaned_command = remove_wake_phrase_prefix(
                 raw_command_transcription,
@@ -167,6 +183,21 @@ class VoiceCommandTestRunner:
             message = f"Command stage failed: {type(exc).__name__}: {exc}"
             self.voice_logger.exception(message)
             errors.append(message)
+            self._status("Sleeping", statuses)
+            return self._report(
+                wake_transcription,
+                wake_detection,
+                raw_command_transcription,
+                cleaned_command,
+                assistant_response,
+                tts_result,
+                statuses,
+                errors,
+            )
+
+        if not cleaned_command:
+            self.voice_logger.warning(NO_COMMAND_DETECTED_MESSAGE)
+            errors.append(NO_COMMAND_DETECTED_MESSAGE)
             self._status("Sleeping", statuses)
             return self._report(
                 wake_transcription,
@@ -264,6 +295,14 @@ class VoiceCommandTestRunner:
             else:
                 flattened.append(float(sample))
         return flattened
+
+    @staticmethod
+    def _safe_beep() -> None:
+        try:
+            winsound = importlib.import_module("winsound")
+            winsound.Beep(880, 180)
+        except Exception:
+            return
 
     def _ensure_voice_command_log_sink(self) -> None:
         global _VOICE_COMMAND_LOG_SINK_ID
