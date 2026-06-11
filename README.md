@@ -160,8 +160,9 @@ The command runs one controlled voice command flow:
 3. Checks the transcript against the wake phrase and aliases.
 4. If wake is detected, records one command clip.
 5. Transcribes the command.
-6. Sends the command text to the existing `AssistantCore` stub.
-7. Prints the placeholder Jarvis response.
+6. Removes a wake phrase prefix from the command transcript when present.
+7. Sends the cleaned command text to the existing `AssistantCore` stub.
+8. Prints the raw command transcript, cleaned command, and placeholder Jarvis response.
 
 Detailed voice command logs are saved to:
 

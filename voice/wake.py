@@ -80,3 +80,40 @@ class WakeDetector:
             for start in range(0, len(transcript_words) - size + 1):
                 candidates.append(" ".join(transcript_words[start : start + size]))
         return candidates
+
+
+def remove_wake_phrase_prefix(command_text: str, wake_phrase: str, aliases: list[str]) -> str:
+    """Remove a configured wake phrase from the beginning of a command transcript."""
+
+    phrases = _unique_phrases([wake_phrase, *aliases])
+    for phrase in sorted(phrases, key=len, reverse=True):
+        pattern = _wake_prefix_pattern(phrase)
+        match = pattern.match(command_text)
+        if match:
+            return clean_command_text(command_text[match.end() :])
+
+    return clean_command_text(command_text)
+
+
+def clean_command_text(command_text: str) -> str:
+    cleaned = re.sub(r"\s+", " ", command_text).strip()
+    cleaned = re.sub(r"\s+([?.!,;:])", r"\1", cleaned)
+    cleaned = re.sub(r"^[\s,.;:!?\"'()\[\]-]+", "", cleaned)
+    cleaned = re.sub(r"[\s,.;:!\"'()\[\]-]+$", "", cleaned)
+    return cleaned.strip()
+
+
+def _unique_phrases(phrases: list[str]) -> list[str]:
+    unique: list[str] = []
+    for phrase in phrases:
+        normalized = WakeDetector._normalize(phrase)
+        if normalized and normalized not in unique:
+            unique.append(normalized)
+    return unique
+
+
+def _wake_prefix_pattern(phrase: str) -> re.Pattern[str]:
+    words = phrase.split()
+    separator = r"[\s,.;:!?\"'()\[\]-]+"
+    body = separator.join(re.escape(word) for word in words)
+    return re.compile(rf"^\s*{body}(?=$|[\s,.;:!?\"'()\[\]-])", re.IGNORECASE)

@@ -12,7 +12,7 @@ from assistant.core import AssistantCore, AssistantResponse
 from config.settings import AppSettings
 from voice.interfaces import TranscriptionResult
 from voice.stt import create_speech_to_text_provider
-from voice.wake import WakeDetectionResult, WakeDetector
+from voice.wake import WakeDetectionResult, WakeDetector, remove_wake_phrase_prefix
 
 
 _VOICE_COMMAND_LOG_SINK_ID: int | None = None
@@ -28,7 +28,8 @@ class VoiceCommandTestReport:
     provider_available: bool
     wake_transcription: str
     wake_detection: WakeDetectionResult
-    command_transcription: str
+    raw_command_transcription: str
+    cleaned_command: str
     assistant_response: AssistantResponse | None
     statuses: list[str]
     log_file: Path
@@ -71,7 +72,8 @@ class VoiceCommandTestRunner:
         statuses: list[str] = []
         errors: list[str] = []
         wake_transcription = ""
-        command_transcription = ""
+        raw_command_transcription = ""
+        cleaned_command = ""
         assistant_response: AssistantResponse | None = None
         detector = WakeDetector(
             wake_phrase=self.settings.wake_phrase,
@@ -87,7 +89,15 @@ class VoiceCommandTestRunner:
             self.voice_logger.error(message)
             errors.append(message)
             self._status("Sleeping", statuses)
-            return self._report(wake_transcription, empty_detection, command_transcription, assistant_response, statuses, errors)
+            return self._report(
+                wake_transcription,
+                empty_detection,
+                raw_command_transcription,
+                cleaned_command,
+                assistant_response,
+                statuses,
+                errors,
+            )
 
         try:
             self._status("Listening for wake phrase", statuses)
@@ -105,32 +115,73 @@ class VoiceCommandTestRunner:
             self.voice_logger.exception(message)
             errors.append(message)
             self._status("Sleeping", statuses)
-            return self._report(wake_transcription, empty_detection, command_transcription, assistant_response, statuses, errors)
+            return self._report(
+                wake_transcription,
+                empty_detection,
+                raw_command_transcription,
+                cleaned_command,
+                assistant_response,
+                statuses,
+                errors,
+            )
 
         if not wake_detection.detected:
             self._status("Sleeping", statuses)
-            return self._report(wake_transcription, wake_detection, command_transcription, assistant_response, statuses, errors)
+            return self._report(
+                wake_transcription,
+                wake_detection,
+                raw_command_transcription,
+                cleaned_command,
+                assistant_response,
+                statuses,
+                errors,
+            )
 
         self._status("Wake detected", statuses)
 
         try:
             self._status("Listening for command", statuses)
             command_samples = self.recorder(self.settings.voice_record_seconds)
-            command_transcription = self.provider.transcribe(command_samples, self.settings.voice_sample_rate).text.strip()
-            self.voice_logger.info("Command transcription={}", command_transcription or "<empty>")
+            raw_command_transcription = self.provider.transcribe(command_samples, self.settings.voice_sample_rate).text.strip()
+            cleaned_command = remove_wake_phrase_prefix(
+                raw_command_transcription,
+                wake_phrase=self.settings.wake_phrase,
+                aliases=self.settings.wake_alias_list,
+            )
+            self.voice_logger.info(
+                "Command transcription={} cleaned={}",
+                raw_command_transcription or "<empty>",
+                cleaned_command or "<empty>",
+            )
         except Exception as exc:
             message = f"Command stage failed: {type(exc).__name__}: {exc}"
             self.voice_logger.exception(message)
             errors.append(message)
             self._status("Sleeping", statuses)
-            return self._report(wake_transcription, wake_detection, command_transcription, assistant_response, statuses, errors)
+            return self._report(
+                wake_transcription,
+                wake_detection,
+                raw_command_transcription,
+                cleaned_command,
+                assistant_response,
+                statuses,
+                errors,
+            )
 
         self._status("Thinking", statuses)
-        assistant_response = self.assistant.handle_command(command_transcription)
+        assistant_response = self.assistant.handle_command(cleaned_command)
         self.voice_logger.info("Assistant response={}", assistant_response.text)
         self._status("Speaking", statuses)
         self._status("Sleeping", statuses)
-        return self._report(wake_transcription, wake_detection, command_transcription, assistant_response, statuses, errors)
+        return self._report(
+            wake_transcription,
+            wake_detection,
+            raw_command_transcription,
+            cleaned_command,
+            assistant_response,
+            statuses,
+            errors,
+        )
 
     def _status(self, status: str, statuses: list[str]) -> None:
         statuses.append(status)
@@ -141,7 +192,8 @@ class VoiceCommandTestRunner:
         self,
         wake_transcription: str,
         wake_detection: WakeDetectionResult,
-        command_transcription: str,
+        raw_command_transcription: str,
+        cleaned_command: str,
         assistant_response: AssistantResponse | None,
         statuses: list[str],
         errors: list[str],
@@ -151,7 +203,8 @@ class VoiceCommandTestRunner:
             provider_available=bool(self.provider.available),
             wake_transcription=wake_transcription,
             wake_detection=wake_detection,
-            command_transcription=command_transcription,
+            raw_command_transcription=raw_command_transcription,
+            cleaned_command=cleaned_command,
             assistant_response=assistant_response,
             statuses=statuses,
             log_file=self.log_file,
@@ -226,7 +279,8 @@ def format_voice_command_report(report: VoiceCommandTestReport) -> str:
         f"  score: {report.wake_detection.score:.3f}",
         "",
         "Command:",
-        f"  transcription: {report.command_transcription if report.command_transcription else '<not recorded>'}",
+        f"  raw command transcription: {report.raw_command_transcription if report.raw_command_transcription else '<not recorded>'}",
+        f"  cleaned command: {report.cleaned_command if report.cleaned_command else '<empty>'}",
     ]
 
     if report.assistant_response is not None:

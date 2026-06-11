@@ -38,7 +38,7 @@ def fake_recorder(duration: float) -> list[float]:
 def test_voice_command_wake_detected_path_passes_command_to_assistant() -> None:
     settings = AppSettings(_env_file=None)
     assistant = SpyAssistant()
-    provider = FakeProvider(["wake up jarvis", "status report"])
+    provider = FakeProvider(["wake up jarvis", "Hey Jarvis, status report"])
 
     report = VoiceCommandTestRunner(
         settings=settings,
@@ -48,7 +48,8 @@ def test_voice_command_wake_detected_path_passes_command_to_assistant() -> None:
     ).run()
 
     assert report.wake_detected is True
-    assert report.command_transcription == "status report"
+    assert report.raw_command_transcription == "Hey Jarvis, status report"
+    assert report.cleaned_command == "status report"
     assert assistant.commands == ["status report"]
     assert report.assistant_response is not None
     assert "Jarvis foundation is running" in report.assistant_response.text
@@ -75,7 +76,8 @@ def test_voice_command_wake_not_detected_path_does_not_record_command() -> None:
     ).run()
 
     assert report.wake_detected is False
-    assert report.command_transcription == ""
+    assert report.raw_command_transcription == ""
+    assert report.cleaned_command == ""
     assert assistant.commands == []
     assert provider.calls == 1
     assert report.statuses == ["Listening for wake phrase", "Sleeping"]
@@ -95,5 +97,6 @@ def test_voice_command_report_includes_safe_placeholder_response() -> None:
 
     assert "Jarvis Voice Command Test" in text
     assert "detected: yes" in text
-    assert "open settings" in text
+    assert "raw command transcription: open settings" in text
+    assert "cleaned command: open settings" in text
     assert "Jarvis foundation is running" in text

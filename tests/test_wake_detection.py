@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from voice.wake import WakeDetector
+from voice.wake import WakeDetector, remove_wake_phrase_prefix
 
 
 def make_detector(threshold: float = 0.72) -> WakeDetector:
@@ -50,3 +50,53 @@ def test_threshold_behavior() -> None:
 
     assert low_threshold.detected is True
     assert high_threshold.detected is False
+
+
+def test_exact_wake_phrase_removal() -> None:
+    cleaned = remove_wake_phrase_prefix(
+        "Hey Jarvis, what can you do?",
+        wake_phrase="hey jarvis",
+        aliases=["hi jarvis"],
+    )
+
+    assert cleaned == "what can you do?"
+
+
+def test_alias_wake_phrase_removal() -> None:
+    cleaned = remove_wake_phrase_prefix(
+        "Wake up Jarvis: open settings",
+        wake_phrase="hey jarvis",
+        aliases=["wake up jarvis"],
+    )
+
+    assert cleaned == "open settings"
+
+
+def test_wake_phrase_removal_cleans_punctuation_and_spacing() -> None:
+    cleaned = remove_wake_phrase_prefix(
+        "hey jarvis   ,   what can you do ?",
+        wake_phrase="hey jarvis",
+        aliases=[],
+    )
+
+    assert cleaned == "what can you do?"
+
+
+def test_command_without_wake_phrase_is_unchanged_except_spacing() -> None:
+    cleaned = remove_wake_phrase_prefix(
+        "what   can you do?",
+        wake_phrase="hey jarvis",
+        aliases=["wake up jarvis"],
+    )
+
+    assert cleaned == "what can you do?"
+
+
+def test_empty_command_after_wake_phrase_only() -> None:
+    cleaned = remove_wake_phrase_prefix(
+        "okay jarvis!",
+        wake_phrase="hey jarvis",
+        aliases=["okay jarvis"],
+    )
+
+    assert cleaned == ""
