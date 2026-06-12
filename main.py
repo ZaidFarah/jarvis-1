@@ -12,6 +12,7 @@ from services.notification_service import NotificationService, format_notificati
 from services.logging_service import configure_logging
 from services.openai_service import OpenAIService, format_openai_check_report
 from tools.app_launcher import AppLauncher, format_app_launch_report, format_app_launcher_check_report, format_app_resolution_report
+from tools.file_access import FileAccess, format_file_access_check_report, format_file_search_report, format_folder_listing_report
 from tools.website_launcher import WebsiteLauncher, format_website_launcher_check_report, format_website_open_report
 from memory.store import SQLiteMemoryStore
 from reminders.service import ReminderService
@@ -135,11 +136,30 @@ def main(argv: list[str] | None = None) -> int:
         print(format_website_launcher_check_report(report))
         return 0 if report.is_successful else 1
 
+    if "--file-access-check" in args:
+        settings = load_settings()
+        configure_logging(settings, console=False)
+        report = FileAccess(settings).run_check()
+        print(format_file_access_check_report(report))
+        return 0 if report.is_successful else 1
+
     if "--open-site" in args:
         settings = load_settings()
         configure_logging(settings, console=False)
         site_name = _message_after_flag(args, "--open-site") or "google"
         return _run_open_site(settings, site_name)
+
+    if "--list-folder" in args:
+        settings = load_settings()
+        configure_logging(settings, console=False)
+        folder_name = _message_after_flag(args, "--list-folder") or "documents"
+        return _run_list_folder(settings, folder_name)
+
+    if "--find-file" in args:
+        settings = load_settings()
+        configure_logging(settings, console=False)
+        query, folder_name = _find_file_args(args)
+        return _run_find_file(settings, query, folder_name)
 
     if "--tts-test" in args:
         settings = load_settings()
@@ -403,6 +423,32 @@ def _run_open_site(settings, site_name: str) -> int:
     result = WebsiteLauncher(settings).open_site(site_name)
     print(format_website_open_report(result), flush=True)
     return 0 if result.request_attempted or result.opened else 1
+
+
+def _run_list_folder(settings, folder_name: str) -> int:
+    result = FileAccess(settings).list_folder(folder_name)
+    print(format_folder_listing_report(result), flush=True)
+    return 0 if result.safe_error is None else 1
+
+
+def _run_find_file(settings, query: str, folder_name: str) -> int:
+    result = FileAccess(settings).find_file(query, folder_name)
+    print(format_file_search_report(result), flush=True)
+    return 0 if result.request_attempted and result.safe_error is None else 1
+
+
+def _find_file_args(args: list[str]) -> tuple[str, str]:
+    index = args.index("--find-file")
+    values: list[str] = []
+    for value in args[index + 1 :]:
+        if value.startswith("--"):
+            break
+        values.append(value)
+    if not values:
+        return "", "documents"
+    if len(values) == 1:
+        return values[0], "documents"
+    return " ".join(values[:-1]).strip(), values[-1].strip()
 
 
 def _format_chat_test_report(

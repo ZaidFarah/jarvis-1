@@ -519,6 +519,16 @@ Jarvis can open only sites listed in `WEBSITE_ALLOWED_SITES`. If a site is missi
 - Raw URLs are rejected and sites without configured URLs fail safely.
 - Website logs are saved to `logs/website_launcher.log`.
 
+## Phase 19 Scope
+
+- Safe read-only file access for whitelisted folders only.
+- CLI commands: `py main.py --file-access-check`, `py main.py --list-folder documents`, and `py main.py --find-file "example" documents`.
+- Assistant commands: `list documents`, `list desktop`, `list downloads`, `find file <name> in documents`, `find file <name> in desktop`, and `find file <name> in downloads`.
+- File access settings: `FILE_ACCESS_ENABLED=false`, `FILE_ACCESS_ALLOWED_FOLDERS=documents=%USERPROFILE%\Documents,desktop=%USERPROFILE%\Desktop,downloads=%USERPROFILE%\Downloads`.
+- File access is read-only and lists filenames plus metadata only.
+- Absolute paths and traversal attempts are rejected.
+- File access logs are saved to `logs/file_access.log`.
+
 ## Text To Speech Test
 
 ```powershell
@@ -565,7 +575,7 @@ py -m pytest
 
 ## Not Implemented Yet
 
-Jarvis still does not include ElevenLabs, startup background service, LangGraph, browser automation, desktop automation, file tools, permissions system, or vision.
+Jarvis still does not include ElevenLabs, startup background service, LangGraph, browser automation, desktop automation, permissions system, or vision.
 
 ## Project Layout
 

@@ -207,6 +207,18 @@ class AppSettings(BaseSettings):
         ),
         validation_alias=AliasChoices("WEBSITE_ALLOWED_SITES", "JARVIS_WEBSITE_ALLOWED_SITES"),
     )
+    file_access_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("FILE_ACCESS_ENABLED", "JARVIS_FILE_ACCESS_ENABLED"),
+    )
+    file_access_allowed_folders: str = Field(
+        default=(
+            "documents=%USERPROFILE%\\Documents,"
+            "desktop=%USERPROFILE%\\Desktop,"
+            "downloads=%USERPROFILE%\\Downloads"
+        ),
+        validation_alias=AliasChoices("FILE_ACCESS_ALLOWED_FOLDERS", "JARVIS_FILE_ACCESS_ALLOWED_FOLDERS"),
+    )
     notifications_enabled: bool = Field(
         default=False,
         validation_alias=AliasChoices("NOTIFICATIONS_ENABLED", "JARVIS_NOTIFICATIONS_ENABLED"),
@@ -377,6 +389,14 @@ class AppSettings(BaseSettings):
             return ""
         return cleaned
 
+    @field_validator("file_access_allowed_folders")
+    @classmethod
+    def normalize_file_access_allowed_folders(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            return ""
+        return cleaned
+
     @field_validator("weather_default_city")
     @classmethod
     def normalize_weather_default_city(cls, value: str) -> str:
@@ -522,6 +542,27 @@ class AppSettings(BaseSettings):
             if not cleaned_name:
                 continue
             parsed[cleaned_name] = url.strip()
+        return parsed
+
+    @property
+    def file_access_allowed_folders_map(self) -> dict[str, str]:
+        raw = self.file_access_allowed_folders.strip()
+        if not raw:
+            return {}
+
+        entries = raw.replace("\n", ",").split(",")
+        parsed: dict[str, str] = {}
+        for entry in entries:
+            item = entry.strip()
+            if not item:
+                continue
+            if "=" not in item:
+                continue
+            name, folder_path = item.split("=", 1)
+            cleaned_name = name.strip().lower()
+            if not cleaned_name:
+                continue
+            parsed[cleaned_name] = folder_path.strip()
         return parsed
 
 

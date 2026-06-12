@@ -141,6 +141,25 @@ def test_website_launcher_settings_read_environment(monkeypatch: pytest.MonkeyPa
     assert settings.website_allowed_sites_map == {"docs": "https://docs.example.com", "blackboard": ""}
 
 
+def test_file_access_settings_defaults_are_safe() -> None:
+    settings = AppSettings(_env_file=None)
+
+    assert settings.file_access_enabled is False
+    assert settings.file_access_allowed_folders_map["documents"].endswith("\\Documents")
+    assert settings.file_access_allowed_folders_map["desktop"].endswith("\\Desktop")
+    assert settings.file_access_allowed_folders_map["downloads"].endswith("\\Downloads")
+
+
+def test_file_access_settings_read_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("FILE_ACCESS_ENABLED", "true")
+    monkeypatch.setenv("FILE_ACCESS_ALLOWED_FOLDERS", "docs=%USERPROFILE%\\Docs")
+
+    settings = AppSettings(_env_file=None)
+
+    assert settings.file_access_enabled is True
+    assert settings.file_access_allowed_folders_map == {"docs": "%USERPROFILE%\\Docs"}
+
+
 def test_notification_settings_defaults_are_safe() -> None:
     settings = AppSettings(_env_file=None)
 

@@ -7,6 +7,7 @@ from assistant.conversation import ConversationHistory
 from integrations.weather_service import WeatherService
 from memory.store import SensitiveMemoryError, SQLiteMemoryStore
 from config.settings import AppSettings, load_settings
+from tools.file_access import FileAccess
 from tools.app_launcher import AppLauncher
 from tools.website_launcher import WebsiteLauncher
 from reminders.service import ReminderService
@@ -48,6 +49,10 @@ class AssistantCore:
             self.website_launcher = WebsiteLauncher(self.settings)
         else:
             self.website_launcher = None
+        if self.settings.file_access_enabled:
+            self.file_access = FileAccess(self.settings)
+        else:
+            self.file_access = None
         if reminder_service is not None:
             self.reminder_service = reminder_service
         elif self.settings.reminders_enabled:
@@ -88,6 +93,10 @@ class AssistantCore:
         website_response = self._handle_website_command(cleaned)
         if website_response is not None:
             return website_response
+
+        file_access_response = self._handle_file_access_command(cleaned)
+        if file_access_response is not None:
+            return file_access_response
 
         reminder_response = self._handle_reminder_command(cleaned)
         if reminder_response is not None:
@@ -213,6 +222,45 @@ class AssistantCore:
             text=self._website_launcher_response_text(result),
             accepted=result.opened,
             source="website",
+            error=result.safe_error,
+        )
+
+    def _handle_file_access_command(self, command: str) -> AssistantResponse | None:
+        normalized = " ".join(command.lower().strip().split())
+        if normalized in {"list documents", "list desktop", "list downloads"}:
+            folder_name = normalized.removeprefix("list ").strip()
+            if not self.settings.file_access_enabled or self.file_access is None:
+                return AssistantResponse(text="File access is disabled.", accepted=True, source="local")
+            result = self.file_access.list_folder(folder_name)
+            return AssistantResponse(
+                text=self._file_listing_response_text(result),
+                accepted=result.safe_error is None,
+                source="file_access",
+                error=result.safe_error,
+            )
+
+        match = re.match(r"(?i)^find file\s+(.+?)\s+in\s+(documents|desktop|downloads)$", command.strip())
+        if not match:
+            return None
+
+        query = match.group(1).strip()
+        folder_name = match.group(2).strip().lower()
+
+        if self._looks_like_raw_path(query):
+            return AssistantResponse(
+                text="Please use a plain filename search term, not a path.",
+                accepted=False,
+                source="local",
+            )
+
+        if not self.settings.file_access_enabled or self.file_access is None:
+            return AssistantResponse(text="File access is disabled.", accepted=True, source="local")
+
+        result = self.file_access.find_file(query, folder_name)
+        return AssistantResponse(
+            text=self._file_search_response_text(result),
+            accepted=result.request_attempted and not result.safe_error,
+            source="file_access",
             error=result.safe_error,
         )
 
@@ -359,3 +407,34 @@ class AssistantCore:
     def _looks_like_raw_url(value: str) -> bool:
         cleaned = value.strip().lower()
         return bool(re.match(r"^(https?://|www\.)", cleaned) or any(sep in cleaned for sep in ("://", "/", "\\", "?", "#", "&", "=")) or "." in cleaned)
+
+    @staticmethod
+    def _looks_like_raw_path(value: str) -> bool:
+        cleaned = value.strip()
+        if not cleaned:
+            return False
+        return bool(
+            cleaned.startswith(("..", "/", "\\"))
+            or re.match(r"^[a-zA-Z]:[\\/]", cleaned)
+            or any(sep in cleaned for sep in ("\\", "/"))
+        )
+
+    @staticmethod
+    def _file_listing_response_text(result) -> str:
+        if result.safe_error:
+            return result.safe_error
+        if not result.entries:
+            return f"No items found in {result.folder_name}."
+        entries = ", ".join(entry.name for entry in result.entries[:8])
+        suffix = "" if len(result.entries) <= 8 else f" and {len(result.entries) - 8} more"
+        return f"Found {len(result.entries)} items in {result.folder_name}: {entries}{suffix}."
+
+    @staticmethod
+    def _file_search_response_text(result) -> str:
+        if result.safe_error:
+            return result.safe_error
+        if not result.matches:
+            return f"No files matching '{result.query}' were found in {result.folder_name}."
+        matches = ", ".join(entry.name for entry in result.matches[:8])
+        suffix = "" if len(result.matches) <= 8 else f" and {len(result.matches) - 8} more"
+        return f"Found {len(result.matches)} matches in {result.folder_name}: {matches}{suffix}."
