@@ -558,6 +558,19 @@ Jarvis can open only sites listed in `WEBSITE_ALLOWED_SITES`. If a site is missi
 - File access logs are saved to `logs/file_access.log`.
 - Confirmation logs are saved to `logs/confirmations.log`.
 
+## Phase 23 Scope
+
+- Safe file summarization for whitelisted text files only.
+- CLI command: `py main.py --summarize-file "example.txt" documents`.
+- Assistant command: `summarize file <filename> in documents|desktop|downloads`.
+- File summary settings: `FILE_SUMMARY_ENABLED=false`, `FILE_SUMMARY_MAX_CHARS=6000`.
+- Summaries require confirmation before reading file content and again before sending content to OpenAI.
+- Summaries are blocked for binary files, traversal, absolute paths, unknown folders, and disallowed extensions.
+- File content is not stored in short-term memory or long-term memory.
+- File access logs are saved to `logs/file_access.log`.
+- Chat logs are saved to `logs/chat.log`.
+- Confirmation logs are saved to `logs/confirmations.log`.
+
 ## Text To Speech Test
 
 ```powershell

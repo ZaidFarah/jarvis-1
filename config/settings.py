@@ -231,6 +231,16 @@ class AppSettings(BaseSettings):
         default=".txt,.md,.csv,.json,.py,.java,.cpp,.h,.html,.css,.js",
         validation_alias=AliasChoices("FILE_READ_ALLOWED_EXTENSIONS", "JARVIS_FILE_READ_ALLOWED_EXTENSIONS"),
     )
+    file_summary_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("FILE_SUMMARY_ENABLED", "JARVIS_FILE_SUMMARY_ENABLED"),
+    )
+    file_summary_max_chars: int = Field(
+        default=6000,
+        ge=512,
+        le=100_000,
+        validation_alias=AliasChoices("FILE_SUMMARY_MAX_CHARS", "JARVIS_FILE_SUMMARY_MAX_CHARS"),
+    )
     file_access_allowed_folders: str = Field(
         default=(
             "documents=%USERPROFILE%\\Documents,"

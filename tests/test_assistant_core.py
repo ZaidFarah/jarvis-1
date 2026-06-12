@@ -410,3 +410,214 @@ def test_assistant_core_read_file_confirmation_denied_blocks_read(tmp_path: Path
     assert response.source == "local"
     assert response.accepted is False
     assert response.text == "Denied."
+
+
+def test_assistant_core_summarize_file_disabled_fallback(tmp_path: Path) -> None:
+    folder = tmp_path / "documents"
+    folder.mkdir()
+    (folder / "notes.md").write_text("hello world", encoding="utf-8")
+    assistant = AssistantCore(
+        settings=AppSettings(
+            _env_file=None,
+            openai_enabled=True,
+            file_access_enabled=True,
+            file_read_enabled=True,
+            file_summary_enabled=False,
+            confirmation_required=True,
+            file_access_allowed_folders=f"documents={folder}",
+        ),
+        openai_service=FakeOpenAIService(OpenAIChatResult(success=True, text="summary", used_openai=True)),
+        confirmation_handler=lambda *args: ConfirmationResult(
+            approved=True,
+            denied=False,
+            timed_out=False,
+            reason="Approved.",
+            log_file=tmp_path / "confirmations.log",
+        ),
+    )
+
+    response = assistant.handle_command("summarize file notes.md in documents")
+
+    assert response.source == "local"
+    assert response.text == "File summarization is disabled."
+
+
+def test_assistant_core_summarize_file_confirmation_denied_before_read(tmp_path: Path) -> None:
+    folder = tmp_path / "documents"
+    folder.mkdir()
+    (folder / "notes.md").write_text("hello world", encoding="utf-8")
+    settings = AppSettings(
+        _env_file=None,
+        openai_enabled=True,
+        file_access_enabled=True,
+        file_read_enabled=True,
+        file_summary_enabled=True,
+        confirmation_required=True,
+        file_access_allowed_folders=f"documents={folder}",
+    )
+
+    def deny_read(action_name: str, risk_level: str, description: str) -> ConfirmationResult:
+        del action_name, risk_level, description
+        return ConfirmationResult(
+            approved=False,
+            denied=True,
+            timed_out=False,
+            reason="Denied before read.",
+            log_file=tmp_path / "confirmations.log",
+        )
+
+    assistant = AssistantCore(settings=settings, openai_service=FakeOpenAIService(), confirmation_handler=deny_read)
+
+    response = assistant.handle_command("summarize file notes.md in documents")
+
+    assert response.source == "local"
+    assert response.accepted is False
+    assert response.text == "Denied before read."
+
+
+def test_assistant_core_summarize_file_confirmation_denied_before_openai(tmp_path: Path) -> None:
+    folder = tmp_path / "documents"
+    folder.mkdir()
+    (folder / "notes.md").write_text("hello world", encoding="utf-8")
+    settings = AppSettings(
+        _env_file=None,
+        openai_enabled=True,
+        file_access_enabled=True,
+        file_read_enabled=True,
+        file_summary_enabled=True,
+        confirmation_required=True,
+        file_access_allowed_folders=f"documents={folder}",
+    )
+    confirmations: list[str] = []
+
+    def gate(action_name: str, risk_level: str, description: str) -> ConfirmationResult:
+        confirmations.append(action_name)
+        if len(confirmations) == 1:
+            return ConfirmationResult(
+                approved=True,
+                denied=False,
+                timed_out=False,
+                reason="Approved.",
+                log_file=tmp_path / "confirmations.log",
+            )
+        return ConfirmationResult(
+            approved=False,
+            denied=True,
+            timed_out=False,
+            reason="Denied before OpenAI.",
+            log_file=tmp_path / "confirmations.log",
+        )
+
+    openai_service = FakeOpenAIService(OpenAIChatResult(success=True, text="summary", used_openai=True))
+    assistant = AssistantCore(settings=settings, openai_service=openai_service, confirmation_handler=gate)
+
+    response = assistant.handle_command("summarize file notes.md in documents")
+
+    assert response.source == "local"
+    assert response.accepted is False
+    assert response.text == "Denied before OpenAI."
+    assert openai_service.messages == []
+
+
+def test_assistant_core_summarize_file_success_with_mocked_openai(tmp_path: Path) -> None:
+    folder = tmp_path / "documents"
+    folder.mkdir()
+    (folder / "notes.md").write_text("hello world", encoding="utf-8")
+    settings = AppSettings(
+        _env_file=None,
+        openai_enabled=True,
+        file_access_enabled=True,
+        file_read_enabled=True,
+        file_summary_enabled=True,
+        confirmation_required=True,
+        file_access_allowed_folders=f"documents={folder}",
+    )
+    confirmations: list[str] = []
+
+    def approve_all(action_name: str, risk_level: str, description: str) -> ConfirmationResult:
+        confirmations.append(action_name)
+        return ConfirmationResult(
+            approved=True,
+            denied=False,
+            timed_out=False,
+            reason="Approved.",
+            log_file=tmp_path / "confirmations.log",
+        )
+
+    openai_service = FakeOpenAIService(OpenAIChatResult(success=True, text="A concise summary.", used_openai=True))
+    assistant = AssistantCore(settings=settings, openai_service=openai_service, confirmation_handler=approve_all)
+
+    response = assistant.handle_command("summarize file notes.md in documents")
+
+    assert response.source == "openai"
+    assert response.accepted is True
+    assert response.text == "A concise summary."
+    assert confirmations.count("read file contents") == 1
+    assert confirmations.count("send text to openai") == 1
+    assert assistant.conversation_history.messages == []
+
+
+def test_assistant_core_summarize_file_rejects_absolute_path(tmp_path: Path) -> None:
+    assistant = AssistantCore(
+        settings=AppSettings(
+            _env_file=None,
+            openai_enabled=True,
+            file_access_enabled=True,
+            file_read_enabled=True,
+            file_summary_enabled=True,
+        ),
+        openai_service=FakeOpenAIService(OpenAIChatResult(success=True, text="summary", used_openai=True)),
+    )
+
+    response = assistant.handle_command("summarize file C:\\Windows\\win.ini in documents")
+
+    assert response.accepted is False
+    assert "plain filename" in response.text.lower()
+
+
+def test_assistant_core_summarize_file_rejects_traversal(tmp_path: Path) -> None:
+    assistant = AssistantCore(
+        settings=AppSettings(
+            _env_file=None,
+            openai_enabled=True,
+            file_access_enabled=True,
+            file_read_enabled=True,
+            file_summary_enabled=True,
+        ),
+        openai_service=FakeOpenAIService(OpenAIChatResult(success=True, text="summary", used_openai=True)),
+    )
+
+    response = assistant.handle_command("summarize file ..\\secret.md in documents")
+
+    assert response.accepted is False
+    assert "plain filename" in response.text.lower()
+
+
+def test_assistant_core_summarize_file_rejects_disallowed_extension(tmp_path: Path) -> None:
+    folder = tmp_path / "documents"
+    folder.mkdir()
+    (folder / "notes.log").write_text("hello world", encoding="utf-8")
+    assistant = AssistantCore(
+        settings=AppSettings(
+            _env_file=None,
+            openai_enabled=True,
+            file_access_enabled=True,
+            file_read_enabled=True,
+            file_summary_enabled=True,
+            confirmation_required=True,
+            file_access_allowed_folders=f"documents={folder}",
+        ),
+        openai_service=FakeOpenAIService(OpenAIChatResult(success=True, text="summary", used_openai=True)),
+        confirmation_handler=lambda *args: ConfirmationResult(
+            approved=True,
+            denied=False,
+            timed_out=False,
+            reason="Approved.",
+            log_file=tmp_path / "confirmations.log",
+        ),
+    )
+
+    response = assistant.handle_command("summarize file notes.log in documents")
+
+    assert response.accepted is False
+    assert "not allowed" in response.text.lower()

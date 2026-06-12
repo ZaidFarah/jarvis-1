@@ -384,3 +384,20 @@ def test_file_read_cli_command(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
     assert exit_code == 0
     assert "line 1" in output
     assert "line 2" in output
+
+
+def test_file_summary_cli_command(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
+    from main import main
+
+    class DummyAssistant:
+        def handle_command(self, command: str) -> AssistantResponse:
+            assert command == "summarize file notes.md in documents"
+            return AssistantResponse(text="A concise summary.", accepted=True, source="openai")
+
+    monkeypatch.setattr("main._build_cli_assistant", lambda settings: DummyAssistant())
+
+    exit_code = main(["--summarize-file", "notes.md", "documents"])
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "A concise summary." in output

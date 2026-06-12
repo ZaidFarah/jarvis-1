@@ -195,6 +195,12 @@ def main(argv: list[str] | None = None) -> int:
         filename, folder_name = _read_file_args(args)
         return _run_read_file(settings, filename, folder_name)
 
+    if "--summarize-file" in args:
+        settings = load_settings()
+        configure_logging(settings, console=False)
+        filename, folder_name = _read_file_args(args, flag="--summarize-file")
+        return _run_summarize_file(settings, filename, folder_name)
+
     if "--tts-test" in args:
         settings = load_settings()
         configure_logging(settings, console=False)
@@ -517,6 +523,13 @@ def _run_read_file(settings, filename: str, folder_name: str) -> int:
     return 0 if response.accepted else 1
 
 
+def _run_summarize_file(settings, filename: str, folder_name: str) -> int:
+    assistant = _build_cli_assistant(settings)
+    response = assistant.handle_command(f"summarize file {filename} in {folder_name}")
+    print(response.text, flush=True)
+    return 0 if response.accepted else 1
+
+
 def _find_file_args(args: list[str]) -> tuple[str, str]:
     index = args.index("--find-file")
     values: list[str] = []
@@ -531,8 +544,8 @@ def _find_file_args(args: list[str]) -> tuple[str, str]:
     return " ".join(values[:-1]).strip(), values[-1].strip()
 
 
-def _read_file_args(args: list[str]) -> tuple[str, str]:
-    index = args.index("--read-file")
+def _read_file_args(args: list[str], flag: str = "--read-file") -> tuple[str, str]:
+    index = args.index(flag)
     values: list[str] = []
     for value in args[index + 1 :]:
         if value.startswith("--"):

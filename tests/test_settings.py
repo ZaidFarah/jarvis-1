@@ -146,6 +146,8 @@ def test_file_access_settings_defaults_are_safe() -> None:
 
     assert settings.file_access_enabled is False
     assert settings.file_read_enabled is False
+    assert settings.file_summary_enabled is False
+    assert settings.file_summary_max_chars == 6000
     assert settings.file_read_max_bytes == 20000
     assert settings.file_read_max_output_chars == 4000
     assert ".txt" in settings.file_read_allowed_extensions_list
@@ -157,6 +159,8 @@ def test_file_access_settings_defaults_are_safe() -> None:
 def test_file_access_settings_read_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("FILE_ACCESS_ENABLED", "true")
     monkeypatch.setenv("FILE_READ_ENABLED", "true")
+    monkeypatch.setenv("FILE_SUMMARY_ENABLED", "true")
+    monkeypatch.setenv("FILE_SUMMARY_MAX_CHARS", "2048")
     monkeypatch.setenv("FILE_READ_MAX_BYTES", "4096")
     monkeypatch.setenv("FILE_READ_MAX_OUTPUT_CHARS", "1024")
     monkeypatch.setenv("FILE_READ_ALLOWED_EXTENSIONS", "txt, md")
@@ -166,6 +170,8 @@ def test_file_access_settings_read_environment(monkeypatch: pytest.MonkeyPatch) 
 
     assert settings.file_access_enabled is True
     assert settings.file_read_enabled is True
+    assert settings.file_summary_enabled is True
+    assert settings.file_summary_max_chars == 2048
     assert settings.file_read_max_bytes == 4096
     assert settings.file_read_max_output_chars == 1024
     assert settings.file_read_allowed_extensions_list == [".txt", ".md"]

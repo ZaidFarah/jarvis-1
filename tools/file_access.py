@@ -99,6 +99,28 @@ class FileReadResult:
         return self.request_attempted and self.safe_error is None and self.content_preview is not None
 
 
+@dataclass(frozen=True)
+class FileSummaryResult:
+    enabled: bool
+    folder_name: str
+    filename: str
+    configured_path: str
+    resolved_path: str | None
+    allowed: bool
+    configured: bool
+    request_attempted: bool
+    read_result: FileReadResult | None
+    summary_text: str | None
+    log_file: Path
+    safe_error: str | None = None
+    fallback_reason: str | None = None
+    errors: list[str] = field(default_factory=list)
+
+    @property
+    def is_successful(self) -> bool:
+        return self.request_attempted and self.safe_error is None and self.summary_text is not None
+
+
 class FileAccess:
     """Safe read-only access to whitelisted folders."""
 
@@ -468,6 +490,10 @@ class FileAccess:
             [],
         )
 
+    def summarize_file(self, filename: str, folder_name: str) -> FileSummaryResult:
+        read_result = self.read_file(filename, folder_name)
+        return self._summary_result_from_read(read_result)
+
     def _listing_result(
         self,
         folder_name: str,
@@ -559,6 +585,25 @@ class FileAccess:
             safe_error=safe_error,
             fallback_reason=fallback_reason,
             errors=errors,
+        )
+
+    def _summary_result_from_read(self, read_result: FileReadResult) -> FileSummaryResult:
+        summary_text = read_result.content_preview[: self.settings.file_summary_max_chars] if read_result.content_preview else None
+        return FileSummaryResult(
+            enabled=self.enabled and self.settings.file_summary_enabled,
+            folder_name=read_result.folder_name,
+            filename=read_result.filename,
+            configured_path=read_result.configured_path,
+            resolved_path=read_result.resolved_path,
+            allowed=read_result.allowed,
+            configured=read_result.configured,
+            request_attempted=read_result.request_attempted,
+            read_result=read_result,
+            summary_text=summary_text,
+            log_file=self.log_file,
+            safe_error=read_result.safe_error,
+            fallback_reason=read_result.fallback_reason,
+            errors=list(read_result.errors),
         )
 
     def _ensure_log_sink(self) -> None:
@@ -768,6 +813,31 @@ def format_file_read_report(result: FileReadResult) -> str:
         lines.extend(["", "Error:", f"  {result.safe_error}"])
     if result.content_preview is not None:
         lines.extend(["", "Content preview:", result.content_preview])
+    return "\n".join(lines)
+
+
+def format_file_summary_report(result: FileSummaryResult) -> str:
+    lines = [
+        "Jarvis File Summary",
+        "===================",
+        f"File access enabled: {_yes_no(result.enabled)}",
+        f"Folder: {result.folder_name}",
+        f"Filename: {result.filename}",
+        f"Allowed: {_yes_no(result.allowed)}",
+        f"Configured: {_yes_no(result.configured)}",
+        f"Request attempted: {_yes_no(result.request_attempted)}",
+        f"Diagnostic log: {result.log_file}",
+    ]
+    if result.resolved_path:
+        lines.extend(["", f"Resolved path: {result.resolved_path}"])
+    if result.read_result is not None:
+        lines.extend(["", f"Read truncated: {_yes_no(result.read_result.truncated)}"])
+    if result.fallback_reason:
+        lines.extend(["", "Fallback reason:", f"  {result.fallback_reason}"])
+    if result.safe_error:
+        lines.extend(["", "Error:", f"  {result.safe_error}"])
+    if result.summary_text is not None:
+        lines.extend(["", "Summary:", result.summary_text])
     return "\n".join(lines)
 
 

@@ -10,7 +10,7 @@ from memory.store import SensitiveMemoryError, SQLiteMemoryStore
 from security.confirmation import ConfirmationResult
 from config.settings import AppSettings, load_settings
 from security.permissions import PermissionBroker
-from tools.file_access import FileAccess, FileReadResult
+from tools.file_access import FileAccess, FileReadResult, FileSummaryResult
 from tools.app_launcher import AppLauncher
 from tools.website_launcher import WebsiteLauncher
 from reminders.service import ReminderService
@@ -269,6 +269,16 @@ class AssistantCore:
                 return AssistantResponse(text="File access is disabled.", accepted=True, source="local")
             return self._read_file(filename, folder_name)
 
+        summarize_match = re.match(r"(?i)^summarize file\s+(.+?)\s+in\s+(documents|desktop|downloads)$", command.strip())
+        if summarize_match:
+            filename = summarize_match.group(1).strip()
+            folder_name = summarize_match.group(2).strip().lower()
+            if self._looks_like_raw_path(filename):
+                return AssistantResponse(text="Please use a plain filename, not a path.", accepted=False, source="local")
+            if not self.settings.file_access_enabled or self.file_access is None:
+                return AssistantResponse(text="File access is disabled.", accepted=True, source="local")
+            return self._summarize_file(filename, folder_name)
+
         match = re.match(r"(?i)^find file\s+(.+?)\s+in\s+(documents|desktop|downloads)$", command.strip())
         if not match:
             return None
@@ -330,6 +340,74 @@ class AssistantCore:
         if result.content_preview is None:
             return AssistantResponse(text="I couldn't read that file.", accepted=False, source="file_access")
         return AssistantResponse(text=result.content_preview, accepted=True, source="file_access")
+
+    def _summarize_file(self, filename: str, folder_name: str) -> AssistantResponse:
+        if not self.settings.file_access_enabled or self.file_access is None:
+            return AssistantResponse(text="File access is disabled.", accepted=True, source="local")
+        if not self.settings.file_summary_enabled:
+            return AssistantResponse(text="File summarization is disabled.", accepted=True, source="local")
+
+        decision = self.permission_broker.check(
+            "read file contents",
+            description=f"Read file {filename} from {folder_name} for summarization.",
+        )
+        if not decision.allowed:
+            return AssistantResponse(text=decision.reason, accepted=False, source="local", error=decision.reason)
+        if decision.requires_confirmation and self.settings.confirmation_required:
+            if self.confirmation_handler is None:
+                return AssistantResponse(
+                    text="Confirmation is required before reading file contents.",
+                    accepted=False,
+                    source="local",
+                    error="Confirmation handler is unavailable.",
+                )
+            confirmation = self.confirmation_handler(decision.action_name, decision.risk_level, decision.description)
+            if not confirmation.approved:
+                reason = confirmation.reason or "Read canceled."
+                return AssistantResponse(text=reason, accepted=False, source="local", error=reason)
+
+        read_result = self.file_access.read_file(filename, folder_name)
+        if read_result.safe_error:
+            return AssistantResponse(text=read_result.safe_error, accepted=False, source="file_access", error=read_result.safe_error)
+
+        if read_result.content_preview is None:
+            return AssistantResponse(text="I couldn't read that file.", accepted=False, source="file_access")
+
+        file_text = read_result.content_preview[: self.settings.file_summary_max_chars]
+        openai_decision = self.permission_broker.check(
+            "send text to openai",
+            description=f"Summarize file {filename} from {folder_name} with OpenAI.",
+        )
+        if not openai_decision.allowed:
+            return AssistantResponse(text=openai_decision.reason, accepted=False, source="local", error=openai_decision.reason)
+
+        if openai_decision.requires_confirmation and self.settings.confirmation_required:
+            if self.confirmation_handler is None:
+                return AssistantResponse(
+                    text="Confirmation is required before sending file content to OpenAI.",
+                    accepted=False,
+                    source="local",
+                    error="Confirmation handler is unavailable.",
+                )
+            confirmation = self.confirmation_handler(openai_decision.action_name, openai_decision.risk_level, openai_decision.description)
+            if not confirmation.approved:
+                reason = confirmation.reason or "Summary canceled."
+                return AssistantResponse(text=reason, accepted=False, source="local", error=reason)
+
+        prompt = (
+            f"Summarize this file clearly and concisely in a few short paragraphs.\n"
+            f"File name: {filename}\n\n"
+            f"{file_text}"
+        )
+        result = self.openai_service.chat(prompt, system_prompt=self.settings.system_prompt)
+        if result.success and result.text:
+            summary_text = result.text[: self.settings.file_summary_max_chars]
+            return AssistantResponse(text=summary_text, accepted=True, source="openai")
+
+        fallback_text = "OpenAI is unavailable, so I could not summarize the file."
+        if result.safe_error:
+            fallback_text = f"{fallback_text} {result.safe_error}"
+        return AssistantResponse(text=fallback_text, accepted=False, source="local", error=result.safe_error or fallback_text)
 
     def _handle_reminder_command(self, command: str) -> AssistantResponse | None:
         if not self.settings.reminders_enabled or self.reminder_service is None:
