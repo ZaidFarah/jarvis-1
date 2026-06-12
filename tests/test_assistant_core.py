@@ -5,6 +5,7 @@ from pathlib import Path
 from assistant.core import AssistantCore
 from config.settings import AppSettings
 from security.confirmation import ConfirmationResult
+from integrations.calendar_service import CalendarQueryResult
 from integrations.weather_service import WeatherQueryResult
 from reminders.models import ReminderCheckResult
 from reminders.service import ReminderQueryResult
@@ -75,6 +76,25 @@ class FakeReminderService:
     def check_due_reminders(self) -> ReminderCheckResult:
         self.calls.append(("check",))
         return ReminderCheckResult(success=True, text="Due reminders:\n1. stretch at 2026-06-12 18:00", due_reminders=[])
+
+
+class FakeCalendarService:
+    def __init__(self, result: CalendarQueryResult | None = None) -> None:
+        self.result = result or CalendarQueryResult(
+            success=True,
+            text="Calendar for today:\n- 09:00 Standup",
+            provider="google_calendar",
+            day_label="today",
+            request_attempted=True,
+            authenticated=True,
+            client_secret_detected=True,
+            token_detected=True,
+        )
+        self.calls: list[str] = []
+
+    def current_events(self, day_label: str = "today") -> CalendarQueryResult:
+        self.calls.append(day_label)
+        return self.result
 
 
 def test_assistant_core_returns_placeholder_response() -> None:
@@ -231,7 +251,7 @@ def test_assistant_core_routes_weather_commands_without_openai() -> None:
     )
     openai_service = FakeOpenAIService(error=AssertionError("OpenAI should not be called for weather"))
     assistant = AssistantCore(
-        settings=AppSettings(_env_file=None, openai_enabled=False),
+        settings=AppSettings(_env_file=None, openai_enabled=False, calendar_enabled=True),
         openai_service=openai_service,
         weather_service=weather_service,
     )
@@ -242,6 +262,73 @@ def test_assistant_core_routes_weather_commands_without_openai() -> None:
     assert response.text == "Current weather in London: clear sky."
     assert weather_service.calls == ["London"]
     assert openai_service.messages == []
+
+
+def test_assistant_core_routes_calendar_commands() -> None:
+    calendar_service = FakeCalendarService()
+    openai_service = FakeOpenAIService(error=AssertionError("OpenAI should not be called for calendar"))
+    assistant = AssistantCore(
+        settings=AppSettings(_env_file=None, openai_enabled=False, calendar_enabled=True),
+        openai_service=openai_service,
+        weather_service=FakeWeatherService(
+            WeatherQueryResult(
+                success=True,
+                text="Current weather in Nottingham: clear sky.",
+                provider="openweathermap",
+                city="Nottingham",
+                request_attempted=False,
+                api_key_detected=False,
+            )
+        ),
+        calendar_service=calendar_service,
+        confirmation_handler=lambda *args: ConfirmationResult(
+            approved=True,
+            denied=False,
+            timed_out=False,
+            reason="Approved.",
+            log_file=Path("confirmations.log"),
+        ),
+    )
+
+    response = assistant.handle_command("what is on my calendar today")
+
+    assert response.source == "calendar"
+    assert "Standup" in response.text
+    assert calendar_service.calls == ["today"]
+    assert openai_service.messages == []
+
+
+def test_assistant_core_calendar_confirmation_denied_blocks_read() -> None:
+    calendar_service = FakeCalendarService()
+    assistant = AssistantCore(
+        settings=AppSettings(_env_file=None, openai_enabled=False, calendar_enabled=True),
+        openai_service=FakeOpenAIService(error=AssertionError("OpenAI should not be called for calendar")),
+        weather_service=FakeWeatherService(
+            WeatherQueryResult(
+                success=True,
+                text="Current weather in Nottingham: clear sky.",
+                provider="openweathermap",
+                city="Nottingham",
+                request_attempted=False,
+                api_key_detected=False,
+            )
+        ),
+        calendar_service=calendar_service,
+        confirmation_handler=lambda *args: ConfirmationResult(
+            approved=False,
+            denied=True,
+            timed_out=False,
+            reason="Denied.",
+            log_file=Path("confirmations.log"),
+        ),
+    )
+
+    response = assistant.handle_command("what is on my calendar today")
+
+    assert response.source == "local"
+    assert response.accepted is False
+    assert response.text == "Denied."
+    assert calendar_service.calls == []
 
 
 def test_assistant_core_routes_reminder_commands() -> None:

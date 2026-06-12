@@ -571,6 +571,16 @@ Jarvis can open only sites listed in `WEBSITE_ALLOWED_SITES`. If a site is missi
 - Chat logs are saved to `logs/chat.log`.
 - Confirmation logs are saved to `logs/confirmations.log`.
 
+## Phase 24 Scope
+
+- Safe Google Calendar read-only foundation.
+- CLI command: `py main.py --calendar-check`.
+- Assistant commands: `what is on my calendar today`, `show my calendar today`, `what events do i have today`, and `what is on my calendar tomorrow`.
+- Calendar settings: `CALENDAR_ENABLED=false`, `CALENDAR_CLIENT_SECRET_PATH=credentials/google_client_secret.json`, `CALENDAR_TOKEN_PATH=credentials/token_calendar.json`.
+- Calendar reads are high risk and require confirmation.
+- Calendar diagnostics report enabled state, credential presence, token presence, and authentication status without printing secrets.
+- Calendar logs are saved to `logs/calendar.log`.
+
 ## Text To Speech Test
 
 ```powershell

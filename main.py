@@ -7,6 +7,7 @@ from pathlib import Path
 from app.application import JarvisApplication
 from assistant.core import AssistantCore, AssistantResponse
 from config.settings import load_settings
+from integrations.calendar_service import CalendarService, format_calendar_check_report
 from integrations.weather_service import WeatherService, format_weather_check_report
 from services.notification_service import NotificationService, format_notification_check_report
 from services.logging_service import configure_logging
@@ -134,6 +135,17 @@ def main(argv: list[str] | None = None) -> int:
         )
         report = WeatherService(settings).run_check()
         print(format_weather_check_report(report))
+        return 0 if report.is_successful else 1
+
+    if "--calendar-check" in args:
+        settings = load_settings()
+        configure_logging(settings, console=False)
+        PermissionBroker(settings).check(
+            "read calendar",
+            description="Calendar diagnostic for today.",
+        )
+        report = CalendarService(settings).run_check()
+        print(format_calendar_check_report(report))
         return 0 if report.is_successful else 1
 
     if "--website-check" in args:

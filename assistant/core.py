@@ -5,6 +5,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from assistant.conversation import ConversationHistory
+from integrations.calendar_service import CalendarService, CalendarQueryResult
 from integrations.weather_service import WeatherService
 from memory.store import SensitiveMemoryError, SQLiteMemoryStore
 from security.confirmation import ConfirmationResult
@@ -39,6 +40,7 @@ class AssistantCore:
         openai_service: OpenAIService | None = None,
         memory_store: SQLiteMemoryStore | None = None,
         weather_service: WeatherService | None = None,
+        calendar_service: CalendarService | None = None,
         reminder_service: ReminderService | None = None,
         confirmation_handler: Callable[[str, str, str], ConfirmationResult] | None = None,
     ) -> None:
@@ -47,6 +49,12 @@ class AssistantCore:
         self.confirmation_handler = confirmation_handler
         self.openai_service = openai_service or OpenAIService(self.settings)
         self.weather_service = weather_service or WeatherService(self.settings)
+        if calendar_service is not None:
+            self.calendar_service = calendar_service
+        elif self.settings.calendar_enabled:
+            self.calendar_service = CalendarService(self.settings)
+        else:
+            self.calendar_service = None
         if self.settings.app_launcher_enabled:
             self.app_launcher = AppLauncher(self.settings)
         else:
@@ -99,6 +107,10 @@ class AssistantCore:
         website_response = self._handle_website_command(cleaned)
         if website_response is not None:
             return website_response
+
+        calendar_response = self._handle_calendar_command(cleaned)
+        if calendar_response is not None:
+            return calendar_response
 
         file_access_response = self._handle_file_access_command(cleaned)
         if file_access_response is not None:
@@ -189,6 +201,42 @@ class AssistantCore:
         self.conversation_history.add_user(command_text)
         self.conversation_history.add_assistant(response.text)
         return response
+
+    def _handle_calendar_command(self, command: str) -> AssistantResponse | None:
+        normalized = " ".join(command.lower().strip().split())
+        day_label = self._parse_calendar_day_label(normalized)
+        if day_label is None:
+            return None
+
+        if self.calendar_service is None or not self.settings.calendar_enabled:
+            return AssistantResponse(text="Calendar is disabled.", accepted=True, source="local")
+
+        decision = self.permission_broker.check(
+            "read calendar",
+            description=f"Read calendar events for {day_label}.",
+        )
+        if not decision.allowed:
+            return AssistantResponse(text=decision.reason, accepted=False, source="local", error=decision.reason)
+        if self.confirmation_handler is None:
+            return AssistantResponse(
+                text="Confirmation is required before reading calendar events.",
+                accepted=False,
+                source="local",
+                error="Confirmation handler is unavailable.",
+            )
+
+        confirmation = self.confirmation_handler(decision.action_name, decision.risk_level, decision.description)
+        if not confirmation.approved:
+            reason = confirmation.reason or "Calendar read canceled."
+            return AssistantResponse(text=reason, accepted=False, source="local", error=reason)
+
+        result = self.calendar_service.current_events(day_label)
+        return AssistantResponse(
+            text=self._calendar_response_text(result),
+            accepted=result.success,
+            source="calendar",
+            error=result.safe_error,
+        )
 
     def _handle_app_launcher_command(self, command: str) -> AssistantResponse | None:
         match = re.match(r"(?i)^(open|launch)\s+(.+)$", command.strip())
@@ -409,6 +457,23 @@ class AssistantCore:
             fallback_text = f"{fallback_text} {result.safe_error}"
         return AssistantResponse(text=fallback_text, accepted=False, source="local", error=result.safe_error or fallback_text)
 
+    @staticmethod
+    def _parse_calendar_day_label(command: str) -> str | None:
+        normalized = " ".join(command.lower().strip().split())
+        if normalized in {
+            "what is on my calendar today",
+            "show my calendar today",
+            "what events do i have today",
+        }:
+            return "today"
+        if normalized in {
+            "what is on my calendar tomorrow",
+            "show my calendar tomorrow",
+            "what events do i have tomorrow",
+        }:
+            return "tomorrow"
+        return None
+
     def _handle_reminder_command(self, command: str) -> AssistantResponse | None:
         if not self.settings.reminders_enabled or self.reminder_service is None:
             normalized = " ".join(command.lower().strip().split())
@@ -566,6 +631,12 @@ class AssistantCore:
             or re.match(r"^[a-zA-Z]:[\\/]", cleaned)
             or any(sep in cleaned for sep in ("\\", "/"))
         )
+
+    @staticmethod
+    def _calendar_response_text(result: CalendarQueryResult) -> str:
+        if result.safe_error:
+            return result.safe_error
+        return result.text
 
     @staticmethod
     def _file_listing_response_text(result) -> str:

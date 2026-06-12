@@ -275,6 +275,18 @@ class AppSettings(BaseSettings):
         default=PROJECT_ROOT / "data" / "jarvis_reminders.db",
         validation_alias=AliasChoices("REMINDERS_DATABASE_PATH", "JARVIS_REMINDERS_DATABASE_PATH"),
     )
+    calendar_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("CALENDAR_ENABLED", "JARVIS_CALENDAR_ENABLED"),
+    )
+    calendar_client_secret_path: Path = Field(
+        default=PROJECT_ROOT / "credentials" / "google_client_secret.json",
+        validation_alias=AliasChoices("CALENDAR_CLIENT_SECRET_PATH", "JARVIS_CALENDAR_CLIENT_SECRET_PATH"),
+    )
+    calendar_token_path: Path = Field(
+        default=PROJECT_ROOT / "credentials" / "token_calendar.json",
+        validation_alias=AliasChoices("CALENDAR_TOKEN_PATH", "JARVIS_CALENDAR_TOKEN_PATH"),
+    )
     weather_enabled: bool = Field(
         default=False,
         validation_alias=AliasChoices("WEATHER_ENABLED", "JARVIS_WEATHER_ENABLED"),
@@ -385,6 +397,11 @@ class AppSettings(BaseSettings):
     @field_validator("reminders_database_path")
     @classmethod
     def expand_reminders_database_path(cls, value: Path) -> Path:
+        return value.expanduser().resolve()
+
+    @field_validator("calendar_client_secret_path", "calendar_token_path")
+    @classmethod
+    def expand_calendar_paths(cls, value: Path) -> Path:
         return value.expanduser().resolve()
 
     @field_validator("speech_to_text_provider", "tts_provider", "whisper_device", "whisper_compute_type")
@@ -549,6 +566,14 @@ class AppSettings(BaseSettings):
     @property
     def has_reminders_database(self) -> bool:
         return bool(self.reminders_database_path)
+
+    @property
+    def has_calendar_client_secret(self) -> bool:
+        return self.calendar_client_secret_path.exists()
+
+    @property
+    def has_calendar_token(self) -> bool:
+        return self.calendar_token_path.exists()
 
     @property
     def app_launcher_allowed_apps_map(self) -> dict[str, str]:

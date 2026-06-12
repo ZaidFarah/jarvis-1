@@ -104,6 +104,26 @@ def test_reminder_settings_defaults_are_safe() -> None:
     assert settings.reminders_database_path.name == "jarvis_reminders.db"
 
 
+def test_calendar_settings_defaults_are_safe() -> None:
+    settings = AppSettings(_env_file=None)
+
+    assert settings.calendar_enabled is False
+    assert settings.calendar_client_secret_path.name == "google_client_secret.json"
+    assert settings.calendar_token_path.name == "token_calendar.json"
+
+
+def test_calendar_settings_read_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CALENDAR_ENABLED", "true")
+    monkeypatch.setenv("CALENDAR_CLIENT_SECRET_PATH", "credentials/custom_secret.json")
+    monkeypatch.setenv("CALENDAR_TOKEN_PATH", "credentials/custom_token.json")
+
+    settings = AppSettings(_env_file=None)
+
+    assert settings.calendar_enabled is True
+    assert settings.calendar_client_secret_path.name == "custom_secret.json"
+    assert settings.calendar_token_path.name == "custom_token.json"
+
+
 def test_app_launcher_settings_defaults_are_safe() -> None:
     settings = AppSettings(_env_file=None)
 
