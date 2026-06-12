@@ -65,6 +65,7 @@ def main(argv: list[str] | None = None) -> int:
         configure_logging(settings, console=False)
         report = VoiceCommandTestRunner(
             settings,
+            assistant=_build_cli_assistant(settings),
             speak_requested=_has_flag(args, "--speak"),
             status_callback=_voice_command_status_callback,
         ).run()
@@ -74,7 +75,7 @@ def main(argv: list[str] | None = None) -> int:
     if "--voice-loop" in args:
         settings = load_settings()
         configure_logging(settings, console=False)
-        runner = VoiceLoopRunner(settings, status_callback=_voice_loop_status_callback)
+        runner = VoiceLoopRunner(settings, assistant=_build_cli_assistant(settings), status_callback=_voice_loop_status_callback)
         try:
             runner.run()
         except KeyboardInterrupt:
@@ -188,6 +189,12 @@ def main(argv: list[str] | None = None) -> int:
         query, folder_name = _find_file_args(args)
         return _run_find_file(settings, query, folder_name)
 
+    if "--read-file" in args:
+        settings = load_settings()
+        configure_logging(settings, console=False)
+        filename, folder_name = _read_file_args(args)
+        return _run_read_file(settings, filename, folder_name)
+
     if "--tts-test" in args:
         settings = load_settings()
         configure_logging(settings, console=False)
@@ -205,7 +212,7 @@ def main(argv: list[str] | None = None) -> int:
         settings = load_settings()
         configure_logging(settings, console=False)
         message = _chat_test_message(args)
-        assistant = AssistantCore(settings=settings, openai_service=OpenAIService(settings))
+        assistant = _build_cli_assistant(settings)
         response = assistant.handle_command(message)
         tts_result = None
         if response.accepted and (settings.tts_enabled or _has_flag(args, "--speak")):
@@ -216,7 +223,7 @@ def main(argv: list[str] | None = None) -> int:
     if "--chat-session" in args:
         settings = load_settings()
         configure_logging(settings, console=False)
-        assistant = AssistantCore(settings=settings, openai_service=OpenAIService(settings))
+        assistant = _build_cli_assistant(settings)
         return _run_chat_session(assistant)
 
     if "--memory-test" in args:
@@ -503,8 +510,29 @@ def _run_find_file(settings, query: str, folder_name: str) -> int:
     return 0 if result.request_attempted and result.safe_error is None else 1
 
 
+def _run_read_file(settings, filename: str, folder_name: str) -> int:
+    assistant = _build_cli_assistant(settings)
+    response = assistant.handle_command(f"read file {filename} in {folder_name}")
+    print(response.text, flush=True)
+    return 0 if response.accepted else 1
+
+
 def _find_file_args(args: list[str]) -> tuple[str, str]:
     index = args.index("--find-file")
+    values: list[str] = []
+    for value in args[index + 1 :]:
+        if value.startswith("--"):
+            break
+        values.append(value)
+    if not values:
+        return "", "documents"
+    if len(values) == 1:
+        return values[0], "documents"
+    return " ".join(values[:-1]).strip(), values[-1].strip()
+
+
+def _read_file_args(args: list[str]) -> tuple[str, str]:
+    index = args.index("--read-file")
     values: list[str] = []
     for value in args[index + 1 :]:
         if value.startswith("--"):
@@ -593,6 +621,27 @@ def _format_reminders_check_report(
 
 def _yes_no(value: bool) -> str:
     return "yes" if value else "no"
+
+
+def _build_cli_assistant(settings) -> AssistantCore:
+    return AssistantCore(
+        settings=settings,
+        openai_service=OpenAIService(settings),
+        confirmation_handler=_cli_confirmation_handler(settings),
+    )
+
+
+def _cli_confirmation_handler(settings):
+    def _handler(action_name: str, risk_level: str, description: str) -> ConfirmationResult:
+        del action_name, risk_level
+        return confirm_action_cli(
+            settings,
+            description,
+            timeout_seconds=settings.confirmation_timeout_seconds,
+            output_func=print,
+        )
+
+    return _handler
 
 
 if __name__ == "__main__":

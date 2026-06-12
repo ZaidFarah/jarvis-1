@@ -546,6 +546,18 @@ Jarvis can open only sites listed in `WEBSITE_ALLOWED_SITES`. If a site is missi
 - Confirmation prompts fail closed on timeout.
 - Confirmation logs are saved to `logs/confirmations.log`.
 
+## Phase 22 Scope
+
+- Safe read-only file content reading for whitelisted folders only.
+- CLI command: `py main.py --read-file "example.txt" documents`.
+- Assistant command: `read file <filename> in documents|desktop|downloads`.
+- File read settings: `FILE_READ_ENABLED=false`, `FILE_READ_MAX_BYTES=20000`, `FILE_READ_MAX_OUTPUT_CHARS=4000`, `FILE_READ_ALLOWED_EXTENSIONS=.txt,.md,.csv,.json,.py,.java,.cpp,.h,.html,.css,.js`.
+- Reading file contents is medium risk and goes through the permission broker plus confirmation flow.
+- Binary files, raw paths, traversal attempts, unknown folders, and disallowed extensions are rejected.
+- File content reads are not sent to OpenAI automatically.
+- File access logs are saved to `logs/file_access.log`.
+- Confirmation logs are saved to `logs/confirmations.log`.
+
 ## Text To Speech Test
 
 ```powershell

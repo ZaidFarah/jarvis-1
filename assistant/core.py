@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from assistant.conversation import ConversationHistory
 from integrations.weather_service import WeatherService
 from memory.store import SensitiveMemoryError, SQLiteMemoryStore
+from security.confirmation import ConfirmationResult
 from config.settings import AppSettings, load_settings
 from security.permissions import PermissionBroker
-from tools.file_access import FileAccess
+from tools.file_access import FileAccess, FileReadResult
 from tools.app_launcher import AppLauncher
 from tools.website_launcher import WebsiteLauncher
 from reminders.service import ReminderService
@@ -38,9 +40,11 @@ class AssistantCore:
         memory_store: SQLiteMemoryStore | None = None,
         weather_service: WeatherService | None = None,
         reminder_service: ReminderService | None = None,
+        confirmation_handler: Callable[[str, str, str], ConfirmationResult] | None = None,
     ) -> None:
         self.settings = settings or load_settings()
         self.permission_broker = PermissionBroker(self.settings)
+        self.confirmation_handler = confirmation_handler
         self.openai_service = openai_service or OpenAIService(self.settings)
         self.weather_service = weather_service or WeatherService(self.settings)
         if self.settings.app_launcher_enabled:
@@ -251,6 +255,20 @@ class AssistantCore:
                 error=result.safe_error,
             )
 
+        read_match = re.match(r"(?i)^read file\s+(.+?)\s+in\s+(documents|desktop|downloads)$", command.strip())
+        if read_match:
+            filename = read_match.group(1).strip()
+            folder_name = read_match.group(2).strip().lower()
+            if self._looks_like_raw_path(filename):
+                return AssistantResponse(
+                    text="Please use a plain filename, not a path.",
+                    accepted=False,
+                    source="local",
+                )
+            if not self.settings.file_access_enabled or self.file_access is None:
+                return AssistantResponse(text="File access is disabled.", accepted=True, source="local")
+            return self._read_file(filename, folder_name)
+
         match = re.match(r"(?i)^find file\s+(.+?)\s+in\s+(documents|desktop|downloads)$", command.strip())
         if not match:
             return None
@@ -279,6 +297,39 @@ class AssistantCore:
             source="file_access",
             error=result.safe_error,
         )
+
+    def _read_file(self, filename: str, folder_name: str) -> AssistantResponse:
+        if not self.settings.file_access_enabled or self.file_access is None:
+            return AssistantResponse(text="File access is disabled.", accepted=True, source="local")
+        if not self.settings.file_read_enabled:
+            return AssistantResponse(text="File reading is disabled.", accepted=True, source="local")
+
+        decision = self.permission_broker.check(
+            "read file contents",
+            description=f"Read file {filename} from {folder_name}.",
+        )
+        if not decision.allowed:
+            return AssistantResponse(text=decision.reason, accepted=False, source="local", error=decision.reason)
+
+        if decision.requires_confirmation and self.settings.confirmation_required:
+            if self.confirmation_handler is None:
+                return AssistantResponse(
+                    text="Confirmation is required before reading file contents.",
+                    accepted=False,
+                    source="local",
+                    error="Confirmation handler is unavailable.",
+                )
+            confirmation = self.confirmation_handler(decision.action_name, decision.risk_level, decision.description)
+            if not confirmation.approved:
+                reason = confirmation.reason or "Read canceled."
+                return AssistantResponse(text=reason, accepted=False, source="local", error=reason)
+
+        result: FileReadResult = self.file_access.read_file(filename, folder_name)
+        if result.safe_error:
+            return AssistantResponse(text=result.safe_error, accepted=False, source="file_access", error=result.safe_error)
+        if result.content_preview is None:
+            return AssistantResponse(text="I couldn't read that file.", accepted=False, source="file_access")
+        return AssistantResponse(text=result.content_preview, accepted=True, source="file_access")
 
     def _handle_reminder_command(self, command: str) -> AssistantResponse | None:
         if not self.settings.reminders_enabled or self.reminder_service is None:

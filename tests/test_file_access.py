@@ -4,8 +4,9 @@ from pathlib import Path
 
 import pytest
 
-from assistant.core import AssistantCore
+from assistant.core import AssistantCore, AssistantResponse
 from config.settings import AppSettings
+from security.confirmation import ConfirmationResult
 from tools.file_access import (
     FileAccess,
     FileAccessCheckReport,
@@ -30,12 +31,16 @@ def _build_file_access(tmp_path: Path) -> FileAccess:
     folder.mkdir()
     (folder / "alpha.txt").write_text("alpha", encoding="utf-8")
     (folder / "beta.log").write_text("beta", encoding="utf-8")
+    (folder / "notes.md").write_text("line 1\nline 2", encoding="utf-8")
+    (folder / "binary.txt").write_bytes(b"\x00\x01\x02")
+    (folder / "large.txt").write_text("x" * 30000, encoding="utf-8")
     (folder / "nested").mkdir()
     (folder / "nested" / "alpha_nested.txt").write_text("nested", encoding="utf-8")
     settings = AppSettings(
         _env_file=None,
         log_dir=tmp_path,
         file_access_enabled=True,
+        file_read_enabled=True,
         file_access_allowed_folders=f"documents={folder}",
     )
     return FileAccess(settings)
@@ -99,6 +104,83 @@ def test_file_access_find_file_behavior(tmp_path: Path) -> None:
     assert {entry.name for entry in result.matches} == {"alpha.txt", "alpha_nested.txt"}
 
 
+def test_file_access_read_allowed_text_file(tmp_path: Path) -> None:
+    access = _build_file_access(tmp_path)
+
+    result = access.read_file("notes.md", "documents")
+
+    assert result.request_attempted is True
+    assert result.safe_error is None
+    assert result.content_preview == "line 1\nline 2"
+
+
+def test_file_access_read_disabled_fallback(tmp_path: Path) -> None:
+    folder = tmp_path / "documents"
+    folder.mkdir()
+    (folder / "notes.md").write_text("line 1", encoding="utf-8")
+    settings = AppSettings(
+        _env_file=None,
+        log_dir=tmp_path,
+        file_access_enabled=True,
+        file_read_enabled=False,
+        file_access_allowed_folders=f"documents={folder}",
+    )
+    access = FileAccess(settings)
+
+    result = access.read_file("notes.md", "documents")
+
+    assert result.request_attempted is False
+    assert result.safe_error == "File reading is disabled."
+
+
+def test_file_access_absolute_path_read_rejected(tmp_path: Path) -> None:
+    access = _build_file_access(tmp_path)
+
+    result = access.read_file("C:\\Windows\\win.ini", "documents")
+
+    assert result.request_attempted is False
+    assert "plain filenames" in (result.safe_error or "")
+
+
+def test_file_access_traversal_read_rejected(tmp_path: Path) -> None:
+    access = _build_file_access(tmp_path)
+
+    result = access.read_file("..\\secret.txt", "documents")
+
+    assert result.request_attempted is False
+    assert "plain filenames" in (result.safe_error or "")
+
+
+def test_file_access_binary_file_rejected(tmp_path: Path) -> None:
+    access = _build_file_access(tmp_path)
+
+    result = access.read_file("binary.txt", "documents")
+
+    assert result.request_attempted is True
+    assert result.safe_error == "Binary files cannot be read safely."
+
+
+def test_file_access_large_file_truncated_safely(tmp_path: Path) -> None:
+    access = _build_file_access(tmp_path)
+
+    result = access.read_file("large.txt", "documents")
+
+    assert result.request_attempted is True
+    assert result.safe_error is None
+    assert result.truncated is True
+    assert result.content_preview is not None
+    assert len(result.content_preview) <= 4003
+
+
+def test_file_access_disallowed_extension_rejected(tmp_path: Path) -> None:
+    access = _build_file_access(tmp_path)
+
+    result = access.read_file("beta.log", "documents")
+
+    assert result.request_attempted is True
+    assert "not allowed" in (result.safe_error or "")
+
+
 def test_file_access_check_formats_safe_error() -> None:
     error = format_file_access_error(RuntimeError("failed with OPENAI_API_KEY=sk-test-secret"))
 
@@ -159,6 +241,62 @@ def test_assistant_core_routes_file_access_commands(tmp_path: Path) -> None:
     assert "report.txt" in list_response.text or "Found" in list_response.text
     assert find_response.source == "file_access"
     assert "report.txt" in find_response.text
+
+
+def test_assistant_core_routes_read_file_with_confirmation(tmp_path: Path) -> None:
+    folder = tmp_path / "documents"
+    folder.mkdir()
+    (folder / "notes.md").write_text("line 1\nline 2", encoding="utf-8")
+    settings = AppSettings(
+        _env_file=None,
+        log_dir=tmp_path,
+        openai_enabled=False,
+        file_access_enabled=True,
+        file_read_enabled=True,
+        confirmation_required=True,
+        file_access_allowed_folders=f"documents={folder}",
+    )
+    confirmations: list[tuple[str, str, str]] = []
+
+    def approve(action_name: str, risk_level: str, description: str):
+        confirmations.append((action_name, risk_level, description))
+        return ConfirmationResult(approved=True, denied=False, timed_out=False, reason="Approved.", log_file=tmp_path / "confirmations.log")
+
+    assistant = AssistantCore(settings=settings, openai_service=FakeOpenAIService(), confirmation_handler=approve)
+
+    response = assistant.handle_command("read file notes.md in documents")
+
+    assert response.source == "file_access"
+    assert response.accepted is True
+    assert response.text == "line 1\nline 2"
+    assert confirmations and confirmations[0][0] == "read file contents"
+
+
+def test_assistant_core_read_file_confirmation_denied_blocks_read(tmp_path: Path) -> None:
+    folder = tmp_path / "documents"
+    folder.mkdir()
+    (folder / "notes.md").write_text("line 1\nline 2", encoding="utf-8")
+    settings = AppSettings(
+        _env_file=None,
+        log_dir=tmp_path,
+        openai_enabled=False,
+        file_access_enabled=True,
+        file_read_enabled=True,
+        confirmation_required=True,
+        file_access_allowed_folders=f"documents={folder}",
+    )
+
+    def deny(action_name: str, risk_level: str, description: str):
+        del action_name, risk_level, description
+        return ConfirmationResult(approved=False, denied=True, timed_out=False, reason="Denied.", log_file=tmp_path / "confirmations.log")
+
+    assistant = AssistantCore(settings=settings, openai_service=FakeOpenAIService(), confirmation_handler=deny)
+
+    response = assistant.handle_command("read file notes.md in documents")
+
+    assert response.source == "local"
+    assert response.accepted is False
+    assert response.text == "Denied."
 
 
 def test_assistant_core_disabled_file_access_fallback(tmp_path: Path) -> None:
@@ -228,3 +366,21 @@ def test_file_access_cli_commands(monkeypatch: pytest.MonkeyPatch, capsys) -> No
     assert "Jarvis Folder Listing" in list_output
     assert find_exit == 0
     assert "Jarvis File Search" in find_output
+
+
+def test_file_read_cli_command(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
+    from main import main
+
+    class DummyAssistant:
+        def handle_command(self, command: str) -> AssistantResponse:
+            assert command == "read file notes.md in documents"
+            return AssistantResponse(text="line 1\nline 2", accepted=True, source="file_access")
+
+    monkeypatch.setattr("main._build_cli_assistant", lambda settings: DummyAssistant())
+
+    exit_code = main(["--read-file", "notes.md", "documents"])
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "line 1" in output
+    assert "line 2" in output

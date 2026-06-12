@@ -73,6 +73,32 @@ class FileSearchResult:
         return self.request_attempted
 
 
+@dataclass(frozen=True)
+class FileReadResult:
+    enabled: bool
+    read_enabled: bool
+    folder_name: str
+    filename: str
+    configured_path: str
+    resolved_path: str | None
+    allowed: bool
+    configured: bool
+    request_attempted: bool
+    matched_file: str | None
+    extension_allowed: bool
+    truncated: bool
+    byte_count: int
+    content_preview: str | None
+    log_file: Path
+    safe_error: str | None = None
+    fallback_reason: str | None = None
+    errors: list[str] = field(default_factory=list)
+
+    @property
+    def is_successful(self) -> bool:
+        return self.request_attempted and self.safe_error is None and self.content_preview is not None
+
+
 class FileAccess:
     """Safe read-only access to whitelisted folders."""
 
@@ -177,6 +203,271 @@ class FileAccess:
         )
         return self._search_result(cleaned_name, cleaned_query, configured_path, str(resolved_path), True, True, True, matches, None, None, [])
 
+    def read_file(self, filename: str, folder_name: str) -> FileReadResult:
+        cleaned_name = self._clean_folder_name(folder_name)
+        cleaned_filename = self._clean_search_query(filename)
+        if not self.enabled or not self.settings.file_read_enabled:
+            message = "File reading is disabled."
+            return self._read_result(
+                cleaned_name,
+                cleaned_filename,
+                "",
+                None,
+                False,
+                False,
+                False,
+                None,
+                False,
+                False,
+                0,
+                None,
+                message,
+                message,
+                [message],
+            )
+        if self._looks_like_path(cleaned_filename):
+            message = "File names must be plain filenames, not paths."
+            return self._read_result(
+                cleaned_name,
+                cleaned_filename,
+                "",
+                None,
+                False,
+                False,
+                False,
+                None,
+                False,
+                False,
+                0,
+                None,
+                message,
+                message,
+                [message],
+            )
+        if self._looks_like_path(cleaned_name):
+            message = "Folder names must be selected from the whitelist."
+            return self._read_result(
+                cleaned_name,
+                cleaned_filename,
+                "",
+                None,
+                False,
+                False,
+                False,
+                None,
+                False,
+                False,
+                0,
+                None,
+                message,
+                message,
+                [message],
+            )
+
+        configured_path = self.allowed_folders.get(cleaned_name, "")
+        allowed = cleaned_name in self.allowed_folders
+        configured = allowed and bool(configured_path.strip())
+        if not allowed:
+            message = f"Folder '{cleaned_name}' is not allowed."
+            return self._read_result(
+                cleaned_name,
+                cleaned_filename,
+                configured_path,
+                None,
+                False,
+                False,
+                False,
+                None,
+                False,
+                False,
+                0,
+                None,
+                message,
+                message,
+                [message],
+            )
+        if not configured:
+            message = f"Folder '{cleaned_name}' is not configured."
+            return self._read_result(
+                cleaned_name,
+                cleaned_filename,
+                configured_path,
+                None,
+                True,
+                False,
+                False,
+                None,
+                False,
+                False,
+                0,
+                None,
+                message,
+                message,
+                [message],
+            )
+
+        resolved_path = self._resolve_configured_path(configured_path)
+        if resolved_path is None:
+            message = f"Folder '{cleaned_name}' could not be resolved."
+            return self._read_result(
+                cleaned_name,
+                cleaned_filename,
+                configured_path,
+                None,
+                True,
+                True,
+                False,
+                None,
+                False,
+                False,
+                0,
+                None,
+                message,
+                message,
+                [message],
+            )
+
+        matched_file = self._find_exact_file(resolved_path, cleaned_filename)
+        if matched_file is None:
+            message = f"File '{cleaned_filename}' was not found in {cleaned_name}."
+            return self._read_result(
+                cleaned_name,
+                cleaned_filename,
+                configured_path,
+                str(resolved_path),
+                True,
+                True,
+                True,
+                None,
+                False,
+                False,
+                0,
+                None,
+                message,
+                message,
+                [message],
+            )
+
+        extension_allowed = self._is_allowed_extension(matched_file.suffix.lower())
+        if not extension_allowed:
+            message = f"File extension '{matched_file.suffix.lower() or '[none]'}' is not allowed."
+            return self._read_result(
+                cleaned_name,
+                cleaned_filename,
+                configured_path,
+                str(resolved_path),
+                True,
+                True,
+                True,
+                str(matched_file),
+                False,
+                False,
+                0,
+                None,
+                message,
+                message,
+                [message],
+            )
+
+        try:
+            data = matched_file.read_bytes()
+        except OSError as exc:
+            message = f"Unable to read file '{matched_file.name}'."
+            return self._read_result(
+                cleaned_name,
+                cleaned_filename,
+                configured_path,
+                str(resolved_path),
+                True,
+                True,
+                True,
+                str(matched_file),
+                True,
+                False,
+                0,
+                None,
+                message,
+                f"{type(exc).__name__}: {exc}",
+                [f"{type(exc).__name__}: {exc}"],
+            )
+
+        truncated = len(data) > self.settings.file_read_max_bytes
+        if truncated:
+            data = data[: self.settings.file_read_max_bytes]
+
+        if b"\x00" in data:
+            message = "Binary files cannot be read safely."
+            return self._read_result(
+                cleaned_name,
+                cleaned_filename,
+                configured_path,
+                str(resolved_path),
+                True,
+                True,
+                True,
+                str(matched_file),
+                True,
+                truncated,
+                len(data),
+                None,
+                message,
+                message,
+                [message],
+            )
+
+        try:
+            content = data.decode("utf-8", errors="ignore" if truncated else "strict")
+        except UnicodeDecodeError:
+            message = "Binary files cannot be read safely."
+            return self._read_result(
+                cleaned_name,
+                cleaned_filename,
+                configured_path,
+                str(resolved_path),
+                True,
+                True,
+                True,
+                str(matched_file),
+                True,
+                truncated,
+                len(data),
+                None,
+                message,
+                message,
+                [message],
+            )
+
+        content = content.replace("\r\n", "\n").replace("\r", "\n")
+        output = content[: self.settings.file_read_max_output_chars]
+        output_truncated = len(content) > len(output)
+        preview = output + ("..." if output_truncated else "")
+        combined_truncated = truncated or output_truncated
+        self.file_access_logger.info(
+            "Read file folder={} file={} resolved_path={} byte_count={} truncated={}",
+            cleaned_name,
+            matched_file.name,
+            resolved_path,
+            len(data),
+            combined_truncated,
+        )
+        return self._read_result(
+            cleaned_name,
+            cleaned_filename,
+            configured_path,
+            str(resolved_path),
+            True,
+            True,
+            True,
+            str(matched_file),
+            True,
+            combined_truncated,
+            len(data),
+            preview,
+            None,
+            None,
+            [],
+        )
+
     def _listing_result(
         self,
         folder_name: str,
@@ -225,6 +516,45 @@ class FileAccess:
             configured=configured,
             request_attempted=request_attempted,
             matches=matches,
+            log_file=self.log_file,
+            safe_error=safe_error,
+            fallback_reason=fallback_reason,
+            errors=errors,
+        )
+
+    def _read_result(
+        self,
+        folder_name: str,
+        filename: str,
+        configured_path: str,
+        resolved_path: str | None,
+        allowed: bool,
+        configured: bool,
+        request_attempted: bool,
+        matched_file: str | None,
+        extension_allowed: bool,
+        truncated: bool,
+        byte_count: int,
+        content_preview: str | None,
+        safe_error: str | None,
+        fallback_reason: str | None,
+        errors: list[str],
+    ) -> FileReadResult:
+        return FileReadResult(
+            enabled=self.enabled and self.settings.file_read_enabled,
+            read_enabled=self.settings.file_read_enabled,
+            folder_name=folder_name,
+            filename=filename,
+            configured_path=configured_path,
+            resolved_path=resolved_path,
+            allowed=allowed,
+            configured=configured,
+            request_attempted=request_attempted,
+            matched_file=matched_file,
+            extension_allowed=extension_allowed,
+            truncated=truncated,
+            byte_count=byte_count,
+            content_preview=content_preview,
             log_file=self.log_file,
             safe_error=safe_error,
             fallback_reason=fallback_reason,
@@ -306,6 +636,33 @@ class FileAccess:
             return True
         return False
 
+    def _find_exact_file(self, folder_path: Path, filename: str) -> Path | None:
+        matches: list[Path] = []
+        for path in folder_path.rglob("*"):
+            if not path.is_file():
+                continue
+            if path.name.lower() != filename.lower():
+                continue
+            try:
+                resolved = path.resolve()
+            except OSError:
+                continue
+            try:
+                resolved.relative_to(folder_path)
+            except ValueError:
+                continue
+            matches.append(resolved)
+
+        if not matches:
+            return None
+        matches.sort(key=lambda item: str(item).lower())
+        return matches[0]
+
+    def _is_allowed_extension(self, extension: str) -> bool:
+        if not self.settings.file_read_allowed_extensions_list:
+            return False
+        return extension.lower() in self.settings.file_read_allowed_extensions_list
+
 
 def format_file_access_error(error: Exception) -> str:
     error_type = type(error).__name__
@@ -382,6 +739,35 @@ def format_file_search_report(result: FileSearchResult) -> str:
             lines.append(f"  {entry.name} | {kind} | size={entry.size_bytes} | modified={entry.modified_at}")
     elif result.request_attempted and not result.safe_error:
         lines.extend(["", "Matches:", "  None."])
+    return "\n".join(lines)
+
+
+def format_file_read_report(result: FileReadResult) -> str:
+    lines = [
+        "Jarvis File Read",
+        "================",
+        f"File access enabled: {_yes_no(result.enabled)}",
+        f"File reading enabled: {_yes_no(result.read_enabled)}",
+        f"Folder: {result.folder_name}",
+        f"Filename: {result.filename}",
+        f"Allowed: {_yes_no(result.allowed)}",
+        f"Configured: {_yes_no(result.configured)}",
+        f"Request attempted: {_yes_no(result.request_attempted)}",
+        f"Extension allowed: {_yes_no(result.extension_allowed)}",
+        f"Truncated: {_yes_no(result.truncated)}",
+        f"Byte count: {result.byte_count}",
+        f"Diagnostic log: {result.log_file}",
+    ]
+    if result.resolved_path:
+        lines.extend(["", f"Resolved path: {result.resolved_path}"])
+    if result.matched_file:
+        lines.extend(["", f"Matched file: {result.matched_file}"])
+    if result.fallback_reason:
+        lines.extend(["", "Fallback reason:", f"  {result.fallback_reason}"])
+    if result.safe_error:
+        lines.extend(["", "Error:", f"  {result.safe_error}"])
+    if result.content_preview is not None:
+        lines.extend(["", "Content preview:", result.content_preview])
     return "\n".join(lines)
 
 

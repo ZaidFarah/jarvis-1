@@ -211,6 +211,26 @@ class AppSettings(BaseSettings):
         default=False,
         validation_alias=AliasChoices("FILE_ACCESS_ENABLED", "JARVIS_FILE_ACCESS_ENABLED"),
     )
+    file_read_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("FILE_READ_ENABLED", "JARVIS_FILE_READ_ENABLED"),
+    )
+    file_read_max_bytes: int = Field(
+        default=20000,
+        ge=1024,
+        le=10_000_000,
+        validation_alias=AliasChoices("FILE_READ_MAX_BYTES", "JARVIS_FILE_READ_MAX_BYTES"),
+    )
+    file_read_max_output_chars: int = Field(
+        default=4000,
+        ge=256,
+        le=100_000,
+        validation_alias=AliasChoices("FILE_READ_MAX_OUTPUT_CHARS", "JARVIS_FILE_READ_MAX_OUTPUT_CHARS"),
+    )
+    file_read_allowed_extensions: str = Field(
+        default=".txt,.md,.csv,.json,.py,.java,.cpp,.h,.html,.css,.js",
+        validation_alias=AliasChoices("FILE_READ_ALLOWED_EXTENSIONS", "JARVIS_FILE_READ_ALLOWED_EXTENSIONS"),
+    )
     file_access_allowed_folders: str = Field(
         default=(
             "documents=%USERPROFILE%\\Documents,"
@@ -407,6 +427,14 @@ class AppSettings(BaseSettings):
             return ""
         return cleaned
 
+    @field_validator("file_read_allowed_extensions")
+    @classmethod
+    def normalize_file_read_allowed_extensions(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            return ""
+        return cleaned
+
     @field_validator("weather_default_city")
     @classmethod
     def normalize_weather_default_city(cls, value: str) -> str:
@@ -574,6 +602,23 @@ class AppSettings(BaseSettings):
                 continue
             parsed[cleaned_name] = folder_path.strip()
         return parsed
+
+    @property
+    def file_read_allowed_extensions_list(self) -> list[str]:
+        raw = self.file_read_allowed_extensions.strip()
+        if not raw:
+            return []
+
+        extensions: list[str] = []
+        for item in raw.replace("\n", ",").split(","):
+            cleaned = item.strip().lower()
+            if not cleaned:
+                continue
+            if not cleaned.startswith("."):
+                cleaned = f".{cleaned}"
+            if cleaned not in extensions:
+                extensions.append(cleaned)
+        return extensions
 
 
 def load_settings() -> AppSettings:

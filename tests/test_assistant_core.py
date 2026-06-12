@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from assistant.core import AssistantCore
 from config.settings import AppSettings
+from security.confirmation import ConfirmationResult
 from integrations.weather_service import WeatherQueryResult
 from reminders.models import ReminderCheckResult
 from reminders.service import ReminderQueryResult
@@ -341,3 +344,69 @@ def test_assistant_core_routes_due_reminder_commands() -> None:
     assert response.source == "reminders"
     assert "Due reminders:" in response.text
     assert reminder_service.calls == [("check",)]
+
+
+def test_assistant_core_routes_read_file_command_with_confirmation(tmp_path: Path) -> None:
+    folder = tmp_path / "documents"
+    folder.mkdir()
+    (folder / "notes.md").write_text("hello world", encoding="utf-8")
+    settings = AppSettings(
+        _env_file=None,
+        openai_enabled=False,
+        file_access_enabled=True,
+        file_read_enabled=True,
+        confirmation_required=True,
+        file_access_allowed_folders=f"documents={folder}",
+    )
+    confirmations: list[tuple[str, str, str]] = []
+
+    def approve(action_name: str, risk_level: str, description: str) -> ConfirmationResult:
+        confirmations.append((action_name, risk_level, description))
+        return ConfirmationResult(
+            approved=True,
+            denied=False,
+            timed_out=False,
+            reason="Approved.",
+            log_file=tmp_path / "confirmations.log",
+        )
+
+    assistant = AssistantCore(settings=settings, openai_service=FakeOpenAIService(), confirmation_handler=approve)
+
+    response = assistant.handle_command("read file notes.md in documents")
+
+    assert response.source == "file_access"
+    assert response.accepted is True
+    assert response.text == "hello world"
+    assert confirmations and confirmations[0][0] == "read file contents"
+
+
+def test_assistant_core_read_file_confirmation_denied_blocks_read(tmp_path: Path) -> None:
+    folder = tmp_path / "documents"
+    folder.mkdir()
+    (folder / "notes.md").write_text("hello world", encoding="utf-8")
+    settings = AppSettings(
+        _env_file=None,
+        openai_enabled=False,
+        file_access_enabled=True,
+        file_read_enabled=True,
+        confirmation_required=True,
+        file_access_allowed_folders=f"documents={folder}",
+    )
+
+    def deny(action_name: str, risk_level: str, description: str) -> ConfirmationResult:
+        del action_name, risk_level, description
+        return ConfirmationResult(
+            approved=False,
+            denied=True,
+            timed_out=False,
+            reason="Denied.",
+            log_file=tmp_path / "confirmations.log",
+        )
+
+    assistant = AssistantCore(settings=settings, openai_service=FakeOpenAIService(), confirmation_handler=deny)
+
+    response = assistant.handle_command("read file notes.md in documents")
+
+    assert response.source == "local"
+    assert response.accepted is False
+    assert response.text == "Denied."
