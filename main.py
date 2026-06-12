@@ -12,6 +12,7 @@ from services.notification_service import NotificationService, format_notificati
 from services.logging_service import configure_logging
 from services.openai_service import OpenAIService, format_openai_check_report
 from tools.app_launcher import AppLauncher, format_app_launch_report, format_app_launcher_check_report, format_app_resolution_report
+from tools.website_launcher import WebsiteLauncher, format_website_launcher_check_report, format_website_open_report
 from memory.store import SQLiteMemoryStore
 from reminders.service import ReminderService
 from reminders.scheduler import ReminderWatcher
@@ -126,6 +127,19 @@ def main(argv: list[str] | None = None) -> int:
         report = WeatherService(settings).run_check()
         print(format_weather_check_report(report))
         return 0 if report.is_successful else 1
+
+    if "--website-check" in args:
+        settings = load_settings()
+        configure_logging(settings, console=False)
+        report = WebsiteLauncher(settings).run_check()
+        print(format_website_launcher_check_report(report))
+        return 0 if report.is_successful else 1
+
+    if "--open-site" in args:
+        settings = load_settings()
+        configure_logging(settings, console=False)
+        site_name = _message_after_flag(args, "--open-site") or "google"
+        return _run_open_site(settings, site_name)
 
     if "--tts-test" in args:
         settings = load_settings()
@@ -383,6 +397,12 @@ def _run_launch_app(settings, app_name: str) -> int:
     result = AppLauncher(settings).launch_app(app_name)
     print(format_app_launch_report(result), flush=True)
     return 0 if result.request_attempted or result.launched else 1
+
+
+def _run_open_site(settings, site_name: str) -> int:
+    result = WebsiteLauncher(settings).open_site(site_name)
+    print(format_website_open_report(result), flush=True)
+    return 0 if result.request_attempted or result.opened else 1
 
 
 def _format_chat_test_report(

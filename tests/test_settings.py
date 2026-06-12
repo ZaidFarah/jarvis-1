@@ -123,6 +123,24 @@ def test_app_launcher_settings_read_environment(monkeypatch: pytest.MonkeyPatch)
     assert settings.app_launcher_allowed_apps_map == {"notepad": "notepad.exe", "paint": "paint.exe"}
 
 
+def test_website_launcher_settings_defaults_are_safe() -> None:
+    settings = AppSettings(_env_file=None)
+
+    assert settings.website_launcher_enabled is True
+    assert settings.website_allowed_sites_map["google"] == "https://www.google.com"
+    assert settings.website_allowed_sites_map["blackboard"] == ""
+
+
+def test_website_launcher_settings_read_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("WEBSITE_LAUNCHER_ENABLED", "false")
+    monkeypatch.setenv("WEBSITE_ALLOWED_SITES", "docs=https://docs.example.com,blackboard=")
+
+    settings = AppSettings(_env_file=None)
+
+    assert settings.website_launcher_enabled is False
+    assert settings.website_allowed_sites_map == {"docs": "https://docs.example.com", "blackboard": ""}
+
+
 def test_notification_settings_defaults_are_safe() -> None:
     settings = AppSettings(_env_file=None)
 

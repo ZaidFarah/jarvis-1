@@ -192,6 +192,21 @@ class AppSettings(BaseSettings):
         default="notepad=notepad.exe,calculator=calc.exe,chrome=,edge=,vscode=,docker=",
         validation_alias=AliasChoices("APP_LAUNCHER_ALLOWED_APPS", "JARVIS_APP_LAUNCHER_ALLOWED_APPS"),
     )
+    website_launcher_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("WEBSITE_LAUNCHER_ENABLED", "JARVIS_WEBSITE_LAUNCHER_ENABLED"),
+    )
+    website_allowed_sites: str = Field(
+        default=(
+            "google=https://www.google.com,"
+            "youtube=https://www.youtube.com,"
+            "github=https://github.com,"
+            "gmail=https://mail.google.com,"
+            "blackboard=,"
+            "outlook=https://outlook.office.com"
+        ),
+        validation_alias=AliasChoices("WEBSITE_ALLOWED_SITES", "JARVIS_WEBSITE_ALLOWED_SITES"),
+    )
     notifications_enabled: bool = Field(
         default=False,
         validation_alias=AliasChoices("NOTIFICATIONS_ENABLED", "JARVIS_NOTIFICATIONS_ENABLED"),
@@ -354,6 +369,14 @@ class AppSettings(BaseSettings):
             return ""
         return cleaned
 
+    @field_validator("website_allowed_sites")
+    @classmethod
+    def normalize_website_allowed_sites(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            return ""
+        return cleaned
+
     @field_validator("weather_default_city")
     @classmethod
     def normalize_weather_default_city(cls, value: str) -> str:
@@ -478,6 +501,27 @@ class AppSettings(BaseSettings):
             if not cleaned_name:
                 continue
             parsed[cleaned_name] = command.strip()
+        return parsed
+
+    @property
+    def website_allowed_sites_map(self) -> dict[str, str]:
+        raw = self.website_allowed_sites.strip()
+        if not raw:
+            return {}
+
+        entries = raw.replace("\n", ",").split(",")
+        parsed: dict[str, str] = {}
+        for entry in entries:
+            item = entry.strip()
+            if not item:
+                continue
+            if "=" not in item:
+                continue
+            name, url = item.split("=", 1)
+            cleaned_name = name.strip().lower()
+            if not cleaned_name:
+                continue
+            parsed[cleaned_name] = url.strip()
         return parsed
 
 

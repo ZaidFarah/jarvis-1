@@ -494,6 +494,31 @@ py main.py --launch-app notepad
 
 Jarvis can launch only apps listed in `APP_LAUNCHER_ALLOWED_APPS`. If an app is missing or not configured, Jarvis refuses the request.
 
+## Website Check
+
+```powershell
+py main.py --website-check
+```
+
+The website check reports whether website launching is enabled and which sites are allowed. It never opens a page.
+
+## Open Site
+
+```powershell
+py main.py --open-site google
+```
+
+Jarvis can open only sites listed in `WEBSITE_ALLOWED_SITES`. If a site is missing or not configured, Jarvis refuses the request. Raw URLs are rejected.
+
+## Phase 18 Scope
+
+- Safe website launcher for whitelisted sites only.
+- CLI commands: `py main.py --website-check` and `py main.py --open-site google`.
+- Assistant commands: `open google`, `open youtube`, `open github`, `open gmail`, `open outlook`, and `open blackboard`.
+- Website settings: `WEBSITE_LAUNCHER_ENABLED=true`, `WEBSITE_ALLOWED_SITES=google=https://www.google.com,youtube=https://www.youtube.com,github=https://github.com,gmail=https://mail.google.com,blackboard=,outlook=https://outlook.office.com`.
+- Raw URLs are rejected and sites without configured URLs fail safely.
+- Website logs are saved to `logs/website_launcher.log`.
+
 ## Text To Speech Test
 
 ```powershell
@@ -540,7 +565,7 @@ py -m pytest
 
 ## Not Implemented Yet
 
-Jarvis still does not include ElevenLabs, startup background service, LangGraph, memory, Gmail, Calendar, browser automation, desktop automation, file tools, permissions system, or vision.
+Jarvis still does not include ElevenLabs, startup background service, LangGraph, browser automation, desktop automation, file tools, permissions system, or vision.
 
 ## Project Layout
 

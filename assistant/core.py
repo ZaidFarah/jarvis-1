@@ -8,6 +8,7 @@ from integrations.weather_service import WeatherService
 from memory.store import SensitiveMemoryError, SQLiteMemoryStore
 from config.settings import AppSettings, load_settings
 from tools.app_launcher import AppLauncher
+from tools.website_launcher import WebsiteLauncher
 from reminders.service import ReminderService
 from services.openai_service import OpenAIService
 
@@ -43,6 +44,10 @@ class AssistantCore:
             self.app_launcher = AppLauncher(self.settings)
         else:
             self.app_launcher = None
+        if self.settings.website_launcher_enabled:
+            self.website_launcher = WebsiteLauncher(self.settings)
+        else:
+            self.website_launcher = None
         if reminder_service is not None:
             self.reminder_service = reminder_service
         elif self.settings.reminders_enabled:
@@ -79,6 +84,10 @@ class AssistantCore:
         app_launch_response = self._handle_app_launcher_command(cleaned)
         if app_launch_response is not None:
             return app_launch_response
+
+        website_response = self._handle_website_command(cleaned)
+        if website_response is not None:
+            return website_response
 
         reminder_response = self._handle_reminder_command(cleaned)
         if reminder_response is not None:
@@ -163,13 +172,15 @@ class AssistantCore:
         return response
 
     def _handle_app_launcher_command(self, command: str) -> AssistantResponse | None:
-        normalized = " ".join(command.lower().strip().split())
-        match = re.match(r"(?i)^(?:open|launch)\s+(.+)$", command.strip())
+        match = re.match(r"(?i)^(open|launch)\s+(.+)$", command.strip())
         if not match:
             return None
 
-        app_name = match.group(1).strip().lower()
+        verb = match.group(1).strip().lower()
+        app_name = match.group(2).strip().lower()
         if app_name not in self.settings.app_launcher_allowed_apps_map:
+            if verb == "open":
+                return None
             return AssistantResponse(text=f"App '{app_name}' is not allowed.", accepted=True, source="local")
 
         if not self.settings.app_launcher_enabled or self.app_launcher is None:
@@ -177,6 +188,33 @@ class AssistantCore:
 
         result = self.app_launcher.launch_app(app_name)
         return AssistantResponse(text=self._app_launcher_response_text(result), accepted=result.launched, source="launcher", error=result.safe_error)
+
+    def _handle_website_command(self, command: str) -> AssistantResponse | None:
+        match = re.match(r"(?i)^open\s+(.+)$", command.strip())
+        if not match:
+            return None
+
+        site_name = match.group(1).strip().lower()
+        if self._looks_like_raw_url(site_name):
+            return AssistantResponse(
+                text="Please use a whitelisted site name, not a raw URL.",
+                accepted=False,
+                source="local",
+            )
+
+        if site_name not in self.settings.website_allowed_sites_map:
+            return AssistantResponse(text=f"Site '{site_name}' is not allowed.", accepted=True, source="local")
+
+        if not self.settings.website_launcher_enabled or self.website_launcher is None:
+            return AssistantResponse(text="Website launcher is disabled.", accepted=True, source="local")
+
+        result = self.website_launcher.open_site(site_name)
+        return AssistantResponse(
+            text=self._website_launcher_response_text(result),
+            accepted=result.opened,
+            source="website",
+            error=result.safe_error,
+        )
 
     def _handle_reminder_command(self, command: str) -> AssistantResponse | None:
         if not self.settings.reminders_enabled or self.reminder_service is None:
@@ -306,3 +344,18 @@ class AssistantCore:
         if result.safe_error:
             return result.safe_error
         return f"Unable to launch {result.app_name}."
+
+    @staticmethod
+    def _website_launcher_response_text(result) -> str:
+        if result.opened:
+            return f"Opened {result.site_name}."
+        if result.fallback_reason:
+            return result.fallback_reason
+        if result.safe_error:
+            return result.safe_error
+        return f"Unable to open {result.site_name}."
+
+    @staticmethod
+    def _looks_like_raw_url(value: str) -> bool:
+        cleaned = value.strip().lower()
+        return bool(re.match(r"^(https?://|www\.)", cleaned) or any(sep in cleaned for sep in ("://", "/", "\\", "?", "#", "&", "=")) or "." in cleaned)
