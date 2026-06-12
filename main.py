@@ -8,7 +8,7 @@ from app.application import JarvisApplication
 from assistant.core import AssistantCore, AssistantResponse
 from config.settings import load_settings
 from integrations.calendar_service import CalendarService, format_calendar_auth_report, format_calendar_check_report
-from integrations.gmail_service import GmailService, format_gmail_auth_report, format_gmail_check_report, format_gmail_unread_report
+from integrations.gmail_service import GmailService, format_gmail_auth_report, format_gmail_check_report, format_gmail_draft_report, format_gmail_unread_report
 from integrations.weather_service import WeatherService, format_weather_check_report
 from services.notification_service import NotificationService, format_notification_check_report
 from services.logging_service import configure_logging
@@ -186,6 +186,12 @@ def main(argv: list[str] | None = None) -> int:
         settings = load_settings()
         configure_logging(settings, console=False)
         return _run_gmail_unread(settings, speak_requested=_has_flag(args, "--speak"))
+
+    if "--gmail-draft" in args:
+        settings = load_settings()
+        configure_logging(settings, console=False)
+        recipient, subject, body = _gmail_draft_args(args)
+        return _run_gmail_draft(settings, recipient, subject, body)
 
     if "--website-check" in args:
         settings = load_settings()
@@ -610,6 +616,17 @@ def _run_gmail_unread(settings, speak_requested: bool) -> int:
     return 0 if response.accepted and (tts_result is None or tts_result.spoken) else 1
 
 
+def _run_gmail_draft(settings, recipient: str, subject: str, body: str) -> int:
+    if not recipient or not subject or not body:
+        print("Please provide a recipient, subject, and body.", flush=True)
+        return 1
+    assistant = _build_cli_assistant(settings)
+    command = f"draft email to {recipient} subject {subject} body {body}"
+    response = assistant.handle_command(command)
+    print(_format_gmail_draft_report(response), flush=True)
+    return 0 if response.accepted else 1
+
+
 def _run_calendar_create(settings, title: str, start_text: str, duration_minutes: int) -> int:
     if not title or not start_text or duration_minutes <= 0:
         print("Please provide a title, datetime in YYYY-MM-DD HH:MM format, and a positive duration.", flush=True)
@@ -678,6 +695,21 @@ def _calendar_create_args(args: list[str]) -> tuple[str, str, int]:
     except ValueError:
         duration_minutes = 0
     return title, start_text, duration_minutes
+
+
+def _gmail_draft_args(args: list[str]) -> tuple[str, str, str]:
+    index = args.index("--gmail-draft")
+    values: list[str] = []
+    for value in args[index + 1 :]:
+        if value.startswith("--"):
+            break
+        values.append(value)
+    if len(values) < 3:
+        return "", "", ""
+    recipient = values[0].strip()
+    subject = values[1].strip()
+    body = " ".join(values[2:]).strip()
+    return recipient, subject, body
 
 
 def _looks_like_calendar_datetime(value: str) -> bool:
@@ -805,6 +837,20 @@ def _format_gmail_unread_report(
             lines.extend(["", "TTS fallback reason:", f"  {tts_result.fallback_reason}"])
         if tts_result.error:
             lines.extend(["", "TTS error:", f"  {tts_result.error}"])
+    return "\n".join(lines)
+
+
+def _format_gmail_draft_report(response: AssistantResponse) -> str:
+    lines = [
+        "Jarvis Gmail Draft",
+        "==================",
+        f"response source: {response.source}",
+        "",
+        "Draft result:",
+        f"  {response.text}",
+    ]
+    if response.error:
+        lines.extend(["", "Fallback reason:", f"  {response.error}"])
     return "\n".join(lines)
 
 

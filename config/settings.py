@@ -287,6 +287,14 @@ class AppSettings(BaseSettings):
         default="https://www.googleapis.com/auth/gmail.readonly",
         validation_alias=AliasChoices("GMAIL_SCOPES", "JARVIS_GMAIL_SCOPES"),
     )
+    gmail_draft_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("GMAIL_DRAFT_ENABLED", "JARVIS_GMAIL_DRAFT_ENABLED"),
+    )
+    gmail_draft_scopes: str = Field(
+        default="https://www.googleapis.com/auth/gmail.compose",
+        validation_alias=AliasChoices("GMAIL_DRAFT_SCOPES", "JARVIS_GMAIL_DRAFT_SCOPES"),
+    )
     gmail_max_results: int = Field(
         default=5,
         ge=1,
@@ -633,6 +641,28 @@ class AppSettings(BaseSettings):
     @property
     def gmail_scopes_list(self) -> list[str]:
         raw = self.gmail_scopes.strip()
+        if not raw:
+            return []
+
+        scopes: list[str] = []
+        for item in raw.replace("\n", ",").split(","):
+            cleaned = item.strip()
+            if cleaned and cleaned not in scopes:
+                scopes.append(cleaned)
+        return scopes
+
+    @property
+    def gmail_auth_scopes_list(self) -> list[str]:
+        scopes = self.gmail_scopes_list[:]
+        if self.gmail_draft_enabled:
+            for scope in self.gmail_draft_scopes_list:
+                if scope not in scopes:
+                    scopes.append(scope)
+        return scopes
+
+    @property
+    def gmail_draft_scopes_list(self) -> list[str]:
+        raw = self.gmail_draft_scopes.strip()
         if not raw:
             return []
 

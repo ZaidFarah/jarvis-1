@@ -139,10 +139,23 @@ class FakeGmailService:
             emails=[],
         )
         self.calls = 0
+        self.draft_calls: list[tuple[str, str, str]] = []
 
     def unread_emails(self) -> GmailUnreadResult:
         self.calls += 1
         return self.result
+
+    def create_draft(self, recipient: str, subject: str, body: str):
+        self.draft_calls.append((recipient, subject, body))
+        return type(
+            "DraftResult",
+            (),
+            {
+                "success": True,
+                "text": f"Created Gmail draft for {recipient}.",
+                "safe_error": None,
+            },
+        )()
 
 
 def test_assistant_core_returns_placeholder_response() -> None:
@@ -497,6 +510,51 @@ def test_assistant_core_gmail_confirmation_denied_blocks_read() -> None:
     assert response.accepted is False
     assert response.text == "Denied."
     assert gmail_service.calls == 0
+
+
+def test_assistant_core_routes_gmail_draft_commands() -> None:
+    gmail_service = FakeGmailService()
+    assistant = AssistantCore(
+        settings=AppSettings(_env_file=None, openai_enabled=False, gmail_enabled=True, gmail_draft_enabled=True),
+        openai_service=FakeOpenAIService(error=AssertionError("OpenAI should not be called for Gmail")),
+        gmail_service=gmail_service,
+        confirmation_handler=lambda *args: ConfirmationResult(
+            approved=True,
+            denied=False,
+            timed_out=False,
+            reason="Approved.",
+            log_file=Path("confirmations.log"),
+        ),
+    )
+
+    response = assistant.handle_command("draft email to recipient@example.com subject Hello body Quick note")
+
+    assert response.source == "gmail"
+    assert "Created Gmail draft" in response.text
+    assert gmail_service.draft_calls == [("recipient@example.com", "Hello", "Quick note")]
+
+
+def test_assistant_core_gmail_draft_confirmation_denied_blocks_create() -> None:
+    gmail_service = FakeGmailService()
+    assistant = AssistantCore(
+        settings=AppSettings(_env_file=None, openai_enabled=False, gmail_enabled=True, gmail_draft_enabled=True),
+        openai_service=FakeOpenAIService(error=AssertionError("OpenAI should not be called for Gmail")),
+        gmail_service=gmail_service,
+        confirmation_handler=lambda *args: ConfirmationResult(
+            approved=False,
+            denied=True,
+            timed_out=False,
+            reason="Denied.",
+            log_file=Path("confirmations.log"),
+        ),
+    )
+
+    response = assistant.handle_command("create email draft to recipient@example.com subject Hello body Quick note")
+
+    assert response.source == "local"
+    assert response.accepted is False
+    assert response.text == "Denied."
+    assert gmail_service.draft_calls == []
 
 
 def test_assistant_core_calendar_create_confirmation_denied_blocks_create() -> None:
