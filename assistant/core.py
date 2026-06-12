@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from assistant.conversation import ConversationHistory
 from integrations.calendar_service import CalendarCreateResult, CalendarService, CalendarQueryResult
+from integrations.gmail_service import GmailService, GmailUnreadResult
 from integrations.weather_service import WeatherService
 from memory.store import SensitiveMemoryError, SQLiteMemoryStore
 from security.confirmation import ConfirmationResult
@@ -41,6 +42,7 @@ class AssistantCore:
         memory_store: SQLiteMemoryStore | None = None,
         weather_service: WeatherService | None = None,
         calendar_service: CalendarService | None = None,
+        gmail_service: GmailService | None = None,
         reminder_service: ReminderService | None = None,
         confirmation_handler: Callable[[str, str, str], ConfirmationResult] | None = None,
     ) -> None:
@@ -55,6 +57,12 @@ class AssistantCore:
             self.calendar_service = CalendarService(self.settings)
         else:
             self.calendar_service = None
+        if gmail_service is not None:
+            self.gmail_service = gmail_service
+        elif self.settings.gmail_enabled:
+            self.gmail_service = GmailService(self.settings)
+        else:
+            self.gmail_service = None
         if self.settings.app_launcher_enabled:
             self.app_launcher = AppLauncher(self.settings)
         else:
@@ -111,6 +119,10 @@ class AssistantCore:
         calendar_response = self._handle_calendar_command(cleaned)
         if calendar_response is not None:
             return calendar_response
+
+        gmail_response = self._handle_gmail_command(cleaned)
+        if gmail_response is not None:
+            return gmail_response
 
         file_access_response = self._handle_file_access_command(cleaned)
         if file_access_response is not None:
@@ -272,6 +284,47 @@ class AssistantCore:
             text=self._calendar_create_response_text(result),
             accepted=result.success,
             source="calendar",
+            error=result.safe_error,
+        )
+
+    def _handle_gmail_command(self, command: str) -> AssistantResponse | None:
+        normalized = " ".join(command.lower().strip().split())
+        if normalized not in {
+            "read my unread emails",
+            "show unread emails",
+            "check my gmail",
+            "check my emails",
+        }:
+            return None
+
+        if self.gmail_service is None or not self.settings.gmail_enabled:
+            return AssistantResponse(text="Gmail is disabled.", accepted=True, source="local")
+
+        decision = self.permission_broker.check(
+            "read emails",
+            description="Read unread Gmail message metadata.",
+        )
+        if not decision.allowed:
+            return AssistantResponse(text=decision.reason, accepted=False, source="local", error=decision.reason)
+
+        if self.confirmation_handler is None:
+            return AssistantResponse(
+                text="Confirmation is required before reading Gmail.",
+                accepted=False,
+                source="local",
+                error="Confirmation handler is unavailable.",
+            )
+
+        confirmation = self.confirmation_handler(decision.action_name, decision.risk_level, decision.description)
+        if not confirmation.approved:
+            reason = confirmation.reason or "Gmail read canceled."
+            return AssistantResponse(text=reason, accepted=False, source="local", error=reason)
+
+        result = self.gmail_service.unread_emails()
+        return AssistantResponse(
+            text=self._gmail_unread_response_text(result),
+            accepted=result.success,
+            source="gmail",
             error=result.safe_error,
         )
 
@@ -677,6 +730,12 @@ class AssistantCore:
 
     @staticmethod
     def _calendar_create_response_text(result: CalendarCreateResult) -> str:
+        if result.safe_error:
+            return result.safe_error
+        return result.text
+
+    @staticmethod
+    def _gmail_unread_response_text(result: GmailUnreadResult) -> str:
         if result.safe_error:
             return result.safe_error
         return result.text

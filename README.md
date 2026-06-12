@@ -606,6 +606,17 @@ Jarvis can open only sites listed in `WEBSITE_ALLOWED_SITES`. If a site is missi
 - If the token only has read-only scope, Jarvis reports: `Calendar write scope is required. Re-run calendar auth after enabling create.`
 - Calendar logs are saved to `logs/calendar.log`.
 
+## Phase 27 Scope
+
+- Gmail unread metadata only, with read-only OAuth setup.
+- Put your OAuth client secret JSON at `credentials/google_client_secret.json`.
+- Run `py main.py --gmail-auth` to complete sign-in and save the token at `credentials/token_gmail.json`.
+- Run `py main.py --gmail-unread` to read unread message metadata after confirmation.
+- Assistant commands: `read my unread emails`, `show unread emails`, `check my Gmail`, and `check my emails`.
+- Gmail scope: `GMAIL_SCOPES=https://www.googleapis.com/auth/gmail.readonly`.
+- Gmail reads only sender, subject, snippet, and date when available.
+- Gmail logs are saved to `logs/gmail.log`.
+
 ## Text To Speech Test
 
 ```powershell

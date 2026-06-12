@@ -8,6 +8,7 @@ from app.application import JarvisApplication
 from assistant.core import AssistantCore, AssistantResponse
 from config.settings import load_settings
 from integrations.calendar_service import CalendarService, format_calendar_auth_report, format_calendar_check_report
+from integrations.gmail_service import GmailService, format_gmail_auth_report, format_gmail_check_report, format_gmail_unread_report
 from integrations.weather_service import WeatherService, format_weather_check_report
 from services.notification_service import NotificationService, format_notification_check_report
 from services.logging_service import configure_logging
@@ -168,6 +169,23 @@ def main(argv: list[str] | None = None) -> int:
         configure_logging(settings, console=False)
         title, start_text, duration_minutes = _calendar_create_args(args)
         return _run_calendar_create(settings, title, start_text, duration_minutes)
+
+    if "--gmail-check" in args:
+        settings = load_settings()
+        configure_logging(settings, console=False)
+        report = GmailService(settings).run_check()
+        print(format_gmail_check_report(report))
+        return 0 if report.is_successful else 1
+
+    if "--gmail-auth" in args:
+        settings = load_settings()
+        configure_logging(settings, console=False)
+        return _run_gmail_auth(settings)
+
+    if "--gmail-unread" in args:
+        settings = load_settings()
+        configure_logging(settings, console=False)
+        return _run_gmail_unread(settings, speak_requested=_has_flag(args, "--speak"))
 
     if "--website-check" in args:
         settings = load_settings()
@@ -576,6 +594,22 @@ def _run_calendar_query(settings, command: str) -> int:
     return 0 if response.accepted else 1
 
 
+def _run_gmail_auth(settings) -> int:
+    report = GmailService(settings).auth_gmail()
+    print(format_gmail_auth_report(report), flush=True)
+    return 0 if report.is_successful else 1
+
+
+def _run_gmail_unread(settings, speak_requested: bool) -> int:
+    assistant = _build_cli_assistant(settings)
+    response = assistant.handle_command("read my unread emails")
+    tts_result = None
+    if response.accepted and (settings.tts_enabled or speak_requested):
+        tts_result = speak_text(response.text, settings, speak_requested=speak_requested)
+    print(_format_gmail_unread_report(response, tts_result), flush=True)
+    return 0 if response.accepted and (tts_result is None or tts_result.spoken) else 1
+
+
 def _run_calendar_create(settings, title: str, start_text: str, duration_minutes: int) -> int:
     if not title or not start_text or duration_minutes <= 0:
         print("Please provide a title, datetime in YYYY-MM-DD HH:MM format, and a positive duration.", flush=True)
@@ -712,6 +746,42 @@ def _format_reminders_check_report(
         f"response source: {response.source}",
         "",
         "Reminders result:",
+        f"  {response.text}",
+    ]
+    if response.error:
+        lines.extend(["", "Fallback reason:", f"  {response.error}"])
+    if tts_result is not None:
+        lines.extend(
+            [
+                "",
+                "Text-to-speech:",
+                f"  provider: {tts_result.provider_name}",
+                f"  requested provider: {tts_result.requested_provider_name or tts_result.provider_name}",
+                f"  provider available: {_yes_no(tts_result.provider_available)}",
+                f"  fallback used: {_yes_no(tts_result.fallback_used)}",
+                f"  spoken: {_yes_no(tts_result.spoken)}",
+                f"  diagnostic log: {tts_result.log_file}",
+            ]
+        )
+        if tts_result.audio_file:
+            lines.append(f"  audio file: {tts_result.audio_file}")
+        if tts_result.fallback_reason:
+            lines.extend(["", "TTS fallback reason:", f"  {tts_result.fallback_reason}"])
+        if tts_result.error:
+            lines.extend(["", "TTS error:", f"  {tts_result.error}"])
+    return "\n".join(lines)
+
+
+def _format_gmail_unread_report(
+    response: AssistantResponse,
+    tts_result: TextToSpeechResult | None = None,
+) -> str:
+    lines = [
+        "Jarvis Gmail Unread",
+        "===================",
+        f"response source: {response.source}",
+        "",
+        "Unread email summary:",
         f"  {response.text}",
     ]
     if response.error:

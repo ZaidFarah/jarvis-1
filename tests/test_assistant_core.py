@@ -6,6 +6,7 @@ from assistant.core import AssistantCore
 from config.settings import AppSettings
 from security.confirmation import ConfirmationResult
 from integrations.calendar_service import CalendarCreateResult, CalendarQueryResult
+from integrations.gmail_service import GmailUnreadResult
 from integrations.weather_service import WeatherQueryResult
 from reminders.models import ReminderCheckResult
 from reminders.service import ReminderQueryResult
@@ -121,6 +122,27 @@ class FakeCalendarService:
             write_scope_detected=True,
             event_id="abc123",
         )
+
+
+class FakeGmailService:
+    def __init__(self, result: GmailUnreadResult | None = None) -> None:
+        self.result = result or GmailUnreadResult(
+            enabled=True,
+            success=True,
+            text="Unread Gmail messages (1):\n1. From: Alice\n   Subject: Hello\n   Date: 2026-06-12\n   Snippet: Quick note",
+            provider="google_gmail",
+            request_attempted=True,
+            authenticated=True,
+            client_secret_detected=True,
+            token_detected=True,
+            unread_count=1,
+            emails=[],
+        )
+        self.calls = 0
+
+    def unread_emails(self) -> GmailUnreadResult:
+        self.calls += 1
+        return self.result
 
 
 def test_assistant_core_returns_placeholder_response() -> None:
@@ -430,6 +452,51 @@ def test_assistant_core_routes_calendar_create_commands() -> None:
     assert response.source == "calendar"
     assert "Created calendar event: Team Sync" in response.text
     assert calendar_service.create_calls == [("Team Sync", "2026-06-12 18:30", 30, None, None)]
+
+
+def test_assistant_core_routes_gmail_unread_commands() -> None:
+    gmail_service = FakeGmailService()
+    assistant = AssistantCore(
+        settings=AppSettings(_env_file=None, openai_enabled=False, gmail_enabled=True),
+        openai_service=FakeOpenAIService(error=AssertionError("OpenAI should not be called for Gmail")),
+        gmail_service=gmail_service,
+        confirmation_handler=lambda *args: ConfirmationResult(
+            approved=True,
+            denied=False,
+            timed_out=False,
+            reason="Approved.",
+            log_file=Path("confirmations.log"),
+        ),
+    )
+
+    response = assistant.handle_command("read my unread emails")
+
+    assert response.source == "gmail"
+    assert "Unread Gmail messages" in response.text
+    assert gmail_service.calls == 1
+
+
+def test_assistant_core_gmail_confirmation_denied_blocks_read() -> None:
+    gmail_service = FakeGmailService()
+    assistant = AssistantCore(
+        settings=AppSettings(_env_file=None, openai_enabled=False, gmail_enabled=True),
+        openai_service=FakeOpenAIService(error=AssertionError("OpenAI should not be called for Gmail")),
+        gmail_service=gmail_service,
+        confirmation_handler=lambda *args: ConfirmationResult(
+            approved=False,
+            denied=True,
+            timed_out=False,
+            reason="Denied.",
+            log_file=Path("confirmations.log"),
+        ),
+    )
+
+    response = assistant.handle_command("show unread emails")
+
+    assert response.source == "local"
+    assert response.accepted is False
+    assert response.text == "Denied."
+    assert gmail_service.calls == 0
 
 
 def test_assistant_core_calendar_create_confirmation_denied_blocks_create() -> None:

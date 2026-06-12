@@ -271,6 +271,28 @@ class AppSettings(BaseSettings):
         default=False,
         validation_alias=AliasChoices("REMINDERS_TOAST_ENABLED", "JARVIS_REMINDERS_TOAST_ENABLED"),
     )
+    gmail_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("GMAIL_ENABLED", "JARVIS_GMAIL_ENABLED"),
+    )
+    gmail_client_secret_path: Path = Field(
+        default=PROJECT_ROOT / "credentials" / "google_client_secret.json",
+        validation_alias=AliasChoices("GMAIL_CLIENT_SECRET_PATH", "JARVIS_GMAIL_CLIENT_SECRET_PATH"),
+    )
+    gmail_token_path: Path = Field(
+        default=PROJECT_ROOT / "credentials" / "token_gmail.json",
+        validation_alias=AliasChoices("GMAIL_TOKEN_PATH", "JARVIS_GMAIL_TOKEN_PATH"),
+    )
+    gmail_scopes: str = Field(
+        default="https://www.googleapis.com/auth/gmail.readonly",
+        validation_alias=AliasChoices("GMAIL_SCOPES", "JARVIS_GMAIL_SCOPES"),
+    )
+    gmail_max_results: int = Field(
+        default=5,
+        ge=1,
+        le=50,
+        validation_alias=AliasChoices("GMAIL_MAX_RESULTS", "JARVIS_GMAIL_MAX_RESULTS"),
+    )
     reminders_database_path: Path = Field(
         default=PROJECT_ROOT / "data" / "jarvis_reminders.db",
         validation_alias=AliasChoices("REMINDERS_DATABASE_PATH", "JARVIS_REMINDERS_DATABASE_PATH"),
@@ -411,7 +433,7 @@ class AppSettings(BaseSettings):
     def expand_reminders_database_path(cls, value: Path) -> Path:
         return value.expanduser().resolve()
 
-    @field_validator("calendar_client_secret_path", "calendar_token_path")
+    @field_validator("calendar_client_secret_path", "calendar_token_path", "gmail_client_secret_path", "gmail_token_path")
     @classmethod
     def expand_calendar_paths(cls, value: Path) -> Path:
         return value.expanduser().resolve()
@@ -580,6 +602,14 @@ class AppSettings(BaseSettings):
         return bool(self.reminders_database_path)
 
     @property
+    def has_gmail_client_secret(self) -> bool:
+        return self.gmail_client_secret_path.exists()
+
+    @property
+    def has_gmail_token(self) -> bool:
+        return self.gmail_token_path.exists()
+
+    @property
     def has_calendar_client_secret(self) -> bool:
         return self.calendar_client_secret_path.exists()
 
@@ -590,6 +620,19 @@ class AppSettings(BaseSettings):
     @property
     def calendar_scopes_list(self) -> list[str]:
         raw = self.calendar_scopes.strip()
+        if not raw:
+            return []
+
+        scopes: list[str] = []
+        for item in raw.replace("\n", ",").split(","):
+            cleaned = item.strip()
+            if cleaned and cleaned not in scopes:
+                scopes.append(cleaned)
+        return scopes
+
+    @property
+    def gmail_scopes_list(self) -> list[str]:
+        raw = self.gmail_scopes.strip()
         if not raw:
             return []
 

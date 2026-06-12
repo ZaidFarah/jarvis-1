@@ -104,6 +104,32 @@ def test_reminder_settings_defaults_are_safe() -> None:
     assert settings.reminders_database_path.name == "jarvis_reminders.db"
 
 
+def test_gmail_settings_defaults_are_safe() -> None:
+    settings = AppSettings(_env_file=None)
+
+    assert settings.gmail_enabled is False
+    assert settings.gmail_client_secret_path.name == "google_client_secret.json"
+    assert settings.gmail_token_path.name == "token_gmail.json"
+    assert settings.gmail_scopes_list == ["https://www.googleapis.com/auth/gmail.readonly"]
+    assert settings.gmail_max_results == 5
+
+
+def test_gmail_settings_read_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GMAIL_ENABLED", "true")
+    monkeypatch.setenv("GMAIL_CLIENT_SECRET_PATH", "credentials/custom_secret.json")
+    monkeypatch.setenv("GMAIL_TOKEN_PATH", "credentials/custom_token.json")
+    monkeypatch.setenv("GMAIL_SCOPES", "https://www.googleapis.com/auth/gmail.readonly")
+    monkeypatch.setenv("GMAIL_MAX_RESULTS", "7")
+
+    settings = AppSettings(_env_file=None)
+
+    assert settings.gmail_enabled is True
+    assert settings.gmail_client_secret_path.name == "custom_secret.json"
+    assert settings.gmail_token_path.name == "custom_token.json"
+    assert settings.gmail_scopes_list == ["https://www.googleapis.com/auth/gmail.readonly"]
+    assert settings.gmail_max_results == 7
+
+
 def test_calendar_settings_defaults_are_safe() -> None:
     settings = AppSettings(_env_file=None)
 
