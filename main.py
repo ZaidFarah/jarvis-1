@@ -7,7 +7,7 @@ from pathlib import Path
 from app.application import JarvisApplication
 from assistant.core import AssistantCore, AssistantResponse
 from config.settings import load_settings
-from integrations.calendar_service import CalendarService, format_calendar_check_report
+from integrations.calendar_service import CalendarService, format_calendar_auth_report, format_calendar_check_report
 from integrations.weather_service import WeatherService, format_weather_check_report
 from services.notification_service import NotificationService, format_notification_check_report
 from services.logging_service import configure_logging
@@ -147,6 +147,21 @@ def main(argv: list[str] | None = None) -> int:
         report = CalendarService(settings).run_check()
         print(format_calendar_check_report(report))
         return 0 if report.is_successful else 1
+
+    if "--calendar-auth" in args:
+        settings = load_settings()
+        configure_logging(settings, console=False)
+        return _run_calendar_auth(settings)
+
+    if "--calendar-today" in args:
+        settings = load_settings()
+        configure_logging(settings, console=False)
+        return _run_calendar_query(settings, "what is on my calendar today")
+
+    if "--calendar-tomorrow" in args:
+        settings = load_settings()
+        configure_logging(settings, console=False)
+        return _run_calendar_query(settings, "what is on my calendar tomorrow")
 
     if "--website-check" in args:
         settings = load_settings()
@@ -538,6 +553,19 @@ def _run_read_file(settings, filename: str, folder_name: str) -> int:
 def _run_summarize_file(settings, filename: str, folder_name: str) -> int:
     assistant = _build_cli_assistant(settings)
     response = assistant.handle_command(f"summarize file {filename} in {folder_name}")
+    print(response.text, flush=True)
+    return 0 if response.accepted else 1
+
+
+def _run_calendar_auth(settings) -> int:
+    report = CalendarService(settings).auth_calendar()
+    print(format_calendar_auth_report(report), flush=True)
+    return 0 if report.is_successful else 1
+
+
+def _run_calendar_query(settings, command: str) -> int:
+    assistant = _build_cli_assistant(settings)
+    response = assistant.handle_command(command)
     print(response.text, flush=True)
     return 0 if response.accepted else 1
 

@@ -581,6 +581,17 @@ Jarvis can open only sites listed in `WEBSITE_ALLOWED_SITES`. If a site is missi
 - Calendar diagnostics report enabled state, credential presence, token presence, and authentication status without printing secrets.
 - Calendar logs are saved to `logs/calendar.log`.
 
+## Phase 25 Scope
+
+- Google Calendar OAuth setup and read-only event queries.
+- Put your OAuth client secret JSON at `credentials/google_client_secret.json`.
+- Run `py main.py --calendar-auth` to complete sign-in and save the token at `credentials/token_calendar.json`.
+- Run `py main.py --calendar-today` or `py main.py --calendar-tomorrow` to read events after confirmation.
+- Calendar scope: `CALENDAR_SCOPES=https://www.googleapis.com/auth/calendar.readonly`.
+- Calendar auth never prints the client secret or token.
+- Calendar logs are saved to `logs/calendar.log`.
+- If the client secret or token is missing, the CLI reports the setup step that is still required.
+
 ## Text To Speech Test
 
 ```powershell

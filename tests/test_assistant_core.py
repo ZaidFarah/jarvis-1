@@ -298,6 +298,49 @@ def test_assistant_core_routes_calendar_commands() -> None:
     assert openai_service.messages == []
 
 
+def test_assistant_core_routes_calendar_tomorrow_commands() -> None:
+    calendar_service = FakeCalendarService(
+        CalendarQueryResult(
+            success=True,
+            text="Calendar for tomorrow:\n- 10:00 Planning",
+            provider="google_calendar",
+            day_label="tomorrow",
+            request_attempted=True,
+            authenticated=True,
+            client_secret_detected=True,
+            token_detected=True,
+        )
+    )
+    assistant = AssistantCore(
+        settings=AppSettings(_env_file=None, openai_enabled=False, calendar_enabled=True),
+        openai_service=FakeOpenAIService(error=AssertionError("OpenAI should not be called for calendar")),
+        weather_service=FakeWeatherService(
+            WeatherQueryResult(
+                success=True,
+                text="Current weather in Nottingham: clear sky.",
+                provider="openweathermap",
+                city="Nottingham",
+                request_attempted=False,
+                api_key_detected=False,
+            )
+        ),
+        calendar_service=calendar_service,
+        confirmation_handler=lambda *args: ConfirmationResult(
+            approved=True,
+            denied=False,
+            timed_out=False,
+            reason="Approved.",
+            log_file=Path("confirmations.log"),
+        ),
+    )
+
+    response = assistant.handle_command("what is on my calendar tomorrow")
+
+    assert response.source == "calendar"
+    assert "Planning" in response.text
+    assert calendar_service.calls == ["tomorrow"]
+
+
 def test_assistant_core_calendar_confirmation_denied_blocks_read() -> None:
     calendar_service = FakeCalendarService()
     assistant = AssistantCore(

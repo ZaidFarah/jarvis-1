@@ -6,3 +6,6 @@ sounddevice>=0.5
 pyttsx3>=2.99
 faster-whisper>=1.2
 openai>=2.38
+google-api-python-client>=2.160
+google-auth>=2.38
+google-auth-oauthlib>=1.2

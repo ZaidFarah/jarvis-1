@@ -287,6 +287,10 @@ class AppSettings(BaseSettings):
         default=PROJECT_ROOT / "credentials" / "token_calendar.json",
         validation_alias=AliasChoices("CALENDAR_TOKEN_PATH", "JARVIS_CALENDAR_TOKEN_PATH"),
     )
+    calendar_scopes: str = Field(
+        default="https://www.googleapis.com/auth/calendar.readonly",
+        validation_alias=AliasChoices("CALENDAR_SCOPES", "JARVIS_CALENDAR_SCOPES"),
+    )
     weather_enabled: bool = Field(
         default=False,
         validation_alias=AliasChoices("WEATHER_ENABLED", "JARVIS_WEATHER_ENABLED"),
@@ -574,6 +578,19 @@ class AppSettings(BaseSettings):
     @property
     def has_calendar_token(self) -> bool:
         return self.calendar_token_path.exists()
+
+    @property
+    def calendar_scopes_list(self) -> list[str]:
+        raw = self.calendar_scopes.strip()
+        if not raw:
+            return []
+
+        scopes: list[str] = []
+        for item in raw.replace("\n", ",").split(","):
+            cleaned = item.strip()
+            if cleaned and cleaned not in scopes:
+                scopes.append(cleaned)
+        return scopes
 
     @property
     def app_launcher_allowed_apps_map(self) -> dict[str, str]:
