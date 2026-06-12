@@ -26,9 +26,9 @@ Sleeper = Callable[[float], None]
 Beeper = Callable[[], None]
 
 
-COMMAND_PROMPT = "Wake detected. Speak your command after the beep/prompt."
+COMMAND_PROMPT = "Yes sir?"
 LISTENING_FOR_COMMAND_PROMPT = "Listening for command..."
-NO_COMMAND_DETECTED_MESSAGE = "No command detected. Please try again and speak after the prompt."
+NO_COMMAND_DETECTED_MESSAGE = "I didn't catch that."
 
 
 @dataclass(frozen=True)

@@ -29,6 +29,10 @@ def test_voice_settings_defaults_are_lightweight() -> None:
     assert settings.wake_listen_seconds == 5.0
     assert settings.voice_command_start_delay_seconds == 1.0
     assert settings.voice_command_record_seconds == 7.0
+    assert settings.voice_loop_enabled is False
+    assert settings.voice_loop_max_empty_commands == 3
+    assert settings.voice_loop_wake_cooldown_seconds == 1.5
+    assert settings.voice_loop_speak_status is True
     assert settings.tts_enabled is False
     assert settings.tts_provider == "openai"
     assert settings.tts_voice_name == ""
@@ -114,6 +118,10 @@ def test_wake_settings_read_environment(monkeypatch) -> None:
     monkeypatch.setenv("WAKE_LISTEN_SECONDS", "4")
     monkeypatch.setenv("VOICE_COMMAND_START_DELAY_SECONDS", "1.25")
     monkeypatch.setenv("VOICE_COMMAND_RECORD_SECONDS", "8")
+    monkeypatch.setenv("VOICE_LOOP_ENABLED", "true")
+    monkeypatch.setenv("VOICE_LOOP_MAX_EMPTY_COMMANDS", "5")
+    monkeypatch.setenv("VOICE_LOOP_WAKE_COOLDOWN_SECONDS", "2.5")
+    monkeypatch.setenv("VOICE_LOOP_SPEAK_STATUS", "false")
 
     settings = AppSettings(_env_file=None)
 
@@ -123,3 +131,7 @@ def test_wake_settings_read_environment(monkeypatch) -> None:
     assert settings.wake_listen_seconds == 4.0
     assert settings.voice_command_start_delay_seconds == 1.25
     assert settings.voice_command_record_seconds == 8.0
+    assert settings.voice_loop_enabled is True
+    assert settings.voice_loop_max_empty_commands == 5
+    assert settings.voice_loop_wake_cooldown_seconds == 2.5
+    assert settings.voice_loop_speak_status is False

@@ -28,6 +28,7 @@ from config.settings import AppSettings
 from voice.audio_diagnostics import AudioDiagnostics, format_microphone_test_summary
 from voice.voice_command_test import COMMAND_PROMPT, LISTENING_FOR_COMMAND_PROMPT, VoiceCommandTestRunner, format_voice_command_report
 from voice.voice_loop import (
+    RETURNING_TO_SLEEP_MESSAGE,
     STOP_COMMAND_DETECTED_MESSAGE,
     VOICE_LOOP_STARTED_MESSAGE,
     VOICE_LOOP_STOPPED_MESSAGE,
@@ -131,11 +132,16 @@ class JarvisMainWindow(QMainWindow):
         self.stop_voice_loop_button = QPushButton("Stop Loop")
         self.send_button = QPushButton("Send")
         self.audio_diagnostics = AudioDiagnostics(settings)
+        self.voice_loop_status_value = QLabel("Idle")
+        self.voice_loop_last_command_value = QLabel("None")
+        self.voice_loop_last_response_value = QLabel("None")
         self.voice_loop_runner: VoiceLoopRunner | None = None
         self.voice_loop_thread: threading.Thread | None = None
         self.voice_loop_events: Queue[str] = Queue()
         self.voice_loop_event_timer = QTimer(self)
         self.voice_loop_event_timer.timeout.connect(self._drain_voice_loop_events)
+        self.start_voice_loop_action: QAction | None = None
+        self.stop_voice_loop_action: QAction | None = None
         self.tray_icon = self._create_tray_icon()
 
         self._build_ui()
@@ -158,6 +164,9 @@ class JarvisMainWindow(QMainWindow):
         subtitle = QLabel("Desktop assistant foundation")
         subtitle.setObjectName("subtitle")
         self.status_label.setObjectName("statusPill")
+        self.voice_loop_status_value.setObjectName("voiceLoopValue")
+        self.voice_loop_last_command_value.setObjectName("voiceLoopValue")
+        self.voice_loop_last_response_value.setObjectName("voiceLoopValue")
 
         minimize_button = QPushButton("-")
         minimize_button.setObjectName("windowButton")
@@ -197,11 +206,34 @@ class JarvisMainWindow(QMainWindow):
         input_row.addWidget(self.stop_voice_loop_button)
         input_row.addWidget(self.send_button)
 
+        loop_info = QFrame()
+        loop_info.setObjectName("loopInfo")
+        loop_info_layout = QVBoxLayout(loop_info)
+        loop_info_layout.setContentsMargins(12, 10, 12, 10)
+        loop_info_layout.setSpacing(4)
+
+        loop_status_row = QHBoxLayout()
+        loop_status_row.addWidget(QLabel("Loop status"))
+        loop_status_row.addWidget(self.voice_loop_status_value, stretch=1)
+
+        loop_command_row = QHBoxLayout()
+        loop_command_row.addWidget(QLabel("Last command"))
+        loop_command_row.addWidget(self.voice_loop_last_command_value, stretch=1)
+
+        loop_response_row = QHBoxLayout()
+        loop_response_row.addWidget(QLabel("Last response"))
+        loop_response_row.addWidget(self.voice_loop_last_response_value, stretch=1)
+
+        loop_info_layout.addLayout(loop_status_row)
+        loop_info_layout.addLayout(loop_command_row)
+        loop_info_layout.addLayout(loop_response_row)
+
         layout = QVBoxLayout(shell)
         layout.setContentsMargins(24, 22, 24, 24)
         layout.setSpacing(16)
         layout.addLayout(title_row)
         layout.addWidget(self.orb, alignment=Qt.AlignmentFlag.AlignHCenter)
+        layout.addWidget(loop_info)
         layout.addWidget(self.transcript, stretch=1)
         layout.addLayout(input_row)
 
@@ -235,6 +267,15 @@ class JarvisMainWindow(QMainWindow):
                 border-radius: 12px;
                 padding: 6px 10px;
                 font-weight: 600;
+            }
+            #loopInfo {
+                background: rgba(3, 7, 18, 95);
+                border: 1px solid rgba(71, 85, 105, 100);
+                border-radius: 12px;
+            }
+            #voiceLoopValue {
+                color: #dff9ff;
+                font-weight: 500;
             }
             #windowButton {
                 color: #dff9ff;
@@ -310,17 +351,17 @@ class JarvisMainWindow(QMainWindow):
         mic_test_action.triggered.connect(self.run_microphone_test)
         voice_command_action = QAction("Voice Command Test", self)
         voice_command_action.triggered.connect(self.run_voice_command_test)
-        start_voice_loop_action = QAction("Start Voice Loop", self)
-        start_voice_loop_action.triggered.connect(self.start_voice_loop)
-        stop_voice_loop_action = QAction("Stop Voice Loop", self)
-        stop_voice_loop_action.triggered.connect(self.stop_voice_loop)
+        self.start_voice_loop_action = QAction("Start Voice Loop", self)
+        self.start_voice_loop_action.triggered.connect(self.start_voice_loop)
+        self.stop_voice_loop_action = QAction("Stop Voice Loop", self)
+        self.stop_voice_loop_action.triggered.connect(self.stop_voice_loop)
         exit_action = QAction("Exit Jarvis", self)
         exit_action.triggered.connect(self.request_quit)
         menu.addAction(show_action)
         menu.addAction(mic_test_action)
         menu.addAction(voice_command_action)
-        menu.addAction(start_voice_loop_action)
-        menu.addAction(stop_voice_loop_action)
+        menu.addAction(self.start_voice_loop_action)
+        menu.addAction(self.stop_voice_loop_action)
         menu.addSeparator()
         menu.addAction(exit_action)
         tray.setContextMenu(menu)
@@ -424,6 +465,9 @@ class JarvisMainWindow(QMainWindow):
             assistant=self.assistant,
             status_callback=self.voice_loop_events.put,
         )
+        self.voice_loop_status_value.setText("Starting")
+        self.voice_loop_last_command_value.setText("None")
+        self.voice_loop_last_response_value.setText("None")
         self.voice_loop_thread = threading.Thread(target=self._run_voice_loop_worker, daemon=True)
         self._set_voice_loop_running(True)
         self.voice_loop_event_timer.start(250)
@@ -470,18 +514,49 @@ class JarvisMainWindow(QMainWindow):
             LISTENING_FOR_COMMAND_PROMPT: AssistantStatus.LISTENING,
             "Thinking": AssistantStatus.THINKING,
             "Speaking": AssistantStatus.SPEAKING,
+            RETURNING_TO_SLEEP_MESSAGE: AssistantStatus.SLEEPING,
+            "I didn't catch that.": AssistantStatus.SLEEPING,
             STOP_COMMAND_DETECTED_MESSAGE: AssistantStatus.SLEEPING,
             VOICE_LOOP_STOPPED_MESSAGE: AssistantStatus.SLEEPING,
         }
+        if status.startswith("Last recognized command:"):
+            command_text = status.split(":", 1)[1].strip() or "None"
+            self.voice_loop_last_command_value.setText(command_text)
+            self.voice_loop_status_value.setText("No command detected" if command_text == "<empty>" else "Command received")
+            self._append_message("Jarvis", status)
+            return
+        if status.startswith("Last Jarvis response:"):
+            self.voice_loop_last_response_value.setText(status.split(":", 1)[1].strip() or "None")
+            self.voice_loop_status_value.setText("Response ready")
+            self._append_message("Jarvis", status)
+            return
+        if status.startswith("Voice loop summary:"):
+            self.voice_loop_status_value.setText(status)
+            self._append_message("Jarvis", status)
+            return
         if status.startswith("Voice loop error:"):
             self.set_status(AssistantStatus.ERROR)
         else:
             self.set_status(status_map.get(status, AssistantStatus.SLEEPING))
+        if status == VOICE_LOOP_STARTED_MESSAGE:
+            self.voice_loop_status_value.setText("Sleeping")
+        elif status == VOICE_LOOP_STOPPED_MESSAGE:
+            self.voice_loop_status_value.setText("Stopped")
+        else:
+            self.voice_loop_status_value.setText(status)
         self._append_message("Jarvis", status)
 
     def _set_voice_loop_running(self, running: bool) -> None:
         self.start_voice_loop_button.setEnabled(not running)
         self.stop_voice_loop_button.setEnabled(running)
+        if self.start_voice_loop_action is not None:
+            self.start_voice_loop_action.setEnabled(not running)
+        if self.stop_voice_loop_action is not None:
+            self.stop_voice_loop_action.setEnabled(running)
+        if running:
+            self.voice_loop_status_value.setText("Running")
+        elif self.voice_loop_runner is None:
+            self.voice_loop_status_value.setText("Idle")
 
     def set_status(self, status: AssistantStatus) -> None:
         self.status = status

@@ -104,6 +104,18 @@ Jarvis is a Windows desktop AI assistant foundation. Phase 1 provides the applic
 - GUI and tray actions: `Start Voice Loop` and `Stop Voice Loop`.
 - Voice loop logs are saved to `logs/voice_loop.log`.
 
+## Phase 9.5 Scope
+
+- Wake feedback: `Yes sir?`.
+- Empty command feedback: `I didn't catch that.`
+- Return-to-sleep feedback: `Standing by.`
+- Voice loop settings: `VOICE_LOOP_ENABLED=false`, `VOICE_LOOP_MAX_EMPTY_COMMANDS=3`, `VOICE_LOOP_WAKE_COOLDOWN_SECONDS=1.5`, `VOICE_LOOP_SPEAK_STATUS=true`.
+- Post-speech cooldown before the next listen cycle to reduce self-hearing.
+- Empty command limit can stop the loop after repeated silence.
+- Stop phrases expanded to include `go to sleep`, `that is all`, and `thank you jarvis`.
+- Loop exit summary reports wake attempts, successful wakes, commands handled, empty commands, and errors.
+- GUI shows loop status, last recognized command, and last Jarvis response, and disables the loop controls while the loop is active.
+
 ## Setup
 
 Install dependencies:
@@ -209,7 +221,7 @@ The command runs one controlled voice command flow:
 1. Records a wake phrase clip.
 2. Transcribes the wake phrase.
 3. Checks the transcript against the wake phrase and aliases.
-4. If wake is detected, prints `Wake detected. Speak your command after the beep/prompt.`
+4. If wake is detected, prints `Yes sir?`
 5. Waits for `VOICE_COMMAND_START_DELAY_SECONDS`.
 6. Plays a short Windows beep when available.
 7. Prints `Listening for command...`.
@@ -230,7 +242,7 @@ VOICE_COMMAND_RECORD_SECONDS=7
 If the command transcription is empty or punctuation-only, Jarvis prints:
 
 ```text
-No command detected. Please try again and speak after the prompt.
+I didn't catch that.
 ```
 
 Detailed voice command logs are saved to:
@@ -256,13 +268,14 @@ The voice loop keeps Jarvis running until stopped:
 1. Sleeps while waiting for the wake phrase.
 2. Records one wake phrase clip.
 3. Transcribes and checks the wake phrase.
-4. Prompts and optionally beeps after wake detection.
+4. Prompts with `Yes sir?`, optionally beeps, and waits briefly before recording the command.
 5. Records one command clip.
 6. Cleans the command text.
-7. Stops cleanly if the command is `stop listening`, `sleep jarvis`, `jarvis sleep`, `exit jarvis`, or `shutdown jarvis`.
+7. Stops cleanly if the command is `stop listening`, `go to sleep`, `sleep jarvis`, `jarvis sleep`, `exit jarvis`, `shutdown jarvis`, `that is all`, or `thank you jarvis`.
 8. Sends valid commands to `AssistantCore`.
 9. Speaks accepted responses using the configured TTS provider.
-10. Returns to sleeping and repeats.
+10. Speaks `Standing by.` when returning to sleep.
+11. Prints a summary on exit with wake attempts, successful wakes, commands handled, empty commands, and errors.
 
 Press Ctrl+C to stop the CLI loop. Detailed voice loop logs are saved to:
 

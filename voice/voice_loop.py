@@ -29,14 +29,37 @@ Beeper = Callable[[], None]
 
 STOP_COMMANDS = {
     "stop listening",
+    "go to sleep",
     "sleep jarvis",
     "jarvis sleep",
     "exit jarvis",
     "shutdown jarvis",
+    "that is all",
+    "thank you jarvis",
 }
 VOICE_LOOP_STARTED_MESSAGE = "Jarvis voice loop started. Press Ctrl+C to stop."
 VOICE_LOOP_STOPPED_MESSAGE = "Jarvis voice loop stopped."
 STOP_COMMAND_DETECTED_MESSAGE = "Stop command detected. Exiting voice loop."
+RETURNING_TO_SLEEP_MESSAGE = "Standing by."
+
+
+@dataclass
+class VoiceLoopSummary:
+    wake_attempts: int = 0
+    successful_wakes: int = 0
+    commands_handled: int = 0
+    empty_commands: int = 0
+    errors: int = 0
+
+    def format(self) -> str:
+        return (
+            "Voice loop summary: "
+            f"wake attempts={self.wake_attempts}, "
+            f"successful wakes={self.successful_wakes}, "
+            f"commands handled={self.commands_handled}, "
+            f"empty commands={self.empty_commands}, "
+            f"errors={self.errors}"
+        )
 
 
 @dataclass(frozen=True)
@@ -84,12 +107,16 @@ class VoiceLoopRunner:
         self.log_file = self.settings.log_dir / "voice_loop.log"
         self.voice_loop_logger = logger.bind(voice_loop=True)
         self._stop_requested = False
+        self.summary = VoiceLoopSummary()
+        self._consecutive_empty_commands = 0
         self._ensure_voice_loop_log_sink()
 
     def request_stop(self) -> None:
         self._stop_requested = True
 
     def run(self, max_cycles: int | None = None) -> list[VoiceLoopCycleReport]:
+        self.summary = VoiceLoopSummary()
+        self._consecutive_empty_commands = 0
         self.voice_loop_logger.info("Starting Jarvis voice loop")
         self._status(VOICE_LOOP_STARTED_MESSAGE, [])
         reports: list[VoiceLoopCycleReport] = []
@@ -106,6 +133,7 @@ class VoiceLoopRunner:
             if max_cycles is not None and cycles >= max_cycles:
                 break
 
+        self._emit(self.summary.format())
         self.voice_loop_logger.info("Jarvis voice loop stopped")
         self._status(VOICE_LOOP_STOPPED_MESSAGE, [])
         return reports
@@ -129,6 +157,7 @@ class VoiceLoopRunner:
         if not self.provider.available:
             message = "Speech-to-text provider is not available. Voice loop cannot run."
             self.voice_loop_logger.error(message)
+            self.summary.errors += 1
             errors.append(message)
             self._status("Sleeping", statuses)
             return self._report(
@@ -143,6 +172,7 @@ class VoiceLoopRunner:
                 stop_requested=True,
             )
 
+        self.summary.wake_attempts += 1
         self._status("Sleeping", statuses)
 
         try:
@@ -159,6 +189,7 @@ class VoiceLoopRunner:
         except Exception as exc:
             message = f"Wake phrase stage failed: {type(exc).__name__}: {exc}"
             self.voice_loop_logger.exception(message)
+            self.summary.errors += 1
             errors.append(message)
             self._status("Sleeping", statuses)
             return self._report(
@@ -185,8 +216,12 @@ class VoiceLoopRunner:
                 errors,
             )
 
+        self.summary.successful_wakes += 1
         self._status("Wake detected", statuses)
         self._status(COMMAND_PROMPT, statuses)
+        if self.settings.voice_loop_speak_status:
+            self._speak_message(COMMAND_PROMPT, errors)
+
         if self.settings.voice_command_start_delay_seconds > 0:
             self.sleeper(self.settings.voice_command_start_delay_seconds)
         self.beeper()
@@ -208,8 +243,11 @@ class VoiceLoopRunner:
         except Exception as exc:
             message = f"Command stage failed: {type(exc).__name__}: {exc}"
             self.voice_loop_logger.exception(message)
+            self.summary.errors += 1
             errors.append(message)
-            self._status("Sleeping", statuses)
+            self._status(RETURNING_TO_SLEEP_MESSAGE, statuses)
+            if self.settings.voice_loop_speak_status:
+                self._speak_message(RETURNING_TO_SLEEP_MESSAGE, errors)
             return self._report(
                 wake_transcription,
                 wake_detection,
@@ -221,11 +259,24 @@ class VoiceLoopRunner:
                 errors,
             )
 
+        self._emit(f"Last recognized command: {cleaned_command or '<empty>'}")
+
         if not cleaned_command:
-            self.voice_loop_logger.warning(NO_COMMAND_DETECTED_MESSAGE)
-            errors.append(NO_COMMAND_DETECTED_MESSAGE)
+            self.voice_loop_logger.info(NO_COMMAND_DETECTED_MESSAGE)
+            self.summary.empty_commands += 1
+            self._consecutive_empty_commands += 1
             self._status(NO_COMMAND_DETECTED_MESSAGE, statuses)
-            self._status("Sleeping", statuses)
+            if self.settings.voice_loop_speak_status:
+                self._speak_message(NO_COMMAND_DETECTED_MESSAGE, errors)
+            self._status(RETURNING_TO_SLEEP_MESSAGE, statuses)
+            if self.settings.voice_loop_speak_status:
+                self._speak_message(RETURNING_TO_SLEEP_MESSAGE, errors)
+            if self.settings.voice_loop_max_empty_commands >= 0 and self._consecutive_empty_commands >= self.settings.voice_loop_max_empty_commands:
+                stop_requested = True
+                self.voice_loop_logger.info(
+                    "Empty command limit reached after {} attempts",
+                    self._consecutive_empty_commands,
+                )
             return self._report(
                 wake_transcription,
                 wake_detection,
@@ -235,12 +286,15 @@ class VoiceLoopRunner:
                 tts_result,
                 statuses,
                 errors,
+                stop_requested=stop_requested,
             )
+
+        self.summary.commands_handled += 1
+        self._consecutive_empty_commands = 0
 
         if is_stop_command(cleaned_command):
             self.voice_loop_logger.info("Stop command detected: {}", cleaned_command)
             self._status(STOP_COMMAND_DETECTED_MESSAGE, statuses)
-            self._status("Sleeping", statuses)
             return self._report(
                 wake_transcription,
                 wake_detection,
@@ -254,7 +308,28 @@ class VoiceLoopRunner:
             )
 
         self._status("Thinking", statuses)
-        assistant_response = self.assistant.handle_command(cleaned_command)
+        try:
+            assistant_response = self.assistant.handle_command(cleaned_command)
+        except Exception as exc:
+            message = f"Assistant command failed: {type(exc).__name__}: {exc}"
+            self.voice_loop_logger.exception(message)
+            self.summary.errors += 1
+            errors.append(message)
+            self._status(RETURNING_TO_SLEEP_MESSAGE, statuses)
+            if self.settings.voice_loop_speak_status:
+                self._speak_message(RETURNING_TO_SLEEP_MESSAGE, errors)
+            return self._report(
+                wake_transcription,
+                wake_detection,
+                raw_command_transcription,
+                cleaned_command,
+                assistant_response,
+                tts_result,
+                statuses,
+                errors,
+            )
+
+        self._emit(f"Last Jarvis response: {assistant_response.text}")
         self.voice_loop_logger.info("Assistant response={}", assistant_response.text)
 
         if assistant_response.accepted:
@@ -267,8 +342,13 @@ class VoiceLoopRunner:
             )
             if tts_result.error:
                 errors.append(tts_result.error)
+                self.summary.errors += 1
+            elif tts_result.spoken:
+                self.sleeper(self.settings.voice_loop_wake_cooldown_seconds)
 
-        self._status("Sleeping", statuses)
+        self._status(RETURNING_TO_SLEEP_MESSAGE, statuses)
+        if self.settings.voice_loop_speak_status:
+            self._speak_message(RETURNING_TO_SLEEP_MESSAGE, errors)
         return self._report(
             wake_transcription,
             wake_detection,
@@ -278,7 +358,6 @@ class VoiceLoopRunner:
             tts_result,
             statuses,
             errors,
-            stop_requested=stop_requested,
         )
 
     def _status(self, status: str, statuses: list[str]) -> None:
@@ -286,6 +365,25 @@ class VoiceLoopRunner:
         self.voice_loop_logger.info("Status={}", status)
         if self.status_callback is not None:
             self.status_callback(status)
+
+    def _emit(self, message: str) -> None:
+        self.voice_loop_logger.info(message)
+        if self.status_callback is not None:
+            self.status_callback(message)
+
+    def _speak_message(self, message: str, errors: list[str]) -> TextToSpeechResult:
+        tts_result = speak_text(
+            message,
+            self.settings,
+            speak_requested=True,
+            provider=self.tts_provider,
+        )
+        if tts_result.error:
+            errors.append(tts_result.error)
+            self.summary.errors += 1
+        elif tts_result.spoken:
+            self.sleeper(self.settings.voice_loop_wake_cooldown_seconds)
+        return tts_result
 
     def _report(
         self,

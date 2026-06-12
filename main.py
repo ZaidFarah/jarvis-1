@@ -16,7 +16,12 @@ from voice.voice_command_test import (
     VoiceCommandTestRunner,
     format_voice_command_report,
 )
-from voice.voice_loop import VoiceLoopRunner, VOICE_LOOP_STARTED_MESSAGE, VOICE_LOOP_STOPPED_MESSAGE
+from voice.voice_loop import (
+    RETURNING_TO_SLEEP_MESSAGE,
+    VoiceLoopRunner,
+    VOICE_LOOP_STARTED_MESSAGE,
+    VOICE_LOOP_STOPPED_MESSAGE,
+)
 from voice.wake_diagnostics import WakeDiagnostics, format_wake_report
 
 
@@ -62,6 +67,7 @@ def main(argv: list[str] | None = None) -> int:
             runner.run()
         except KeyboardInterrupt:
             runner.request_stop()
+            print(runner.summary.format(), flush=True)
             print("\nJarvis voice loop interrupted. Exiting cleanly.", flush=True)
         return 0
 
@@ -149,13 +155,15 @@ def _voice_loop_status_callback(status: str) -> None:
         "Wake detected",
         COMMAND_PROMPT,
         LISTENING_FOR_COMMAND_PROMPT,
-        "No command detected. Please try again and speak after the prompt.",
+        "I didn't catch that.",
+        RETURNING_TO_SLEEP_MESSAGE,
         "Stop command detected. Exiting voice loop.",
         "Thinking",
         "Speaking",
         VOICE_LOOP_STOPPED_MESSAGE,
     }
-    if status in visible_statuses:
+    visible_prefixes = ("Last recognized command:", "Last Jarvis response:", "Voice loop summary:")
+    if status in visible_statuses or status.startswith(visible_prefixes):
         print(status, flush=True)
 
 

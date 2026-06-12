@@ -108,6 +108,29 @@ class AppSettings(BaseSettings):
         le=30.0,
         validation_alias=AliasChoices("VOICE_COMMAND_RECORD_SECONDS", "JARVIS_VOICE_COMMAND_RECORD_SECONDS"),
     )
+    voice_loop_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("VOICE_LOOP_ENABLED", "JARVIS_VOICE_LOOP_ENABLED"),
+    )
+    voice_loop_max_empty_commands: int = Field(
+        default=3,
+        ge=0,
+        le=20,
+        validation_alias=AliasChoices("VOICE_LOOP_MAX_EMPTY_COMMANDS", "JARVIS_VOICE_LOOP_MAX_EMPTY_COMMANDS"),
+    )
+    voice_loop_wake_cooldown_seconds: float = Field(
+        default=1.5,
+        ge=0.0,
+        le=10.0,
+        validation_alias=AliasChoices(
+            "VOICE_LOOP_WAKE_COOLDOWN_SECONDS",
+            "JARVIS_VOICE_LOOP_WAKE_COOLDOWN_SECONDS",
+        ),
+    )
+    voice_loop_speak_status: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("VOICE_LOOP_SPEAK_STATUS", "JARVIS_VOICE_LOOP_SPEAK_STATUS"),
+    )
     openai_enabled: bool = Field(
         default=False,
         validation_alias=AliasChoices("OPENAI_ENABLED", "JARVIS_OPENAI_ENABLED"),
