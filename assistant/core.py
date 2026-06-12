@@ -7,6 +7,7 @@ from assistant.conversation import ConversationHistory
 from integrations.weather_service import WeatherService
 from memory.store import SensitiveMemoryError, SQLiteMemoryStore
 from config.settings import AppSettings, load_settings
+from security.permissions import PermissionBroker
 from tools.file_access import FileAccess
 from tools.app_launcher import AppLauncher
 from tools.website_launcher import WebsiteLauncher
@@ -39,6 +40,7 @@ class AssistantCore:
         reminder_service: ReminderService | None = None,
     ) -> None:
         self.settings = settings or load_settings()
+        self.permission_broker = PermissionBroker(self.settings)
         self.openai_service = openai_service or OpenAIService(self.settings)
         self.weather_service = weather_service or WeatherService(self.settings)
         if self.settings.app_launcher_enabled:
@@ -170,6 +172,10 @@ class AssistantCore:
                 return None
 
         result = self.weather_service.current_weather(weather_city)
+        self.permission_broker.check(
+            "weather query",
+            description=f"Weather lookup for {weather_city or self.settings.weather_default_city}.",
+        )
         response = AssistantResponse(
             text=result.text,
             accepted=True,
@@ -195,6 +201,7 @@ class AssistantCore:
         if not self.settings.app_launcher_enabled or self.app_launcher is None:
             return AssistantResponse(text="App launcher is disabled.", accepted=True, source="local")
 
+        self.permission_broker.check("open whitelisted app", description=f"Launch local app {app_name}.")
         result = self.app_launcher.launch_app(app_name)
         return AssistantResponse(text=self._app_launcher_response_text(result), accepted=result.launched, source="launcher", error=result.safe_error)
 
@@ -217,6 +224,7 @@ class AssistantCore:
         if not self.settings.website_launcher_enabled or self.website_launcher is None:
             return AssistantResponse(text="Website launcher is disabled.", accepted=True, source="local")
 
+        self.permission_broker.check("open whitelisted website", description=f"Open site {site_name}.")
         result = self.website_launcher.open_site(site_name)
         return AssistantResponse(
             text=self._website_launcher_response_text(result),
@@ -231,6 +239,10 @@ class AssistantCore:
             folder_name = normalized.removeprefix("list ").strip()
             if not self.settings.file_access_enabled or self.file_access is None:
                 return AssistantResponse(text="File access is disabled.", accepted=True, source="local")
+            self.permission_broker.check(
+                "list whitelisted folder filenames",
+                description=f"List files in {folder_name}.",
+            )
             result = self.file_access.list_folder(folder_name)
             return AssistantResponse(
                 text=self._file_listing_response_text(result),
@@ -279,6 +291,7 @@ class AssistantCore:
 
         normalized = " ".join(command.lower().strip().split())
         if ReminderService.is_due_reminder_command(command):
+            self.permission_broker.check("list reminders", description="Check due reminders from local storage.")
             result = self.reminder_service.check_due_reminders()
             return AssistantResponse(
                 text=result.text,
@@ -288,6 +301,7 @@ class AssistantCore:
             )
 
         if normalized in {"list reminders", "show reminders"}:
+            self.permission_broker.check("list reminders", description="List reminders from local storage.")
             result = self.reminder_service.list_reminders()
             return AssistantResponse(text=result.text, accepted=result.success, source="reminders", error=result.safe_error)
 
@@ -319,6 +333,7 @@ class AssistantCore:
             return None
 
         if normalized.startswith("remind me to "):
+            self.permission_broker.check("create reminder", description=f"Create reminder {title}.")
             result = self.reminder_service.create_reminder(title, remind_at_text)
             return AssistantResponse(text=result.text, accepted=result.success, source="reminders", error=result.safe_error)
 

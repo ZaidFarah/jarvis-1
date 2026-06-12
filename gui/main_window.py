@@ -571,6 +571,10 @@ class JarvisMainWindow(QMainWindow):
         QApplication.processEvents()
 
         try:
+            self.assistant.permission_broker.check(
+                "show notification",
+                description="Show test notification from the GUI.",
+            )
             result = NotificationService(self.settings).send_notification("Jarvis", "Hello from Jarvis")
             self._append_message("Jarvis", format_notification_check_report(result))
             self.notification_result_value.setText("Delivered" if result.delivered else "Unavailable")

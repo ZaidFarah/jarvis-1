@@ -11,6 +11,7 @@ from integrations.weather_service import WeatherService, format_weather_check_re
 from services.notification_service import NotificationService, format_notification_check_report
 from services.logging_service import configure_logging
 from services.openai_service import OpenAIService, format_openai_check_report
+from security.permissions import PermissionBroker, format_permission_check_report, format_permission_decision
 from tools.app_launcher import AppLauncher, format_app_launch_report, format_app_launcher_check_report, format_app_resolution_report
 from tools.file_access import FileAccess, format_file_access_check_report, format_file_search_report, format_folder_listing_report
 from tools.website_launcher import WebsiteLauncher, format_website_launcher_check_report, format_website_open_report
@@ -125,6 +126,10 @@ def main(argv: list[str] | None = None) -> int:
     if "--weather-check" in args:
         settings = load_settings()
         configure_logging(settings, console=False)
+        PermissionBroker(settings).check(
+            "weather query",
+            description=f"Weather diagnostic for {settings.weather_default_city}.",
+        )
         report = WeatherService(settings).run_check()
         print(format_weather_check_report(report))
         return 0 if report.is_successful else 1
@@ -135,6 +140,21 @@ def main(argv: list[str] | None = None) -> int:
         report = WebsiteLauncher(settings).run_check()
         print(format_website_launcher_check_report(report))
         return 0 if report.is_successful else 1
+
+    if "--permission-check" in args:
+        settings = load_settings()
+        configure_logging(settings, console=False)
+        report = PermissionBroker(settings).run_check()
+        print(format_permission_check_report(report))
+        return 0 if report.is_successful else 1
+
+    if "--permission-check-action" in args:
+        settings = load_settings()
+        configure_logging(settings, console=False)
+        action_name = _message_after_flag(args, "--permission-check-action") or "unknown action"
+        decision = PermissionBroker(settings).check(action_name)
+        print(format_permission_decision(decision))
+        return 0 if decision.allowed else 1
 
     if "--file-access-check" in args:
         settings = load_settings()
@@ -408,30 +428,41 @@ def _run_reminders_watch(settings, speak_requested: bool) -> int:
 
 
 def _run_notification_test(settings, message: str) -> int:
+    PermissionBroker(settings).check("show notification", description=f"Show notification with title Jarvis and message {message}.")
     result = NotificationService(settings).send_notification("Jarvis", message)
     print(format_notification_check_report(result), flush=True)
     return 0 if result.delivered else 1
 
 
 def _run_launch_app(settings, app_name: str) -> int:
+    PermissionBroker(settings).check("open whitelisted app", description=f"Launch local app {app_name}.")
     result = AppLauncher(settings).launch_app(app_name)
     print(format_app_launch_report(result), flush=True)
     return 0 if result.request_attempted or result.launched else 1
 
 
 def _run_open_site(settings, site_name: str) -> int:
+    PermissionBroker(settings).check("open whitelisted website", description=f"Open site {site_name}.")
     result = WebsiteLauncher(settings).open_site(site_name)
     print(format_website_open_report(result), flush=True)
     return 0 if result.request_attempted or result.opened else 1
 
 
 def _run_list_folder(settings, folder_name: str) -> int:
+    PermissionBroker(settings).check(
+        "list whitelisted folder filenames",
+        description=f"List files in {folder_name}.",
+    )
     result = FileAccess(settings).list_folder(folder_name)
     print(format_folder_listing_report(result), flush=True)
     return 0 if result.safe_error is None else 1
 
 
 def _run_find_file(settings, query: str, folder_name: str) -> int:
+    PermissionBroker(settings).check(
+        "list whitelisted folder filenames",
+        description=f"Search files in {folder_name} for {query}.",
+    )
     result = FileAccess(settings).find_file(query, folder_name)
     print(format_file_search_report(result), flush=True)
     return 0 if result.request_attempted and result.safe_error is None else 1

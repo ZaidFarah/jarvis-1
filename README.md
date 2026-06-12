@@ -529,6 +529,14 @@ Jarvis can open only sites listed in `WEBSITE_ALLOWED_SITES`. If a site is missi
 - Absolute paths and traversal attempts are rejected.
 - File access logs are saved to `logs/file_access.log`.
 
+## Phase 20 Scope
+
+- Central permission broker for classifying sensitive actions.
+- CLI commands: `py main.py --permission-check` and `py main.py --permission-check-action "delete files"`.
+- Default policies cover low, medium, high, and blocked risk levels.
+- Existing low-risk actions are logged but not blocked yet.
+- Permission logs are saved to `logs/permissions.log`.
+
 ## Text To Speech Test
 
 ```powershell
@@ -575,7 +583,7 @@ py -m pytest
 
 ## Not Implemented Yet
 
-Jarvis still does not include ElevenLabs, startup background service, LangGraph, browser automation, desktop automation, permissions system, or vision.
+Jarvis still does not include ElevenLabs, startup background service, LangGraph, browser automation, desktop automation, or vision.
 
 ## Project Layout
 
