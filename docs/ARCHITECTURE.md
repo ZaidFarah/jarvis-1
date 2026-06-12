@@ -100,6 +100,7 @@ Future phases should add capabilities behind explicit approval gates:
 - Phase 6: weather, Gmail, Google Calendar, reminders
 - Phase 7: screenshot, OCR, and vision
 - Phase 8: packaging, Windows startup, diagnostics
+- Phase 17: safe local application launcher
 
 ## Safety Boundary
 
@@ -118,3 +119,5 @@ Phase 14 adds only manual reminder checking. It does not add always-running sche
 Phase 15 adds only a local reminder watcher that runs while Jarvis is active. It does not add a Windows service, startup persistence, toast notifications, or a background daemon outside the app/CLI lifecycle.
 
 Phase 16 adds only optional Windows toast notifications. It does not add a startup service, background daemon, Gmail, Calendar, browser automation, desktop automation, file tools, vision, or LangGraph.
+
+Phase 17 adds only a whitelisted local application launcher. It does not execute arbitrary shell commands, expose raw paths, add desktop automation, browser automation beyond whitelisted app launches, Gmail, Calendar, file tools, vision, startup services, or LangGraph.

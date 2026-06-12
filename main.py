@@ -11,6 +11,7 @@ from integrations.weather_service import WeatherService, format_weather_check_re
 from services.notification_service import NotificationService, format_notification_check_report
 from services.logging_service import configure_logging
 from services.openai_service import OpenAIService, format_openai_check_report
+from tools.app_launcher import AppLauncher, format_app_launch_report, format_app_launcher_check_report
 from memory.store import SQLiteMemoryStore
 from reminders.service import ReminderService
 from reminders.scheduler import ReminderWatcher
@@ -97,6 +98,19 @@ def main(argv: list[str] | None = None) -> int:
         configure_logging(settings, console=False)
         message = _message_after_flag(args, "--notification-test") or "Hello from Jarvis"
         return _run_notification_test(settings, message)
+
+    if "--app-launcher-check" in args:
+        settings = load_settings()
+        configure_logging(settings, console=False)
+        report = AppLauncher(settings).run_check()
+        print(format_app_launcher_check_report(report))
+        return 0 if report.is_successful else 1
+
+    if "--launch-app" in args:
+        settings = load_settings()
+        configure_logging(settings, console=False)
+        app_name = _message_after_flag(args, "--launch-app") or "notepad"
+        return _run_launch_app(settings, app_name)
 
     if "--weather-check" in args:
         settings = load_settings()
@@ -355,6 +369,12 @@ def _run_notification_test(settings, message: str) -> int:
     result = NotificationService(settings).send_notification("Jarvis", message)
     print(format_notification_check_report(result), flush=True)
     return 0 if result.delivered else 1
+
+
+def _run_launch_app(settings, app_name: str) -> int:
+    result = AppLauncher(settings).launch_app(app_name)
+    print(format_app_launch_report(result), flush=True)
+    return 0 if result.request_attempted or result.launched else 1
 
 
 def _format_chat_test_report(

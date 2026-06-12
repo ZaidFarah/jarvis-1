@@ -163,7 +163,7 @@ def test_voice_command_report_includes_safe_placeholder_response() -> None:
     assert "detected: yes" in text
     assert "raw command transcription: open settings" in text
     assert "cleaned command: open settings" in text
-    assert "Jarvis foundation is running" in text
+    assert "not allowed" in text
 
 
 def test_voice_command_punctuation_only_transcription_is_empty() -> None:

@@ -104,6 +104,25 @@ def test_reminder_settings_defaults_are_safe() -> None:
     assert settings.reminders_database_path.name == "jarvis_reminders.db"
 
 
+def test_app_launcher_settings_defaults_are_safe() -> None:
+    settings = AppSettings(_env_file=None)
+
+    assert settings.app_launcher_enabled is True
+    assert settings.app_launcher_allowed_apps_map["notepad"] == "notepad.exe"
+    assert settings.app_launcher_allowed_apps_map["calculator"] == "calc.exe"
+    assert settings.app_launcher_allowed_apps_map["edge"] == ""
+
+
+def test_app_launcher_settings_read_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("APP_LAUNCHER_ENABLED", "false")
+    monkeypatch.setenv("APP_LAUNCHER_ALLOWED_APPS", "notepad=notepad.exe,paint=paint.exe")
+
+    settings = AppSettings(_env_file=None)
+
+    assert settings.app_launcher_enabled is False
+    assert settings.app_launcher_allowed_apps_map == {"notepad": "notepad.exe", "paint": "paint.exe"}
+
+
 def test_notification_settings_defaults_are_safe() -> None:
     settings = AppSettings(_env_file=None)
 

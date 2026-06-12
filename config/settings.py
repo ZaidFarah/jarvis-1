@@ -184,6 +184,14 @@ class AppSettings(BaseSettings):
         default=False,
         validation_alias=AliasChoices("REMINDERS_WATCH_SPEAK", "JARVIS_REMINDERS_WATCH_SPEAK"),
     )
+    app_launcher_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("APP_LAUNCHER_ENABLED", "JARVIS_APP_LAUNCHER_ENABLED"),
+    )
+    app_launcher_allowed_apps: str = Field(
+        default="notepad=notepad.exe,calculator=calc.exe,chrome=,edge=,vscode=,docker=",
+        validation_alias=AliasChoices("APP_LAUNCHER_ALLOWED_APPS", "JARVIS_APP_LAUNCHER_ALLOWED_APPS"),
+    )
     notifications_enabled: bool = Field(
         default=False,
         validation_alias=AliasChoices("NOTIFICATIONS_ENABLED", "JARVIS_NOTIFICATIONS_ENABLED"),
@@ -338,6 +346,14 @@ class AppSettings(BaseSettings):
             raise ValueError(f"Unsupported notification provider: {value}")
         return cleaned
 
+    @field_validator("app_launcher_allowed_apps")
+    @classmethod
+    def normalize_app_launcher_allowed_apps(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            return ""
+        return cleaned
+
     @field_validator("weather_default_city")
     @classmethod
     def normalize_weather_default_city(cls, value: str) -> str:
@@ -442,6 +458,27 @@ class AppSettings(BaseSettings):
     @property
     def has_reminders_database(self) -> bool:
         return bool(self.reminders_database_path)
+
+    @property
+    def app_launcher_allowed_apps_map(self) -> dict[str, str]:
+        raw = self.app_launcher_allowed_apps.strip()
+        if not raw:
+            return {}
+
+        entries = raw.replace("\n", ",").split(",")
+        parsed: dict[str, str] = {}
+        for entry in entries:
+            item = entry.strip()
+            if not item:
+                continue
+            if "=" not in item:
+                continue
+            name, command = item.split("=", 1)
+            cleaned_name = name.strip().lower()
+            if not cleaned_name:
+                continue
+            parsed[cleaned_name] = command.strip()
+        return parsed
 
 
 def load_settings() -> AppSettings:

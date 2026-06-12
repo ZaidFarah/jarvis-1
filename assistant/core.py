@@ -7,6 +7,7 @@ from assistant.conversation import ConversationHistory
 from integrations.weather_service import WeatherService
 from memory.store import SensitiveMemoryError, SQLiteMemoryStore
 from config.settings import AppSettings, load_settings
+from tools.app_launcher import AppLauncher
 from reminders.service import ReminderService
 from services.openai_service import OpenAIService
 
@@ -38,6 +39,10 @@ class AssistantCore:
         self.settings = settings or load_settings()
         self.openai_service = openai_service or OpenAIService(self.settings)
         self.weather_service = weather_service or WeatherService(self.settings)
+        if self.settings.app_launcher_enabled:
+            self.app_launcher = AppLauncher(self.settings)
+        else:
+            self.app_launcher = None
         if reminder_service is not None:
             self.reminder_service = reminder_service
         elif self.settings.reminders_enabled:
@@ -70,6 +75,10 @@ class AssistantCore:
         weather_response = self._handle_weather_command(cleaned)
         if weather_response is not None:
             return weather_response
+
+        app_launch_response = self._handle_app_launcher_command(cleaned)
+        if app_launch_response is not None:
+            return app_launch_response
 
         reminder_response = self._handle_reminder_command(cleaned)
         if reminder_response is not None:
@@ -152,6 +161,22 @@ class AssistantCore:
         self.conversation_history.add_user(command_text)
         self.conversation_history.add_assistant(response.text)
         return response
+
+    def _handle_app_launcher_command(self, command: str) -> AssistantResponse | None:
+        normalized = " ".join(command.lower().strip().split())
+        match = re.match(r"(?i)^(?:open|launch)\s+(.+)$", command.strip())
+        if not match:
+            return None
+
+        app_name = match.group(1).strip().lower()
+        if app_name not in self.settings.app_launcher_allowed_apps_map:
+            return AssistantResponse(text=f"App '{app_name}' is not allowed.", accepted=True, source="local")
+
+        if not self.settings.app_launcher_enabled or self.app_launcher is None:
+            return AssistantResponse(text="App launcher is disabled.", accepted=True, source="local")
+
+        result = self.app_launcher.launch_app(app_name)
+        return AssistantResponse(text=self._app_launcher_response_text(result), accepted=result.launched, source="launcher", error=result.safe_error)
 
     def _handle_reminder_command(self, command: str) -> AssistantResponse | None:
         if not self.settings.reminders_enabled or self.reminder_service is None:
@@ -271,3 +296,13 @@ class AssistantCore:
         if not cleaned.isdigit():
             return None
         return int(cleaned)
+
+    @staticmethod
+    def _app_launcher_response_text(result) -> str:
+        if result.launched:
+            return f"Launched {result.app_name}."
+        if result.fallback_reason:
+            return result.fallback_reason
+        if result.safe_error:
+            return result.safe_error
+        return f"Unable to launch {result.app_name}."

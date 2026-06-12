@@ -462,6 +462,30 @@ py main.py --notification-test "Hello from Jarvis"
 
 The notification test sends a one-off toast using the configured provider when notifications are enabled and the provider is available. On unsupported platforms or when the provider cannot load, Jarvis fails safely and reports the reason.
 
+## Phase 17 Scope
+
+- Safe local application launcher for whitelisted commands only.
+- CLI commands: `py main.py --app-launcher-check` and `py main.py --launch-app notepad`.
+- Assistant commands: `open notepad`, `launch calculator`, `open edge`, `open vscode`, and `open docker`.
+- Launcher settings: `APP_LAUNCHER_ENABLED=true`, `APP_LAUNCHER_ALLOWED_APPS=notepad=notepad.exe,calculator=calc.exe,chrome=,edge=,vscode=,docker=`.
+- Launcher logs are saved to `logs/app_launcher.log`.
+
+## App Launcher Check
+
+```powershell
+py main.py --app-launcher-check
+```
+
+The app launcher check prints whether the launcher is enabled, whether the platform is supported, and which apps are allowed. It never executes arbitrary commands.
+
+## Launch App
+
+```powershell
+py main.py --launch-app notepad
+```
+
+Jarvis can launch only apps listed in `APP_LAUNCHER_ALLOWED_APPS`. If an app is missing or not configured, Jarvis refuses the request.
+
 ## Text To Speech Test
 
 ```powershell
