@@ -134,7 +134,12 @@ class OpenAIService:
                 errors=[safe_error],
             )
 
-    def chat(self, user_text: str, system_prompt: str | None = None) -> OpenAIChatResult:
+    def chat(
+        self,
+        user_text: str,
+        system_prompt: str | None = None,
+        conversation_history: str | None = None,
+    ) -> OpenAIChatResult:
         cleaned = user_text.strip()
         if not cleaned:
             return OpenAIChatResult(
@@ -165,16 +170,18 @@ class OpenAIService:
         prompt = system_prompt or self.settings.system_prompt
         try:
             client = self.client_factory(api_key=self.settings.openai_api_key)
+            input_text = self._build_chat_input(cleaned, conversation_history=conversation_history)
             self.chat_logger.info(
-                "Sending OpenAI chat request model={} prompt_chars={} user_chars={}",
+                "Sending OpenAI chat request model={} prompt_chars={} user_chars={} history_chars={}",
                 self.settings.openai_model,
                 len(prompt),
                 len(cleaned),
+                len(conversation_history or ""),
             )
             response = client.responses.create(
                 model=self.settings.openai_model,
                 instructions=prompt,
-                input=cleaned,
+                input=input_text,
                 max_output_tokens=400,
             )
             text = self._extract_response_text(response)
@@ -222,6 +229,13 @@ class OpenAIService:
         if output_text:
             return str(output_text).strip()
         return ""
+
+    @staticmethod
+    def _build_chat_input(user_text: str, conversation_history: str | None) -> str:
+        history = conversation_history.strip() if conversation_history else ""
+        if not history:
+            return user_text
+        return f"{history}\nUser: {user_text}"
 
     def _ensure_openai_log_sink(self) -> None:
         global _OPENAI_LOG_SINK_ID

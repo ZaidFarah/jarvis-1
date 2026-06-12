@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from assistant.core import AssistantCore, AssistantResponse
 from config.settings import AppSettings
+from services.openai_service import OpenAIChatResult
 from voice.interfaces import TranscriptionResult
 from voice.voice_command_test import COMMAND_PROMPT, LISTENING_FOR_COMMAND_PROMPT, NO_COMMAND_DETECTED_MESSAGE
 from voice.voice_loop import RETURNING_TO_SLEEP_MESSAGE, STOP_COMMAND_DETECTED_MESSAGE, VoiceLoopRunner, is_stop_command
@@ -41,6 +42,18 @@ class FakeTtsProvider:
 
     def speak(self, text: str) -> None:
         self.spoken.append(text)
+
+
+class SpyOpenAIService:
+    def __init__(self) -> None:
+        self.messages: list[str] = []
+        self.histories: list[str | None] = []
+
+    def chat(self, user_text: str, system_prompt: str | None = None, conversation_history: str | None = None) -> OpenAIChatResult:
+        del system_prompt
+        self.messages.append(user_text)
+        self.histories.append(conversation_history)
+        return OpenAIChatResult(success=True, text=f"handled {user_text}", used_openai=True)
 
 
 def fake_recorder(duration: float) -> list[float]:
@@ -235,3 +248,30 @@ def test_voice_loop_run_stops_after_stop_command() -> None:
 
     assert len(reports) == 1
     assert reports[0].stop_requested is True
+
+
+def test_voice_loop_uses_conversation_history_between_turns() -> None:
+    settings = AppSettings(_env_file=None, openai_enabled=True, openai_api_key="sk-test")
+    settings.voice_loop_speak_status = False
+    openai_service = SpyOpenAIService()
+    assistant = AssistantCore(settings=settings, openai_service=openai_service)
+    provider = FakeProvider(["hey jarvis", "first question", "hey jarvis", "second question"])
+
+    runner = VoiceLoopRunner(
+        settings=settings,
+        assistant=assistant,
+        provider=provider,
+        tts_provider=FakeTtsProvider(),
+        recorder=fake_recorder,
+        sleeper=no_sleep,
+        beeper=no_beep,
+    )
+
+    reports = runner.run(max_cycles=2)
+
+    assert len(reports) == 2
+    assert openai_service.messages == ["first question", "second question"]
+    assert openai_service.histories[0] is None
+    assert openai_service.histories[1] is not None
+    assert "User: first question" in (openai_service.histories[1] or "")
+    assert "Assistant: handled first question" in (openai_service.histories[1] or "")

@@ -103,6 +103,12 @@ def main(argv: list[str] | None = None) -> int:
         print(_format_chat_test_report(message, response, tts_result))
         return 0 if response.accepted and (tts_result is None or tts_result.spoken) else 1
 
+    if "--chat-session" in args:
+        settings = load_settings()
+        configure_logging(settings, console=False)
+        assistant = AssistantCore(settings=settings, openai_service=OpenAIService(settings))
+        return _run_chat_session(assistant)
+
     application = JarvisApplication()
     return application.run()
 
@@ -165,6 +171,25 @@ def _voice_loop_status_callback(status: str) -> None:
     visible_prefixes = ("Last recognized command:", "Last Jarvis response:", "Voice loop summary:")
     if status in visible_statuses or status.startswith(visible_prefixes):
         print(status, flush=True)
+
+
+def _run_chat_session(assistant: AssistantCore) -> int:
+    print("Jarvis chat session started. Type exit, quit, or bye to leave.", flush=True)
+    try:
+        while True:
+            user_text = input("You: ").strip()
+            if not user_text:
+                continue
+
+            if user_text.lower() in {"exit", "quit", "bye"}:
+                print("Jarvis: Session closed.", flush=True)
+                return 0
+
+            response = assistant.handle_command(user_text)
+            print(f"Jarvis: {response.text}", flush=True)
+    except KeyboardInterrupt:
+        print("\nJarvis chat session interrupted. Exiting cleanly.", flush=True)
+        return 0
 
 
 def _format_chat_test_report(

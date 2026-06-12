@@ -11,10 +11,17 @@ class FakeOpenAIService:
         self.error = error
         self.messages: list[str] = []
         self.prompts: list[str | None] = []
+        self.histories: list[str | None] = []
 
-    def chat(self, user_text: str, system_prompt: str | None = None) -> OpenAIChatResult:
+    def chat(
+        self,
+        user_text: str,
+        system_prompt: str | None = None,
+        conversation_history: str | None = None,
+    ) -> OpenAIChatResult:
         self.messages.append(user_text)
         self.prompts.append(system_prompt)
+        self.histories.append(conversation_history)
         if self.error:
             raise self.error
         assert self.result is not None
@@ -74,3 +81,53 @@ def test_assistant_core_uses_fallback_on_openai_error() -> None:
     assert response.source == "fallback"
     assert "status report" in response.text
     assert response.error == "RuntimeError: network failed"
+
+
+def test_assistant_core_stores_history_turns() -> None:
+    service = FakeOpenAIService(OpenAIChatResult(success=True, text="OpenAI answer", used_openai=True))
+    assistant = AssistantCore(
+        settings=AppSettings(_env_file=None, openai_enabled=True, openai_api_key="sk-test"),
+        openai_service=service,
+    )
+
+    first = assistant.handle_command("first question")
+    second = assistant.handle_command("second question")
+
+    assert first.source == "openai"
+    assert second.source == "openai"
+    assert [turn.role for turn in assistant.conversation_history.messages] == [
+        "user",
+        "assistant",
+        "user",
+        "assistant",
+    ]
+    assert assistant.conversation_history.messages[0].content == "first question"
+    assert assistant.conversation_history.messages[1].content == "OpenAI answer"
+
+
+def test_assistant_core_reset_conversation_clears_history() -> None:
+    service = FakeOpenAIService(OpenAIChatResult(success=True, text="OpenAI answer", used_openai=True))
+    assistant = AssistantCore(
+        settings=AppSettings(_env_file=None, openai_enabled=True, openai_api_key="sk-test"),
+        openai_service=service,
+    )
+
+    assistant.handle_command("first question")
+    response = assistant.handle_command("reset conversation")
+
+    assert response.text == "Conversation history cleared."
+    assert response.source == "local"
+    assert assistant.conversation_history.messages == []
+
+
+def test_assistant_core_history_disabled_still_uses_fallback() -> None:
+    service = FakeOpenAIService(error=RuntimeError("network failed"))
+    assistant = AssistantCore(
+        settings=AppSettings(_env_file=None, conversation_history_enabled=False),
+        openai_service=service,
+    )
+
+    response = assistant.handle_command("status report")
+
+    assert response.source == "fallback"
+    assert assistant.conversation_history.messages == []

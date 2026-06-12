@@ -131,6 +131,22 @@ class AppSettings(BaseSettings):
         default=True,
         validation_alias=AliasChoices("VOICE_LOOP_SPEAK_STATUS", "JARVIS_VOICE_LOOP_SPEAK_STATUS"),
     )
+    conversation_history_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices(
+            "CONVERSATION_HISTORY_ENABLED",
+            "JARVIS_CONVERSATION_HISTORY_ENABLED",
+        ),
+    )
+    conversation_history_max_messages: int = Field(
+        default=10,
+        ge=0,
+        le=50,
+        validation_alias=AliasChoices(
+            "CONVERSATION_HISTORY_MAX_MESSAGES",
+            "JARVIS_CONVERSATION_HISTORY_MAX_MESSAGES",
+        ),
+    )
     openai_enabled: bool = Field(
         default=False,
         validation_alias=AliasChoices("OPENAI_ENABLED", "JARVIS_OPENAI_ENABLED"),

@@ -124,6 +124,32 @@ def test_openai_chat_success_uses_configured_model_and_prompt() -> None:
     assert captured["input"] == "hello"
 
 
+def test_openai_chat_includes_recent_history_in_prompt() -> None:
+    captured: dict[str, str] = {}
+
+    class ChatResponses:
+        def create(self, **kwargs):
+            captured.update(kwargs)
+            return FakeResponse()
+
+    class ChatClient:
+        responses = ChatResponses()
+
+    settings = AppSettings(
+        _env_file=None,
+        openai_enabled=True,
+        openai_api_key="sk-secret",
+        openai_model="gpt-test",
+        system_prompt="You are Jarvis.",
+    )
+    service = OpenAIService(settings, client_factory=lambda api_key: ChatClient())
+
+    result = service.chat("follow up", conversation_history="Recent conversation context:\nUser: hello\nAssistant: hi")
+
+    assert result.success is True
+    assert captured["input"] == "Recent conversation context:\nUser: hello\nAssistant: hi\nUser: follow up"
+
+
 def test_openai_chat_error_is_safe() -> None:
     class FailingResponses:
         def create(self, **kwargs):

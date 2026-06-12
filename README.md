@@ -116,6 +116,16 @@ Jarvis is a Windows desktop AI assistant foundation. Phase 1 provides the applic
 - Loop exit summary reports wake attempts, successful wakes, commands handled, empty commands, and errors.
 - GUI shows loop status, last recognized command, and last Jarvis response, and disables the loop controls while the loop is active.
 
+## Phase 10 Scope
+
+- In-memory short-term conversation history for the current session only.
+- Conversation history keeps the last `CONVERSATION_HISTORY_MAX_MESSAGES` messages.
+- Chat and voice loop requests send recent history to OpenAI when history is enabled.
+- CLI command: `py main.py --chat-session`.
+- Session exit commands: `exit`, `quit`, and `bye`.
+- `reset conversation` clears only the current short-term history.
+- Conversation history is not written to disk.
+
 ## Setup
 
 Install dependencies:
@@ -335,6 +345,14 @@ If OpenAI is disabled or unavailable, Jarvis returns the local fallback response
 ```text
 logs/chat.log
 ```
+
+## Chat Session
+
+```powershell
+py main.py --chat-session
+```
+
+The chat session keeps a single in-memory conversation open across turns. It reuses the current short-term history so follow-up questions can reference earlier turns in the same session. Type `reset conversation` to clear only the current history, or `exit`, `quit`, or `bye` to end the session.
 
 ## Text To Speech Test
 

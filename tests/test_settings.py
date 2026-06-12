@@ -39,6 +39,18 @@ def test_openai_settings_defaults_are_safe() -> None:
     assert settings.has_openai_api_key is False
     assert settings.openai_model == "gpt-4o-mini"
     assert settings.system_prompt == "You are Jarvis, a helpful personal desktop AI assistant."
+    assert settings.conversation_history_enabled is True
+    assert settings.conversation_history_max_messages == 10
+
+
+def test_conversation_history_settings_read_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CONVERSATION_HISTORY_ENABLED", "false")
+    monkeypatch.setenv("CONVERSATION_HISTORY_MAX_MESSAGES", "4")
+
+    settings = AppSettings(_env_file=None)
+
+    assert settings.conversation_history_enabled is False
+    assert settings.conversation_history_max_messages == 4
 
 
 def test_openai_settings_read_environment(monkeypatch: pytest.MonkeyPatch) -> None:
