@@ -32,8 +32,20 @@ def test_voice_loop_gui_state_updates_controls_and_status_fields() -> None:
     settings = AppSettings(_env_file=None)
     window = JarvisMainWindow(settings=settings, assistant=StubAssistant())
 
+    assert window.tabs.count() == 5
+    assert [window.tabs.tabText(index) for index in range(window.tabs.count())] == [
+        "Voice",
+        "Tools",
+        "Reminders",
+        "Memory",
+        "Diagnostics",
+    ]
+    assert window.mode_value.text() == "Idle"
     assert window.start_voice_loop_button.isEnabled() is True
     assert window.stop_voice_loop_button.isEnabled() is False
+    assert window.chat_test_button.text() == "Chat Test"
+    assert window.weather_check_button.text() == "Weather Check"
+    assert window.vision_check_button.text() == "Vision Check"
 
     window._set_voice_loop_running(True)
 
@@ -48,6 +60,7 @@ def test_voice_loop_gui_state_updates_controls_and_status_fields() -> None:
     assert window.launch_notepad_button.isEnabled() is True
     assert window.start_reminder_watch_button.isEnabled() is True
     assert window.stop_reminder_watch_button.isEnabled() is False
+    assert window.mode_value.text() == "Voice Loop"
 
     window._set_reminder_watch_running(True)
     assert window.start_reminder_watch_button.isEnabled() is False
@@ -75,6 +88,14 @@ def test_voice_loop_gui_state_updates_controls_and_status_fields() -> None:
     assert window.notification_result_value.text() == "Delivered"
     assert window.app_launch_result_value.text() == "Launched"
     assert window.reminder_watch_status_value.text() == "Idle"
+
+    tray_actions = [action.text() for action in window.tray_icon.contextMenu().actions()]
+    assert "Show Jarvis" in tray_actions
+    assert "Start Voice Loop" in tray_actions
+    assert "Stop Voice Loop" in tray_actions
+    assert "Check Reminders" in tray_actions
+    assert "Test Notification" in tray_actions
+    assert "Exit Jarvis" in tray_actions
 
     window.close()
     app.processEvents()

@@ -2,6 +2,8 @@
 
 Jarvis is a Windows desktop AI assistant foundation. Phase 1 provides the application shell. Phase 2 adds a safe voice foundation for local microphone diagnostics and provider interfaces only.
 
+The GUI now uses a tabbed dark interface with quick actions for voice, tools, reminders, memory, and diagnostics, plus a tray menu for show, voice loop, reminders, notification test, and exit.
+
 ## Phase 1 Scope
 
 - PySide6 desktop window with a dark floating Jarvis-style interface.

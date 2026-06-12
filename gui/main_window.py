@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QGraphicsDropShadowEffect,
     QHBoxLayout,
+    QGridLayout,
     QLabel,
     QLineEdit,
     QMainWindow,
@@ -18,6 +19,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QSizePolicy,
     QSystemTrayIcon,
+    QTabWidget,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -37,6 +39,7 @@ from voice.voice_loop import (
     VOICE_LOOP_STOPPED_MESSAGE,
     VoiceLoopRunner,
 )
+from vision.vision_service import format_vision_check_report
 
 
 class AssistantStatus(str, Enum):
@@ -127,6 +130,10 @@ class JarvisMainWindow(QMainWindow):
         self.orb = OrbWidget()
         self.status = AssistantStatus.SLEEPING
         self.status_label = QLabel(self.status.value)
+        self.mode_label = QLabel("Mode")
+        self.mode_value = QLabel("Idle")
+        self.current_mode = "Idle"
+        self.tabs = QTabWidget()
         self.transcript = QTextEdit()
         self.command_input = QLineEdit()
         self.mic_test_button = QPushButton("Mic Test")
@@ -194,6 +201,8 @@ class JarvisMainWindow(QMainWindow):
         subtitle = QLabel("Desktop assistant foundation")
         subtitle.setObjectName("subtitle")
         self.status_label.setObjectName("statusPill")
+        self.mode_label.setObjectName("modeLabel")
+        self.mode_value.setObjectName("modeValue")
         self.voice_loop_status_value.setObjectName("voiceLoopValue")
         self.voice_loop_last_command_value.setObjectName("voiceLoopValue")
         self.voice_loop_last_response_value.setObjectName("voiceLoopValue")
@@ -218,6 +227,8 @@ class JarvisMainWindow(QMainWindow):
         title_block.addWidget(subtitle)
         title_row.addLayout(title_block)
         title_row.addStretch(1)
+        title_row.addWidget(self.mode_label)
+        title_row.addWidget(self.mode_value)
         title_row.addWidget(self.status_label)
         title_row.addWidget(minimize_button)
         title_row.addWidget(close_button)
@@ -235,6 +246,12 @@ class JarvisMainWindow(QMainWindow):
         self.stop_voice_loop_button.setEnabled(False)
         self.check_reminders_button.setObjectName("secondaryButton")
         self.notification_test_button.setObjectName("secondaryButton")
+        self.chat_test_button = QPushButton("Chat Test")
+        self.chat_test_button.setObjectName("secondaryButton")
+        self.weather_check_button = QPushButton("Weather Check")
+        self.weather_check_button.setObjectName("secondaryButton")
+        self.vision_check_button = QPushButton("Vision Check")
+        self.vision_check_button.setObjectName("secondaryButton")
         self.launch_notepad_button.setObjectName("secondaryButton")
         self.open_google_button.setObjectName("secondaryButton")
         self.list_downloads_button.setObjectName("secondaryButton")
@@ -248,17 +265,89 @@ class JarvisMainWindow(QMainWindow):
         input_row.addWidget(self.command_input)
         input_row.addWidget(self.mic_test_button)
         input_row.addWidget(self.voice_command_button)
+        input_row.addWidget(self.chat_test_button)
         input_row.addWidget(self.start_voice_loop_button)
         input_row.addWidget(self.stop_voice_loop_button)
-        input_row.addWidget(self.check_reminders_button)
-        input_row.addWidget(self.notification_test_button)
-        input_row.addWidget(self.launch_notepad_button)
-        input_row.addWidget(self.open_google_button)
-        input_row.addWidget(self.list_downloads_button)
-        input_row.addWidget(self.test_confirmation_button)
-        input_row.addWidget(self.start_reminder_watch_button)
-        input_row.addWidget(self.stop_reminder_watch_button)
         input_row.addWidget(self.send_button)
+
+        self.tabs = QTabWidget()
+        self.tabs.setObjectName("mainTabs")
+
+        voice_tab = QWidget()
+        voice_layout = QVBoxLayout(voice_tab)
+        voice_layout.setContentsMargins(12, 12, 12, 12)
+        voice_layout.setSpacing(10)
+        voice_intro = QLabel("Speak to Jarvis, type a command, or run a quick voice test.")
+        voice_intro.setObjectName("sectionNote")
+        voice_layout.addWidget(voice_intro)
+        voice_layout.addWidget(self.transcript, stretch=1)
+        voice_layout.addLayout(input_row)
+
+        tools_tab = QWidget()
+        tools_layout = QGridLayout(tools_tab)
+        tools_layout.setContentsMargins(12, 12, 12, 12)
+        tools_layout.setHorizontalSpacing(10)
+        tools_layout.setVerticalSpacing(10)
+        tools_layout.addWidget(self.launch_notepad_button, 0, 0)
+        tools_layout.addWidget(self.open_google_button, 0, 1)
+        tools_layout.addWidget(self.list_downloads_button, 0, 2)
+        tools_intro = QLabel("These quick actions call existing safe routes only.")
+        tools_intro.setObjectName("sectionNote")
+        tools_layout.addWidget(tools_intro, 1, 0, 1, 3)
+
+        reminders_tab = QWidget()
+        reminders_layout = QVBoxLayout(reminders_tab)
+        reminders_layout.setContentsMargins(12, 12, 12, 12)
+        reminders_layout.setSpacing(10)
+        reminders_intro = QLabel("Reminder actions stay permission-gated and confirmation-gated.")
+        reminders_intro.setObjectName("sectionNote")
+        reminders_layout.addWidget(reminders_intro)
+        reminders_layout.addWidget(self.check_reminders_button)
+        reminders_layout.addWidget(self.start_reminder_watch_button)
+        reminders_layout.addWidget(self.stop_reminder_watch_button)
+        reminders_status_row = QHBoxLayout()
+        reminders_status_row.addWidget(QLabel("Reminder check"))
+        reminders_status_row.addWidget(self.reminders_check_value, stretch=1)
+        reminders_layout.addLayout(reminders_status_row)
+        watch_status_row = QHBoxLayout()
+        watch_status_row.addWidget(QLabel("Reminder watch"))
+        watch_status_row.addWidget(self.reminder_watch_status_value, stretch=1)
+        reminders_layout.addLayout(watch_status_row)
+        reminders_layout.addStretch(1)
+
+        memory_tab = QWidget()
+        memory_layout = QVBoxLayout(memory_tab)
+        memory_layout.setContentsMargins(12, 12, 12, 12)
+        memory_layout.setSpacing(10)
+        memory_intro = QLabel("Use chat commands to manage short-term history and explicit memory.")
+        memory_intro.setObjectName("sectionNote")
+        memory_layout.addWidget(memory_intro)
+        self.memory_status_value = QLabel("Idle")
+        self.memory_status_value.setObjectName("voiceLoopValue")
+        memory_status_row = QHBoxLayout()
+        memory_status_row.addWidget(QLabel("Memory status"))
+        memory_status_row.addWidget(self.memory_status_value, stretch=1)
+        memory_layout.addLayout(memory_status_row)
+        memory_layout.addStretch(1)
+
+        diagnostics_tab = QWidget()
+        diagnostics_layout = QGridLayout(diagnostics_tab)
+        diagnostics_layout.setContentsMargins(12, 12, 12, 12)
+        diagnostics_layout.setHorizontalSpacing(10)
+        diagnostics_layout.setVerticalSpacing(10)
+        diagnostics_layout.addWidget(self.notification_test_button, 0, 0)
+        diagnostics_layout.addWidget(self.weather_check_button, 0, 1)
+        diagnostics_layout.addWidget(self.vision_check_button, 1, 0)
+        diagnostics_layout.addWidget(self.test_confirmation_button, 1, 1)
+        diagnostics_intro = QLabel("Diagnostics stay read-only and use existing safe routes.")
+        diagnostics_intro.setObjectName("sectionNote")
+        diagnostics_layout.addWidget(diagnostics_intro, 2, 0, 1, 2)
+
+        self.tabs.addTab(voice_tab, "Voice")
+        self.tabs.addTab(tools_tab, "Tools")
+        self.tabs.addTab(reminders_tab, "Reminders")
+        self.tabs.addTab(memory_tab, "Memory")
+        self.tabs.addTab(diagnostics_tab, "Diagnostics")
 
         loop_info = QFrame()
         loop_info.setObjectName("loopInfo")
@@ -322,9 +411,8 @@ class JarvisMainWindow(QMainWindow):
         layout.setSpacing(16)
         layout.addLayout(title_row)
         layout.addWidget(self.orb, alignment=Qt.AlignmentFlag.AlignHCenter)
+        layout.addWidget(self.tabs)
         layout.addWidget(loop_info)
-        layout.addWidget(self.transcript, stretch=1)
-        layout.addLayout(input_row)
 
         root = QWidget()
         root_layout = QVBoxLayout(root)
@@ -349,6 +437,20 @@ class JarvisMainWindow(QMainWindow):
                 color: #8fb3c8;
                 font-size: 12px;
             }
+            #modeLabel {
+                color: #9fb7c9;
+                font-size: 12px;
+                font-weight: 600;
+            }
+            #modeValue {
+                color: #f0fbff;
+                background: rgba(15, 23, 42, 165);
+                border: 1px solid rgba(96, 165, 250, 90);
+                border-radius: 10px;
+                padding: 5px 10px;
+                min-width: 120px;
+                font-weight: 600;
+            }
             #statusPill {
                 color: #dff9ff;
                 background: rgba(37, 99, 235, 70);
@@ -365,6 +467,29 @@ class JarvisMainWindow(QMainWindow):
             #voiceLoopValue {
                 color: #dff9ff;
                 font-weight: 500;
+            }
+            #sectionNote {
+                color: #9fb7c9;
+                font-size: 12px;
+                padding-top: 4px;
+            }
+            #mainTabs::pane {
+                border: 1px solid rgba(71, 85, 105, 120);
+                border-radius: 12px;
+                background: rgba(3, 7, 18, 95);
+            }
+            #mainTabs QTabBar::tab {
+                color: #dff9ff;
+                background: rgba(15, 23, 42, 180);
+                border: 1px solid rgba(71, 85, 105, 100);
+                padding: 8px 14px;
+                margin-right: 4px;
+                border-top-left-radius: 10px;
+                border-top-right-radius: 10px;
+            }
+            #mainTabs QTabBar::tab:selected {
+                background: rgba(34, 211, 238, 40);
+                border-color: rgba(125, 211, 252, 150);
             }
             #windowButton {
                 color: #dff9ff;
@@ -426,13 +551,16 @@ class JarvisMainWindow(QMainWindow):
         self.send_button.clicked.connect(self.handle_command)
         self.mic_test_button.clicked.connect(self.run_microphone_test)
         self.voice_command_button.clicked.connect(self.run_voice_command_test)
+        self.chat_test_button.clicked.connect(self.run_chat_test)
         self.start_voice_loop_button.clicked.connect(self.start_voice_loop)
         self.stop_voice_loop_button.clicked.connect(self.stop_voice_loop)
         self.check_reminders_button.clicked.connect(self.check_reminders)
         self.notification_test_button.clicked.connect(self.test_notification)
         self.launch_notepad_button.clicked.connect(self.launch_notepad)
+        self.weather_check_button.clicked.connect(self.weather_check)
         self.open_google_button.clicked.connect(self.open_google)
         self.list_downloads_button.clicked.connect(self.list_downloads)
+        self.vision_check_button.clicked.connect(self.vision_check)
         self.test_confirmation_button.clicked.connect(self.test_confirmation)
         self.start_reminder_watch_button.clicked.connect(self.start_reminder_watch)
         self.stop_reminder_watch_button.clicked.connect(self.stop_reminder_watch)
@@ -519,6 +647,7 @@ class JarvisMainWindow(QMainWindow):
         if not command:
             return
 
+        self._set_mode("Chat")
         self.command_input.clear()
         self._append_message("You", command)
         self.set_status(AssistantStatus.THINKING)
@@ -530,11 +659,14 @@ class JarvisMainWindow(QMainWindow):
         except Exception as exc:  # pragma: no cover - defensive GUI boundary
             self._append_message("Jarvis", f"Phase 1 error: {exc}")
             self.set_status(AssistantStatus.ERROR)
+            self._set_mode("Error")
             return
 
         QTimer.singleShot(1200, lambda: self.set_status(AssistantStatus.SLEEPING))
+        QTimer.singleShot(1200, lambda: self._set_mode("Idle"))
 
     def run_microphone_test(self) -> None:
+        self._set_mode("Diagnostics")
         self._append_message("Jarvis", "Running a short local microphone test...")
         self.set_status(AssistantStatus.LISTENING)
         QApplication.processEvents()
@@ -545,10 +677,13 @@ class JarvisMainWindow(QMainWindow):
             self.set_status(AssistantStatus.SPEAKING)
         else:
             self.set_status(AssistantStatus.ERROR)
+            self._set_mode("Error")
 
         QTimer.singleShot(1600, lambda: self.set_status(AssistantStatus.SLEEPING))
+        QTimer.singleShot(1600, lambda: self._set_mode("Idle"))
 
     def run_voice_command_test(self) -> None:
+        self._set_mode("Voice Test")
         self._append_message("Jarvis", "Starting controlled voice command test...")
         QApplication.processEvents()
 
@@ -561,8 +696,29 @@ class JarvisMainWindow(QMainWindow):
         self._append_message("Jarvis", format_voice_command_report(report))
         self.set_status(AssistantStatus.SPEAKING if report.wake_detected and report.assistant_response else AssistantStatus.SLEEPING)
         QTimer.singleShot(1800, lambda: self.set_status(AssistantStatus.SLEEPING))
+        QTimer.singleShot(1800, lambda: self._set_mode("Idle"))
+
+    def run_chat_test(self) -> None:
+        command = self.command_input.text().strip() or "Say hello"
+        self._set_mode("Chat Test")
+        self._append_message("Jarvis", f"Running chat test: {command}")
+        self.set_status(AssistantStatus.THINKING)
+        QApplication.processEvents()
+
+        try:
+            response = self.assistant.handle_command(command)
+            self._append_message("Jarvis", response.text)
+            self.set_status(AssistantStatus.SPEAKING if response.accepted else AssistantStatus.ERROR)
+        except Exception as exc:  # pragma: no cover - defensive GUI boundary
+            self._append_message("Jarvis", f"Chat test failed: {exc}")
+            self.set_status(AssistantStatus.ERROR)
+            return
+
+        QTimer.singleShot(1200, lambda: self.set_status(AssistantStatus.SLEEPING))
+        QTimer.singleShot(1200, lambda: self._set_mode("Idle"))
 
     def check_reminders(self) -> None:
+        self._set_mode("Reminders")
         self._append_message("Jarvis", "Checking reminders...")
         self.set_status(AssistantStatus.THINKING)
         QApplication.processEvents()
@@ -576,11 +732,14 @@ class JarvisMainWindow(QMainWindow):
             self._append_message("Jarvis", f"Reminder check failed: {exc}")
             self.reminders_check_value.setText("Error")
             self.set_status(AssistantStatus.ERROR)
+            self._set_mode("Error")
             return
 
         QTimer.singleShot(1200, lambda: self.set_status(AssistantStatus.SLEEPING))
+        QTimer.singleShot(1200, lambda: self._set_mode("Idle"))
 
     def test_notification(self) -> None:
+        self._set_mode("Diagnostics")
         self._append_message("Jarvis", "Testing notification...")
         self.notification_result_value.setText("Checking")
         self.set_status(AssistantStatus.THINKING)
@@ -599,11 +758,52 @@ class JarvisMainWindow(QMainWindow):
             self._append_message("Jarvis", f"Notification test failed: {exc}")
             self.notification_result_value.setText("Error")
             self.set_status(AssistantStatus.ERROR)
+            self._set_mode("Error")
             return
 
         QTimer.singleShot(1200, lambda: self.set_status(AssistantStatus.SLEEPING))
+        QTimer.singleShot(1200, lambda: self._set_mode("Idle"))
+
+    def weather_check(self) -> None:
+        self._set_mode("Weather")
+        self._append_message("Jarvis", "Checking weather...")
+        self.set_status(AssistantStatus.THINKING)
+        QApplication.processEvents()
+
+        try:
+            response = self.assistant.handle_command("what is the weather")
+            self._append_message("Jarvis", response.text)
+            self.set_status(AssistantStatus.SLEEPING if response.accepted else AssistantStatus.ERROR)
+        except Exception as exc:  # pragma: no cover - defensive GUI boundary
+            self._append_message("Jarvis", f"Weather check failed: {exc}")
+            self.set_status(AssistantStatus.ERROR)
+            self._set_mode("Error")
+            return
+
+        QTimer.singleShot(1200, lambda: self.set_status(AssistantStatus.SLEEPING))
+        QTimer.singleShot(1200, lambda: self._set_mode("Idle"))
+
+    def vision_check(self) -> None:
+        self._set_mode("Diagnostics")
+        self._append_message("Jarvis", "Checking vision diagnostics...")
+        self.set_status(AssistantStatus.THINKING)
+        QApplication.processEvents()
+
+        try:
+            report = self.assistant.vision_service.run_check()
+            self._append_message("Jarvis", format_vision_check_report(report))
+            self.set_status(AssistantStatus.SLEEPING if report.is_successful else AssistantStatus.ERROR)
+        except Exception as exc:  # pragma: no cover - defensive GUI boundary
+            self._append_message("Jarvis", f"Vision check failed: {exc}")
+            self.set_status(AssistantStatus.ERROR)
+            self._set_mode("Error")
+            return
+
+        QTimer.singleShot(1200, lambda: self.set_status(AssistantStatus.SLEEPING))
+        QTimer.singleShot(1200, lambda: self._set_mode("Idle"))
 
     def launch_notepad(self) -> None:
+        self._set_mode("Tools")
         self._append_message("Jarvis", "Launching Notepad...")
         self.app_launch_result_value.setText("Checking")
         self.set_status(AssistantStatus.THINKING)
@@ -618,11 +818,14 @@ class JarvisMainWindow(QMainWindow):
             self._append_message("Jarvis", f"App launch failed: {exc}")
             self.app_launch_result_value.setText("Error")
             self.set_status(AssistantStatus.ERROR)
+            self._set_mode("Error")
             return
 
         QTimer.singleShot(1200, lambda: self.set_status(AssistantStatus.SLEEPING))
+        QTimer.singleShot(1200, lambda: self._set_mode("Idle"))
 
     def open_google(self) -> None:
+        self._set_mode("Tools")
         self._append_message("Jarvis", "Opening Google...")
         self.website_result_value.setText("Checking")
         self.set_status(AssistantStatus.THINKING)
@@ -637,11 +840,14 @@ class JarvisMainWindow(QMainWindow):
             self._append_message("Jarvis", f"Website open failed: {exc}")
             self.website_result_value.setText("Error")
             self.set_status(AssistantStatus.ERROR)
+            self._set_mode("Error")
             return
 
         QTimer.singleShot(1200, lambda: self.set_status(AssistantStatus.SLEEPING))
+        QTimer.singleShot(1200, lambda: self._set_mode("Idle"))
 
     def list_downloads(self) -> None:
+        self._set_mode("Tools")
         self._append_message("Jarvis", "Listing Downloads...")
         self.file_access_result_value.setText("Checking")
         self.set_status(AssistantStatus.THINKING)
@@ -656,11 +862,14 @@ class JarvisMainWindow(QMainWindow):
             self._append_message("Jarvis", f"File access failed: {exc}")
             self.file_access_result_value.setText("Error")
             self.set_status(AssistantStatus.ERROR)
+            self._set_mode("Error")
             return
 
         QTimer.singleShot(1200, lambda: self.set_status(AssistantStatus.SLEEPING))
+        QTimer.singleShot(1200, lambda: self._set_mode("Idle"))
 
     def test_confirmation(self) -> None:
+        self._set_mode("Diagnostics")
         self._append_message("Jarvis", "Testing confirmation...")
         self.confirmation_result_value.setText("Checking")
         self.set_status(AssistantStatus.THINKING)
@@ -680,15 +889,18 @@ class JarvisMainWindow(QMainWindow):
             self._append_message("Jarvis", f"Confirmation test failed: {exc}")
             self.confirmation_result_value.setText("Error")
             self.set_status(AssistantStatus.ERROR)
+            self._set_mode("Error")
             return
 
         QTimer.singleShot(1200, lambda: self.set_status(AssistantStatus.SLEEPING))
+        QTimer.singleShot(1200, lambda: self._set_mode("Idle"))
 
     def start_reminder_watch(self) -> None:
         if self.reminder_watch_thread is not None and self.reminder_watch_thread.is_alive():
             self._append_message("Jarvis", "Reminder watch is already running.")
             return
 
+        self._set_mode("Reminder Watch")
         self._append_message("Jarvis", "Starting reminder watch...")
         self.reminder_watch_runner = ReminderWatcher(
             settings=self.settings,
@@ -711,6 +923,7 @@ class JarvisMainWindow(QMainWindow):
         if self.reminder_watch_runner is None:
             self._append_message("Jarvis", "Reminder watch is not running.")
             self._set_reminder_watch_running(False)
+            self._set_mode("Idle")
             return
 
         self._append_message("Jarvis", "Stopping reminder watch...")
@@ -777,6 +990,10 @@ class JarvisMainWindow(QMainWindow):
     def _set_app_launch_result(self, text: str) -> None:
         self.app_launch_result_value.setText(text)
 
+    def _set_mode(self, mode: str) -> None:
+        self.current_mode = mode
+        self.mode_value.setText(mode)
+
     def _handle_voice_command_status(self, status: str) -> None:
         status_map = {
             "Listening for wake phrase": AssistantStatus.LISTENING,
@@ -795,6 +1012,7 @@ class JarvisMainWindow(QMainWindow):
             self._append_message("Jarvis", "Voice loop is already running.")
             return
 
+        self._set_mode("Voice Loop")
         self._append_message("Jarvis", "Starting continuous voice loop...")
         self.voice_loop_runner = VoiceLoopRunner(
             settings=self.settings,
@@ -813,6 +1031,7 @@ class JarvisMainWindow(QMainWindow):
         if self.voice_loop_runner is None:
             self._append_message("Jarvis", "Voice loop is not running.")
             self._set_voice_loop_running(False)
+            self._set_mode("Idle")
             return
 
         self._append_message("Jarvis", "Stopping voice loop...")
@@ -896,8 +1115,10 @@ class JarvisMainWindow(QMainWindow):
             self.stop_voice_loop_action.setEnabled(running)
         if running:
             self.voice_loop_status_value.setText("Running")
+            self._set_mode("Voice Loop")
         elif self.voice_loop_runner is None:
             self.voice_loop_status_value.setText("Idle")
+            self._set_mode("Idle")
 
     def _set_reminder_watch_running(self, running: bool) -> None:
         self.start_reminder_watch_button.setEnabled(not running)
@@ -908,8 +1129,10 @@ class JarvisMainWindow(QMainWindow):
             self.stop_reminder_watch_action.setEnabled(running)
         if running:
             self.reminder_watch_status_value.setText("Running")
+            self._set_mode("Reminder Watch")
         elif self.reminder_watch_runner is None:
             self.reminder_watch_status_value.setText("Idle")
+            self._set_mode("Idle")
 
     def set_status(self, status: AssistantStatus) -> None:
         self.status = status
