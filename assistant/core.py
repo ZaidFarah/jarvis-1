@@ -5,7 +5,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from assistant.conversation import ConversationHistory
-from integrations.calendar_service import CalendarService, CalendarQueryResult
+from integrations.calendar_service import CalendarCreateResult, CalendarService, CalendarQueryResult
 from integrations.weather_service import WeatherService
 from memory.store import SensitiveMemoryError, SQLiteMemoryStore
 from security.confirmation import ConfirmationResult
@@ -204,6 +204,11 @@ class AssistantCore:
 
     def _handle_calendar_command(self, command: str) -> AssistantResponse | None:
         normalized = " ".join(command.lower().strip().split())
+        create_request = self._parse_calendar_create_command(command)
+        if create_request is not None:
+            title, start_text, duration_minutes = create_request
+            return self._create_calendar_event(title, start_text, duration_minutes)
+
         day_label = self._parse_calendar_day_label(normalized)
         if day_label is None:
             return None
@@ -233,6 +238,38 @@ class AssistantCore:
         result = self.calendar_service.current_events(day_label)
         return AssistantResponse(
             text=self._calendar_response_text(result),
+            accepted=result.success,
+            source="calendar",
+            error=result.safe_error,
+        )
+
+    def _create_calendar_event(self, title: str, start_text: str, duration_minutes: int, location: str | None = None, description: str | None = None) -> AssistantResponse:
+        if self.calendar_service is None or not self.settings.calendar_enabled or not self.settings.calendar_create_enabled:
+            return AssistantResponse(text="Calendar creation is disabled.", accepted=True, source="local")
+
+        decision = self.permission_broker.check(
+            "create calendar event",
+            description=f"Create calendar event '{title}' at {start_text} for {duration_minutes} minutes.",
+        )
+        if not decision.allowed:
+            return AssistantResponse(text=decision.reason, accepted=False, source="local", error=decision.reason)
+
+        if self.confirmation_handler is None:
+            return AssistantResponse(
+                text="Confirmation is required before creating calendar events.",
+                accepted=False,
+                source="local",
+                error="Confirmation handler is unavailable.",
+            )
+
+        confirmation = self.confirmation_handler(decision.action_name, decision.risk_level, decision.description)
+        if not confirmation.approved:
+            reason = confirmation.reason or "Calendar creation canceled."
+            return AssistantResponse(text=reason, accepted=False, source="local", error=reason)
+
+        result = self.calendar_service.create_event(title, start_text, duration_minutes, location=location, description=description)
+        return AssistantResponse(
+            text=self._calendar_create_response_text(result),
             accepted=result.success,
             source="calendar",
             error=result.safe_error,
@@ -637,6 +674,28 @@ class AssistantCore:
         if result.safe_error:
             return result.safe_error
         return result.text
+
+    @staticmethod
+    def _calendar_create_response_text(result: CalendarCreateResult) -> str:
+        if result.safe_error:
+            return result.safe_error
+        return result.text
+
+    @staticmethod
+    def _parse_calendar_create_command(command: str) -> tuple[str, str, int] | None:
+        match = re.match(
+            r"(?i)^(?:create calendar event|schedule)\s+(.+?)\s+at\s+(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2})\s+for\s+(\d+)\s*$",
+            command.strip(),
+        )
+        if not match:
+            return None
+
+        title = " ".join(match.group(1).strip().split())
+        start_text = " ".join(match.group(2).strip().split())
+        duration_minutes = int(match.group(3))
+        if not title:
+            return None
+        return title, start_text, duration_minutes
 
     @staticmethod
     def _file_listing_response_text(result) -> str:

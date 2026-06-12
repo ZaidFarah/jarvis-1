@@ -291,6 +291,14 @@ class AppSettings(BaseSettings):
         default="https://www.googleapis.com/auth/calendar.readonly",
         validation_alias=AliasChoices("CALENDAR_SCOPES", "JARVIS_CALENDAR_SCOPES"),
     )
+    calendar_create_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("CALENDAR_CREATE_ENABLED", "JARVIS_CALENDAR_CREATE_ENABLED"),
+    )
+    calendar_write_scopes: str = Field(
+        default="https://www.googleapis.com/auth/calendar.events",
+        validation_alias=AliasChoices("CALENDAR_WRITE_SCOPES", "JARVIS_CALENDAR_WRITE_SCOPES"),
+    )
     weather_enabled: bool = Field(
         default=False,
         validation_alias=AliasChoices("WEATHER_ENABLED", "JARVIS_WEATHER_ENABLED"),
@@ -590,6 +598,28 @@ class AppSettings(BaseSettings):
             cleaned = item.strip()
             if cleaned and cleaned not in scopes:
                 scopes.append(cleaned)
+        return scopes
+
+    @property
+    def calendar_write_scopes_list(self) -> list[str]:
+        raw = self.calendar_write_scopes.strip()
+        if not raw:
+            return []
+
+        scopes: list[str] = []
+        for item in raw.replace("\n", ",").split(","):
+            cleaned = item.strip()
+            if cleaned and cleaned not in scopes:
+                scopes.append(cleaned)
+        return scopes
+
+    @property
+    def calendar_auth_scopes_list(self) -> list[str]:
+        scopes = self.calendar_scopes_list[:]
+        if self.calendar_create_enabled:
+            for scope in self.calendar_write_scopes_list:
+                if scope not in scopes:
+                    scopes.append(scope)
         return scopes
 
     @property

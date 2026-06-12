@@ -137,3 +137,5 @@ Phase 23 adds only file summarization for whitelisted text files. It does not ad
 Phase 24 adds only read-only Google Calendar lookups. It does not add event creation, editing, deletion, Gmail, browser automation, desktop automation, or broader Google API access beyond the read-only calendar query path. Calendar reads remain high risk and confirmation-gated.
 
 Phase 25 adds only OAuth setup and read-only event queries for Google Calendar. It does not add event creation, editing, deletion, Gmail, browser automation, desktop automation, or broader Google API access beyond the readonly calendar scope. The token is stored locally and the client secret is never logged or printed.
+
+Phase 26 adds only Google Calendar event creation. It keeps creation separate behind `CALENDAR_CREATE_ENABLED` and `CALENDAR_WRITE_SCOPES`, requires permission broker classification and explicit confirmation, and refuses to create events when the token only has read-only scope. It does not add event editing, deletion, Gmail, browser automation, desktop automation, or any broader Google API access.

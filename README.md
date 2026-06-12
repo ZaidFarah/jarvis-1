@@ -592,6 +592,20 @@ Jarvis can open only sites listed in `WEBSITE_ALLOWED_SITES`. If a site is missi
 - Calendar logs are saved to `logs/calendar.log`.
 - If the client secret or token is missing, the CLI reports the setup step that is still required.
 
+## Phase 26 Scope
+
+- Google Calendar event creation with strict confirmation.
+- Enable creation with `CALENDAR_CREATE_ENABLED=true`.
+- Keep read-only scope separate from write scope:
+  - `CALENDAR_SCOPES=https://www.googleapis.com/auth/calendar.readonly`
+  - `CALENDAR_WRITE_SCOPES=https://www.googleapis.com/auth/calendar.events`
+- Run `py main.py --calendar-auth` after enabling creation so Jarvis can request the write scope explicitly.
+- Run `py main.py --calendar-create "Meeting" "2026-06-12 18:30" 30` to create a calendar event after confirmation.
+- Assistant commands: `create calendar event <title> at <YYYY-MM-DD HH:MM> for <minutes>` and `schedule <title> at <YYYY-MM-DD HH:MM> for <minutes>`.
+- Calendar creation is high risk and always requires permission plus confirmation.
+- If the token only has read-only scope, Jarvis reports: `Calendar write scope is required. Re-run calendar auth after enabling create.`
+- Calendar logs are saved to `logs/calendar.log`.
+
 ## Text To Speech Test
 
 ```powershell

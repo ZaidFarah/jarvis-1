@@ -5,7 +5,7 @@ from pathlib import Path
 from assistant.core import AssistantCore
 from config.settings import AppSettings
 from security.confirmation import ConfirmationResult
-from integrations.calendar_service import CalendarQueryResult
+from integrations.calendar_service import CalendarCreateResult, CalendarQueryResult
 from integrations.weather_service import WeatherQueryResult
 from reminders.models import ReminderCheckResult
 from reminders.service import ReminderQueryResult
@@ -91,10 +91,36 @@ class FakeCalendarService:
             token_detected=True,
         )
         self.calls: list[str] = []
+        self.create_calls: list[tuple[str, str, int, str | None, str | None]] = []
 
     def current_events(self, day_label: str = "today") -> CalendarQueryResult:
         self.calls.append(day_label)
         return self.result
+
+    def create_event(
+        self,
+        title: str,
+        start_text: str,
+        duration_minutes: int,
+        location: str | None = None,
+        description: str | None = None,
+    ) -> CalendarCreateResult:
+        self.create_calls.append((title, start_text, duration_minutes, location, description))
+        return CalendarCreateResult(
+            success=True,
+            text=f"Created calendar event: {title}",
+            provider="google_calendar",
+            title=title,
+            start_text=start_text,
+            duration_minutes=duration_minutes,
+            request_attempted=True,
+            authenticated=True,
+            client_secret_detected=True,
+            token_detected=True,
+            create_enabled=True,
+            write_scope_detected=True,
+            event_id="abc123",
+        )
 
 
 def test_assistant_core_returns_placeholder_response() -> None:
@@ -372,6 +398,71 @@ def test_assistant_core_calendar_confirmation_denied_blocks_read() -> None:
     assert response.accepted is False
     assert response.text == "Denied."
     assert calendar_service.calls == []
+
+
+def test_assistant_core_routes_calendar_create_commands() -> None:
+    calendar_service = FakeCalendarService()
+    assistant = AssistantCore(
+        settings=AppSettings(_env_file=None, openai_enabled=False, calendar_enabled=True, calendar_create_enabled=True),
+        openai_service=FakeOpenAIService(error=AssertionError("OpenAI should not be called for calendar")),
+        weather_service=FakeWeatherService(
+            WeatherQueryResult(
+                success=True,
+                text="Current weather in Nottingham: clear sky.",
+                provider="openweathermap",
+                city="Nottingham",
+                request_attempted=False,
+                api_key_detected=False,
+            )
+        ),
+        calendar_service=calendar_service,
+        confirmation_handler=lambda *args: ConfirmationResult(
+            approved=True,
+            denied=False,
+            timed_out=False,
+            reason="Approved.",
+            log_file=Path("confirmations.log"),
+        ),
+    )
+
+    response = assistant.handle_command("create calendar event Team Sync at 2026-06-12 18:30 for 30")
+
+    assert response.source == "calendar"
+    assert "Created calendar event: Team Sync" in response.text
+    assert calendar_service.create_calls == [("Team Sync", "2026-06-12 18:30", 30, None, None)]
+
+
+def test_assistant_core_calendar_create_confirmation_denied_blocks_create() -> None:
+    calendar_service = FakeCalendarService()
+    assistant = AssistantCore(
+        settings=AppSettings(_env_file=None, openai_enabled=False, calendar_enabled=True, calendar_create_enabled=True),
+        openai_service=FakeOpenAIService(error=AssertionError("OpenAI should not be called for calendar")),
+        weather_service=FakeWeatherService(
+            WeatherQueryResult(
+                success=True,
+                text="Current weather in Nottingham: clear sky.",
+                provider="openweathermap",
+                city="Nottingham",
+                request_attempted=False,
+                api_key_detected=False,
+            )
+        ),
+        calendar_service=calendar_service,
+        confirmation_handler=lambda *args: ConfirmationResult(
+            approved=False,
+            denied=True,
+            timed_out=False,
+            reason="Denied.",
+            log_file=Path("confirmations.log"),
+        ),
+    )
+
+    response = assistant.handle_command("schedule Team Sync at 2026-06-12 18:30 for 30")
+
+    assert response.source == "local"
+    assert response.accepted is False
+    assert response.text == "Denied."
+    assert calendar_service.create_calls == []
 
 
 def test_assistant_core_routes_reminder_commands() -> None:

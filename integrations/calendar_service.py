@@ -19,6 +19,14 @@ _CALENDAR_LOG_FILE: Path | None = None
 
 class CalendarClient(Protocol):
     def list_events(self, start: datetime, end: datetime) -> list[dict[str, Any]]: ...
+    def create_event(
+        self,
+        title: str,
+        start: datetime,
+        end: datetime,
+        location: str | None = None,
+        description: str | None = None,
+    ) -> dict[str, Any]: ...
 
 
 CalendarClientFactory = Callable[[AppSettings], CalendarClient]
@@ -41,6 +49,8 @@ class CalendarQueryResult:
     authenticated: bool
     client_secret_detected: bool
     token_detected: bool
+    create_enabled: bool = False
+    write_scope_detected: bool = False
     safe_error: str | None = None
 
 
@@ -59,6 +69,8 @@ class CalendarCheckReport:
     text: str
     safe_error: str | None
     log_file: Path
+    create_enabled: bool = False
+    write_scope_detected: bool = False
     errors: list[str] = field(default_factory=list)
 
     @property
@@ -82,6 +94,8 @@ class CalendarAuthReport:
     text: str
     safe_error: str | None
     log_file: Path
+    create_enabled: bool = False
+    requested_scopes: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
 
     @property
@@ -91,6 +105,31 @@ class CalendarAuthReport:
         if not self.client_secret_detected:
             return True
         return self.authenticated
+
+
+@dataclass(frozen=True)
+class CalendarCreateResult:
+    success: bool
+    text: str
+    provider: str
+    title: str
+    start_text: str
+    duration_minutes: int
+    request_attempted: bool
+    authenticated: bool
+    client_secret_detected: bool
+    token_detected: bool
+    create_enabled: bool
+    write_scope_detected: bool = False
+    safe_error: str | None = None
+    log_file: Path | None = None
+    event_id: str | None = None
+    event_link: str | None = None
+    errors: list[str] = field(default_factory=list)
+
+    @property
+    def is_successful(self) -> bool:
+        return self.success
 
 
 class CalendarService:
@@ -103,6 +142,7 @@ class CalendarService:
     ) -> None:
         self.settings = settings
         self.client_factory = client_factory or self._default_client_factory
+        self._custom_client_factory = client_factory is not None
         self.log_file = self.settings.log_dir / "calendar.log"
         self.calendar_logger = logger.bind(calendar=True)
         self._ensure_calendar_log_sink()
@@ -132,6 +172,7 @@ class CalendarService:
                 authenticated=False,
                 client_secret_detected=client_secret_detected,
                 token_detected=token_detected,
+                create_enabled=self.settings.calendar_create_enabled,
                 safe_error=message,
             )
 
@@ -147,6 +188,7 @@ class CalendarService:
                 authenticated=False,
                 client_secret_detected=False,
                 token_detected=token_detected,
+                create_enabled=self.settings.calendar_create_enabled,
                 safe_error=message,
             )
 
@@ -162,6 +204,7 @@ class CalendarService:
                 authenticated=False,
                 client_secret_detected=True,
                 token_detected=False,
+                create_enabled=self.settings.calendar_create_enabled,
                 safe_error=message,
             )
 
@@ -179,6 +222,7 @@ class CalendarService:
                 authenticated=True,
                 client_secret_detected=True,
                 token_detected=True,
+                create_enabled=self.settings.calendar_create_enabled,
             )
         except Exception as exc:
             safe_error = format_calendar_error(exc)
@@ -192,6 +236,201 @@ class CalendarService:
                 authenticated=False,
                 client_secret_detected=True,
                 token_detected=True,
+                create_enabled=self.settings.calendar_create_enabled,
+                safe_error=safe_error,
+            )
+
+    def create_event(
+        self,
+        title: str,
+        start_text: str,
+        duration_minutes: int,
+        location: str | None = None,
+        description: str | None = None,
+    ) -> CalendarCreateResult:
+        provider = "google_calendar"
+        title_text = " ".join(title.strip().split())
+        start_text_clean = " ".join(start_text.strip().split())
+        client_secret_detected = self.settings.has_calendar_client_secret
+        token_detected = self.settings.has_calendar_token
+        write_scope_detected = False
+
+        self.calendar_logger.info(
+            "Calendar create enabled={} title={} start={} duration={} client_secret_detected={} token_detected={}",
+            self.settings.calendar_create_enabled,
+            title_text,
+            start_text_clean,
+            duration_minutes,
+            client_secret_detected,
+            token_detected,
+        )
+
+        if not self.settings.calendar_enabled:
+            message = self._create_disabled_message()
+            return self._create_result(
+                success=False,
+                text=message,
+                provider=provider,
+                title=title_text,
+                start_text=start_text_clean,
+                duration_minutes=duration_minutes,
+                request_attempted=False,
+                authenticated=False,
+                client_secret_detected=client_secret_detected,
+                token_detected=token_detected,
+                write_scope_detected=write_scope_detected,
+                safe_error=message,
+            )
+
+        if not self.settings.calendar_create_enabled:
+            message = self._create_disabled_message()
+            return self._create_result(
+                success=False,
+                text=message,
+                provider=provider,
+                title=title_text,
+                start_text=start_text_clean,
+                duration_minutes=duration_minutes,
+                request_attempted=False,
+                authenticated=False,
+                client_secret_detected=client_secret_detected,
+                token_detected=token_detected,
+                write_scope_detected=write_scope_detected,
+                safe_error=message,
+            )
+
+        if not client_secret_detected:
+            message = "Calendar is enabled, but the Google client secret file is missing."
+            self.calendar_logger.warning(message)
+            return self._create_result(
+                success=False,
+                text=self._credentials_missing_message("calendar creation"),
+                provider=provider,
+                title=title_text,
+                start_text=start_text_clean,
+                duration_minutes=duration_minutes,
+                request_attempted=False,
+                authenticated=False,
+                client_secret_detected=False,
+                token_detected=token_detected,
+                write_scope_detected=write_scope_detected,
+                safe_error=message,
+            )
+
+        if not token_detected:
+            message = "Calendar is enabled, but the calendar token file is missing."
+            self.calendar_logger.warning(message)
+            return self._create_result(
+                success=False,
+                text=self._credentials_missing_message("calendar creation"),
+                provider=provider,
+                title=title_text,
+                start_text=start_text_clean,
+                duration_minutes=duration_minutes,
+                request_attempted=False,
+                authenticated=False,
+                client_secret_detected=True,
+                token_detected=False,
+                write_scope_detected=write_scope_detected,
+                safe_error=message,
+            )
+
+        if duration_minutes <= 0:
+            message = "Duration must be a positive number of minutes."
+            return self._create_result(
+                success=False,
+                text=message,
+                provider=provider,
+                title=title_text,
+                start_text=start_text_clean,
+                duration_minutes=duration_minutes,
+                request_attempted=False,
+                authenticated=False,
+                client_secret_detected=True,
+                token_detected=True,
+                write_scope_detected=write_scope_detected,
+                safe_error=message,
+            )
+
+        start_dt = self._parse_calendar_datetime(start_text_clean)
+        if start_dt is None:
+            message = "Please provide a datetime in format YYYY-MM-DD HH:MM."
+            return self._create_result(
+                success=False,
+                text=message,
+                provider=provider,
+                title=title_text,
+                start_text=start_text_clean,
+                duration_minutes=duration_minutes,
+                request_attempted=False,
+                authenticated=False,
+                client_secret_detected=True,
+                token_detected=True,
+                write_scope_detected=write_scope_detected,
+                safe_error=message,
+            )
+
+        end_dt = start_dt + timedelta(minutes=duration_minutes)
+
+        try:
+            credentials = self._load_credentials(self.settings.calendar_write_scopes_list)
+            write_scope_detected = self._credentials_has_scopes(credentials, self.settings.calendar_write_scopes_list)
+            if not write_scope_detected:
+                message = "Calendar write scope is required. Re-run calendar auth after enabling create."
+                return self._create_result(
+                    success=False,
+                    text=message,
+                    provider=provider,
+                    title=title_text,
+                    start_text=start_text_clean,
+                    duration_minutes=duration_minutes,
+                    request_attempted=False,
+                    authenticated=False,
+                    client_secret_detected=True,
+                    token_detected=True,
+                    write_scope_detected=False,
+                    safe_error=message,
+                )
+
+            if self._custom_client_factory:
+                client = self.client_factory(self.settings)
+            else:
+                client = self._build_calendar_client(self.settings, scopes=self.settings.calendar_write_scopes_list)
+            event = client.create_event(title_text, start_dt, end_dt, location=location, description=description)
+            event_id = str(event.get("id") or "").strip() or None
+            event_link = str(event.get("htmlLink") or "").strip() or None
+            text = self._format_created_event(title_text, start_dt, end_dt, location, event_id, event_link)
+            self.calendar_logger.info("Calendar event created title={} start={} end={} event_id={}", title_text, start_dt, end_dt, event_id)
+            return self._create_result(
+                success=True,
+                text=text,
+                provider=provider,
+                title=title_text,
+                start_text=start_text_clean,
+                duration_minutes=duration_minutes,
+                request_attempted=True,
+                authenticated=True,
+                client_secret_detected=True,
+                token_detected=True,
+                write_scope_detected=write_scope_detected,
+                event_id=event_id,
+                event_link=event_link,
+            )
+        except Exception as exc:
+            safe_error = format_calendar_error(exc)
+            self.calendar_logger.error("Calendar create failed: {}", safe_error)
+            return self._create_result(
+                success=False,
+                text=self._service_unavailable_message("calendar creation"),
+                provider=provider,
+                title=title_text,
+                start_text=start_text_clean,
+                duration_minutes=duration_minutes,
+                request_attempted=True,
+                authenticated=False,
+                client_secret_detected=True,
+                token_detected=True,
+                write_scope_detected=write_scope_detected,
                 safe_error=safe_error,
             )
 
@@ -202,6 +441,7 @@ class CalendarService:
 
         client_secret_detected = self.settings.has_calendar_client_secret
         token_detected = self.settings.has_calendar_token
+        requested_scopes = self.settings.calendar_auth_scopes_list
         self.calendar_logger.info(
             "Calendar auth enabled={} client_secret_detected={} token_detected={}",
             self.settings.calendar_enabled,
@@ -219,11 +459,13 @@ class CalendarService:
                 setup_status="missing client secret",
                 text=message,
                 safe_error="Google client secret file is missing.",
+                create_enabled=self.settings.calendar_create_enabled,
+                requested_scopes=requested_scopes,
             )
 
         try:
-            credentials = self._load_credentials()
-            if credentials is not None and credentials.valid:
+            credentials = self._load_credentials(requested_scopes)
+            if credentials is not None and credentials.valid and self._credentials_has_scopes(credentials, requested_scopes):
                 self._save_credentials(credentials)
                 return self._auth_report(
                     client_secret_detected=True,
@@ -233,9 +475,16 @@ class CalendarService:
                     setup_status="authenticated",
                     text="Google Calendar is already authenticated.",
                     safe_error=None,
+                    create_enabled=self.settings.calendar_create_enabled,
+                    requested_scopes=requested_scopes,
                 )
 
-            if credentials is not None and getattr(credentials, "expired", False) and getattr(credentials, "refresh_token", None):
+            if (
+                credentials is not None
+                and getattr(credentials, "expired", False)
+                and getattr(credentials, "refresh_token", None)
+                and self._credentials_has_scopes(credentials, requested_scopes)
+            ):
                 credentials.refresh(self._request_adapter())
                 self._save_credentials(credentials)
                 return self._auth_report(
@@ -246,6 +495,8 @@ class CalendarService:
                     setup_status="authenticated",
                     text="Google Calendar authentication refreshed successfully.",
                     safe_error=None,
+                    create_enabled=self.settings.calendar_create_enabled,
+                    requested_scopes=requested_scopes,
                 )
 
             flow = self._build_flow()
@@ -262,6 +513,8 @@ class CalendarService:
                 setup_status="authenticated",
                 text="Google Calendar authentication completed successfully.",
                 safe_error=None,
+                create_enabled=self.settings.calendar_create_enabled,
+                requested_scopes=requested_scopes,
             )
         except Exception as exc:
             safe_error = format_calendar_error(exc)
@@ -274,12 +527,27 @@ class CalendarService:
                 setup_status="authentication failed",
                 text=self._auth_guide_message(missing_client_secret=False, missing_token=not self.settings.has_calendar_token),
                 safe_error=safe_error,
+                create_enabled=self.settings.calendar_create_enabled,
+                requested_scopes=requested_scopes,
             )
 
     def run_check(self) -> CalendarCheckReport:
         day_label = "today"
         result = self.current_events(day_label)
-        authentication_status = self._authentication_status(result)
+        write_scope_detected = result.write_scope_detected
+        if (
+            self.settings.calendar_create_enabled
+            and self.settings.has_calendar_client_secret
+            and self.settings.has_calendar_token
+            and not write_scope_detected
+        ):
+            try:
+                credentials = self._load_credentials(self.settings.calendar_auth_scopes_list)
+                write_scope_detected = bool(credentials and self._credentials_has_scopes(credentials, self.settings.calendar_write_scopes_list))
+            except Exception:
+                write_scope_detected = False
+
+        authentication_status = self._authentication_status(result, write_scope_detected=write_scope_detected)
         errors = [result.safe_error] if result.safe_error else []
         return CalendarCheckReport(
             enabled=self.settings.calendar_enabled,
@@ -295,6 +563,8 @@ class CalendarService:
             text=result.text,
             safe_error=result.safe_error,
             log_file=self.log_file,
+            create_enabled=self.settings.calendar_create_enabled,
+            write_scope_detected=write_scope_detected,
             errors=errors,
         )
 
@@ -308,6 +578,8 @@ class CalendarService:
         authenticated: bool,
         client_secret_detected: bool,
         token_detected: bool,
+        create_enabled: bool = False,
+        write_scope_detected: bool = False,
         safe_error: str | None = None,
     ) -> CalendarQueryResult:
         return CalendarQueryResult(
@@ -319,16 +591,20 @@ class CalendarService:
             authenticated=authenticated,
             client_secret_detected=client_secret_detected,
             token_detected=token_detected,
+            create_enabled=create_enabled,
+            write_scope_detected=write_scope_detected,
             safe_error=safe_error,
         )
 
-    def _authentication_status(self, result: CalendarQueryResult) -> str:
+    def _authentication_status(self, result: CalendarQueryResult, write_scope_detected: bool = False) -> str:
         if not self.settings.calendar_enabled:
             return "disabled"
         if not result.client_secret_detected:
             return "missing client secret"
         if not result.token_detected:
             return "missing token"
+        if self.settings.calendar_create_enabled and not write_scope_detected:
+            return "write scope missing"
         if result.authenticated:
             return "authenticated"
         return "unavailable"
@@ -406,8 +682,14 @@ class CalendarService:
     def _service_unavailable_message(self, day_label: str) -> str:
         return f"I couldn't fetch your calendar for {day_label} right now. Please try again later."
 
+    def _create_disabled_message(self) -> str:
+        return (
+            "Calendar creation is disabled. Enable CALENDAR_CREATE_ENABLED and provide Google Calendar "
+            "credentials before creating events."
+        )
+
     def _default_client_factory(self, settings: AppSettings) -> CalendarClient:
-        client = self._build_calendar_client(settings)
+        client = self._build_calendar_client(settings, scopes=settings.calendar_scopes_list)
         return client
 
     def _auth_report(
@@ -419,6 +701,8 @@ class CalendarService:
         setup_status: str,
         text: str,
         safe_error: str | None,
+        create_enabled: bool = False,
+        requested_scopes: list[str] | None = None,
     ) -> CalendarAuthReport:
         errors = [safe_error] if safe_error else []
         return CalendarAuthReport(
@@ -432,6 +716,8 @@ class CalendarService:
             text=text,
             safe_error=safe_error,
             log_file=self.log_file,
+            create_enabled=create_enabled,
+            requested_scopes=requested_scopes or [],
             errors=errors,
         )
 
@@ -451,7 +737,34 @@ class CalendarService:
             lines.append("1. Run `python main.py --calendar-auth` to sign in and save the token.")
         return "\n".join(lines)
 
-    def _load_credentials(self) -> Any | None:
+    def _parse_calendar_datetime(self, value: str) -> datetime | None:
+        cleaned = " ".join(value.strip().split())
+        if not cleaned:
+            return None
+        for candidate in ("%Y-%m-%d %H:%M", "%Y-%m-%d %H:%M:%S"):
+            try:
+                return datetime.strptime(cleaned, candidate)
+            except ValueError:
+                continue
+        return None
+
+    @staticmethod
+    def _credentials_has_scopes(credentials: Any, scopes: list[str]) -> bool:
+        if not scopes:
+            return False
+
+        has_scopes = getattr(credentials, "has_scopes", None)
+        if callable(has_scopes):
+            try:
+                return bool(has_scopes(scopes))
+            except Exception:
+                pass
+
+        credential_scopes = getattr(credentials, "scopes", None) or []
+        credential_set = {str(scope).strip() for scope in credential_scopes if str(scope).strip()}
+        return set(scopes).issubset(credential_set)
+
+    def _load_credentials(self, scopes: list[str] | None = None) -> Any | None:
         if not self.settings.has_calendar_token:
             return None
 
@@ -462,7 +775,8 @@ class CalendarService:
                 "Google authentication libraries are missing. Install google-auth and google-auth-oauthlib."
             ) from exc
 
-        return Credentials.from_authorized_user_file(str(self.settings.calendar_token_path), scopes=self.settings.calendar_scopes_list)
+        scopes_to_use = scopes if scopes is not None else self.settings.calendar_scopes_list
+        return Credentials.from_authorized_user_file(str(self.settings.calendar_token_path), scopes=scopes_to_use)
 
     def _save_credentials(self, credentials: Any) -> None:
         token_path = self.settings.calendar_token_path
@@ -483,10 +797,48 @@ class CalendarService:
 
         return InstalledAppFlow.from_client_secrets_file(
             str(self.settings.calendar_client_secret_path),
-            scopes=self.settings.calendar_scopes_list,
+            scopes=self.settings.calendar_auth_scopes_list,
         )
 
-    def _build_calendar_client(self, settings: AppSettings) -> CalendarClient:
+    def _create_result(
+        self,
+        success: bool,
+        text: str,
+        provider: str,
+        title: str,
+        start_text: str,
+        duration_minutes: int,
+        request_attempted: bool,
+        authenticated: bool,
+        client_secret_detected: bool,
+        token_detected: bool,
+        write_scope_detected: bool,
+        safe_error: str | None = None,
+        event_id: str | None = None,
+        event_link: str | None = None,
+    ) -> CalendarCreateResult:
+        errors = [safe_error] if safe_error else []
+        return CalendarCreateResult(
+            success=success,
+            text=text,
+            provider=provider,
+            title=title,
+            start_text=start_text,
+            duration_minutes=duration_minutes,
+            request_attempted=request_attempted,
+            authenticated=authenticated,
+            client_secret_detected=client_secret_detected,
+            token_detected=token_detected,
+            create_enabled=self.settings.calendar_create_enabled,
+            write_scope_detected=write_scope_detected,
+            safe_error=safe_error,
+            log_file=self.log_file,
+            event_id=event_id,
+            event_link=event_link,
+            errors=errors,
+        )
+
+    def _build_calendar_client(self, settings: AppSettings, scopes: list[str] | None = None) -> CalendarClient:
         try:
             from google.oauth2.credentials import Credentials
             from google.auth.transport.requests import Request
@@ -501,7 +853,8 @@ class CalendarService:
 
         credentials = None
         if settings.has_calendar_token:
-            credentials = Credentials.from_authorized_user_file(str(settings.calendar_token_path), scopes=settings.calendar_scopes_list)
+            scopes_to_use = scopes if scopes is not None else settings.calendar_scopes_list
+            credentials = Credentials.from_authorized_user_file(str(settings.calendar_token_path), scopes=scopes_to_use)
             if credentials.expired and credentials.refresh_token:
                 credentials.refresh(Request())
                 settings.calendar_token_path.parent.mkdir(parents=True, exist_ok=True)
@@ -535,7 +888,51 @@ class CalendarService:
                 )
                 return list(response.get("items", []))
 
+            def create_event(
+                self,
+                title: str,
+                start: datetime,
+                end: datetime,
+                location: str | None = None,
+                description: str | None = None,
+            ) -> dict[str, Any]:
+                event: dict[str, Any] = {
+                    "summary": title,
+                    "start": {"dateTime": start.isoformat()},
+                    "end": {"dateTime": end.isoformat()},
+                }
+                if location:
+                    event["location"] = location
+                if description:
+                    event["description"] = description
+                response = (
+                    self.calendar_service.events()
+                    .insert(calendarId="primary", body=event)
+                    .execute()
+                )
+                return dict(response)
+
         return _GoogleCalendarClient(service)
+
+    def _format_created_event(
+        self,
+        title: str,
+        start_dt: datetime,
+        end_dt: datetime,
+        location: str | None,
+        event_id: str | None,
+        event_link: str | None,
+    ) -> str:
+        start_text = start_dt.strftime("%Y-%m-%d %H:%M")
+        end_text = end_dt.strftime("%Y-%m-%d %H:%M")
+        parts = [f"Created calendar event: {title}", f"Start: {start_text}", f"End: {end_text}"]
+        if location:
+            parts.append(f"Location: {location}")
+        if event_id:
+            parts.append(f"Event ID: {event_id}")
+        if event_link:
+            parts.append(f"Link: {event_link}")
+        return "\n".join(parts)
 
     def _request_adapter(self) -> Any:
         try:
@@ -583,9 +980,11 @@ def format_calendar_check_report(report: CalendarCheckReport) -> str:
         "Jarvis Calendar Check",
         "=====================",
         f"Calendar enabled: {_yes_no(report.enabled)}",
+        f"Calendar create enabled: {_yes_no(report.create_enabled)}",
         f"Provider: {report.provider}",
         f"Client secret detected: {_yes_no(report.client_secret_detected)}",
         f"Token detected: {_yes_no(report.token_detected)}",
+        f"Write scope detected: {_yes_no(report.write_scope_detected)}",
         f"Authenticated: {_yes_no(report.authenticated)}",
         f"Authentication status: {report.authentication_status}",
         f"Diagnostic log: {report.log_file}",
@@ -609,6 +1008,7 @@ def format_calendar_auth_report(report: CalendarAuthReport) -> str:
         "Jarvis Calendar Auth",
         "====================",
         f"Calendar enabled: {_yes_no(report.enabled)}",
+        f"Calendar create enabled: {_yes_no(report.create_enabled)}",
         f"Client secret detected: {_yes_no(report.client_secret_detected)}",
         f"Token detected: {_yes_no(report.token_detected)}",
         f"Credentials directory created: {_yes_no(report.credentials_dir_created)}",
@@ -617,6 +1017,8 @@ def format_calendar_auth_report(report: CalendarAuthReport) -> str:
         f"Token path: {report.token_path}",
         f"Diagnostic log: {report.log_file}",
     ]
+    if report.requested_scopes:
+        lines.extend(["", "Requested scopes:", f"  {', '.join(report.requested_scopes)}"])
 
     if report.text:
         lines.extend(["", "Result:", f"  {report.text}"])
@@ -624,6 +1026,35 @@ def format_calendar_auth_report(report: CalendarAuthReport) -> str:
     if report.safe_error:
         lines.extend(["", "Error:", f"  {report.safe_error}"])
 
+    return "\n".join(lines)
+
+
+def format_calendar_create_report(report: CalendarCreateResult) -> str:
+    lines = [
+        "Jarvis Calendar Create",
+        "======================",
+        f"Calendar create enabled: {_yes_no(report.create_enabled)}",
+        f"Provider: {report.provider}",
+        f"Title: {report.title}",
+        f"Start: {report.start_text}",
+        f"Duration minutes: {report.duration_minutes}",
+        f"Client secret detected: {_yes_no(report.client_secret_detected)}",
+        f"Token detected: {_yes_no(report.token_detected)}",
+        f"Write scope detected: {_yes_no(report.write_scope_detected)}",
+        f"Authenticated: {_yes_no(report.authenticated)}",
+        f"Request attempted: {_yes_no(report.request_attempted)}",
+        f"Request success: {_yes_no(report.success)}",
+    ]
+    if report.log_file:
+        lines.append(f"Diagnostic log: {report.log_file}")
+    if report.text:
+        lines.extend(["", "Result:", f"  {report.text}"])
+    if report.safe_error:
+        lines.extend(["", "Error:", f"  {report.safe_error}"])
+    if report.event_id:
+        lines.extend(["", f"Event ID: {report.event_id}"])
+    if report.event_link:
+        lines.extend(["", f"Event link: {report.event_link}"])
     return "\n".join(lines)
 
 

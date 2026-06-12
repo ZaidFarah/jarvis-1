@@ -108,20 +108,33 @@ def test_calendar_settings_defaults_are_safe() -> None:
     settings = AppSettings(_env_file=None)
 
     assert settings.calendar_enabled is False
+    assert settings.calendar_create_enabled is False
     assert settings.calendar_client_secret_path.name == "google_client_secret.json"
     assert settings.calendar_token_path.name == "token_calendar.json"
+    assert settings.calendar_scopes_list == ["https://www.googleapis.com/auth/calendar.readonly"]
+    assert settings.calendar_write_scopes_list == ["https://www.googleapis.com/auth/calendar.events"]
 
 
 def test_calendar_settings_read_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CALENDAR_ENABLED", "true")
+    monkeypatch.setenv("CALENDAR_CREATE_ENABLED", "true")
     monkeypatch.setenv("CALENDAR_CLIENT_SECRET_PATH", "credentials/custom_secret.json")
     monkeypatch.setenv("CALENDAR_TOKEN_PATH", "credentials/custom_token.json")
+    monkeypatch.setenv("CALENDAR_SCOPES", "https://www.googleapis.com/auth/calendar.readonly")
+    monkeypatch.setenv("CALENDAR_WRITE_SCOPES", "https://www.googleapis.com/auth/calendar.events")
 
     settings = AppSettings(_env_file=None)
 
     assert settings.calendar_enabled is True
+    assert settings.calendar_create_enabled is True
     assert settings.calendar_client_secret_path.name == "custom_secret.json"
     assert settings.calendar_token_path.name == "custom_token.json"
+    assert settings.calendar_scopes_list == ["https://www.googleapis.com/auth/calendar.readonly"]
+    assert settings.calendar_write_scopes_list == ["https://www.googleapis.com/auth/calendar.events"]
+    assert settings.calendar_auth_scopes_list == [
+        "https://www.googleapis.com/auth/calendar.readonly",
+        "https://www.googleapis.com/auth/calendar.events",
+    ]
 
 
 def test_app_launcher_settings_defaults_are_safe() -> None:

@@ -163,6 +163,12 @@ def main(argv: list[str] | None = None) -> int:
         configure_logging(settings, console=False)
         return _run_calendar_query(settings, "what is on my calendar tomorrow")
 
+    if "--calendar-create" in args:
+        settings = load_settings()
+        configure_logging(settings, console=False)
+        title, start_text, duration_minutes = _calendar_create_args(args)
+        return _run_calendar_create(settings, title, start_text, duration_minutes)
+
     if "--website-check" in args:
         settings = load_settings()
         configure_logging(settings, console=False)
@@ -570,6 +576,17 @@ def _run_calendar_query(settings, command: str) -> int:
     return 0 if response.accepted else 1
 
 
+def _run_calendar_create(settings, title: str, start_text: str, duration_minutes: int) -> int:
+    if not title or not start_text or duration_minutes <= 0:
+        print("Please provide a title, datetime in YYYY-MM-DD HH:MM format, and a positive duration.", flush=True)
+        return 1
+    assistant = _build_cli_assistant(settings)
+    command = f"create calendar event {title} at {start_text} for {duration_minutes}"
+    response = assistant.handle_command(command)
+    print(response.text, flush=True)
+    return 0 if response.accepted else 1
+
+
 def _find_file_args(args: list[str]) -> tuple[str, str]:
     index = args.index("--find-file")
     values: list[str] = []
@@ -596,6 +613,55 @@ def _read_file_args(args: list[str], flag: str = "--read-file") -> tuple[str, st
     if len(values) == 1:
         return values[0], "documents"
     return " ".join(values[:-1]).strip(), values[-1].strip()
+
+
+def _calendar_create_args(args: list[str]) -> tuple[str, str, int]:
+    index = args.index("--calendar-create")
+    values: list[str] = []
+    for value in args[index + 1 :]:
+        if value.startswith("--"):
+            break
+        values.append(value)
+    if len(values) < 3:
+        return "", "", 0
+
+    duration_text = values[-1]
+    title_and_start = values[:-1]
+    if len(title_and_start) >= 2 and _looks_like_calendar_datetime(title_and_start[-1]):
+        title = " ".join(title_and_start[:-1]).strip()
+        start_text = title_and_start[-1].strip()
+    elif len(title_and_start) >= 3 and _looks_like_calendar_datetime(
+        f"{title_and_start[-2]} {title_and_start[-1]}"
+    ):
+        title = " ".join(title_and_start[:-2]).strip()
+        start_text = f"{title_and_start[-2]} {title_and_start[-1]}".strip()
+    else:
+        title = " ".join(title_and_start[:-1]).strip()
+        start_text = title_and_start[-1].strip()
+
+    try:
+        duration_minutes = int(duration_text)
+    except ValueError:
+        duration_minutes = 0
+    return title, start_text, duration_minutes
+
+
+def _looks_like_calendar_datetime(value: str) -> bool:
+    cleaned = " ".join(value.strip().split())
+    if not cleaned:
+        return False
+    try:
+        from datetime import datetime
+
+        for candidate in ("%Y-%m-%d %H:%M", "%Y-%m-%d %H:%M:%S"):
+            try:
+                datetime.strptime(cleaned, candidate)
+                return True
+            except ValueError:
+                continue
+    except Exception:
+        return False
+    return False
 
 
 def _format_chat_test_report(
