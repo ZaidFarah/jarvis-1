@@ -147,6 +147,14 @@ class AppSettings(BaseSettings):
             "JARVIS_CONVERSATION_HISTORY_MAX_MESSAGES",
         ),
     )
+    memory_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("MEMORY_ENABLED", "JARVIS_MEMORY_ENABLED"),
+    )
+    memory_database_path: Path = Field(
+        default=PROJECT_ROOT / "data" / "jarvis_memory.db",
+        validation_alias=AliasChoices("MEMORY_DATABASE_PATH", "JARVIS_MEMORY_DATABASE_PATH"),
+    )
     openai_enabled: bool = Field(
         default=False,
         validation_alias=AliasChoices("OPENAI_ENABLED", "JARVIS_OPENAI_ENABLED"),
@@ -226,6 +234,11 @@ class AppSettings(BaseSettings):
     @field_validator("log_dir")
     @classmethod
     def expand_log_dir(cls, value: Path) -> Path:
+        return value.expanduser().resolve()
+
+    @field_validator("memory_database_path")
+    @classmethod
+    def expand_memory_database_path(cls, value: Path) -> Path:
         return value.expanduser().resolve()
 
     @field_validator("speech_to_text_provider", "tts_provider", "whisper_device", "whisper_compute_type")

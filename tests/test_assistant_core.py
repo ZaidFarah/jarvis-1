@@ -3,6 +3,7 @@ from __future__ import annotations
 from assistant.core import AssistantCore
 from config.settings import AppSettings
 from services.openai_service import OpenAIChatResult
+from memory.store import SQLiteMemoryStore
 
 
 class FakeOpenAIService:
@@ -131,3 +132,39 @@ def test_assistant_core_history_disabled_still_uses_fallback() -> None:
 
     assert response.source == "fallback"
     assert assistant.conversation_history.messages == []
+
+
+def test_assistant_core_can_remember_list_forget_and_reset_memory(tmp_path) -> None:
+    settings = AppSettings(_env_file=None, openai_enabled=False, memory_enabled=True, memory_database_path=tmp_path / "memory.db")
+    assistant = AssistantCore(settings=settings, openai_service=FakeOpenAIService(), memory_store=SQLiteMemoryStore(settings.memory_database_path))
+
+    remember_response = assistant.handle_command("remember that the office code is blue")
+    list_response = assistant.handle_command("what do you remember")
+    forget_response = assistant.handle_command("forget that the office code is blue")
+    reset_response = assistant.handle_command("reset memory")
+
+    assert remember_response.source == "local"
+    assert "I'll remember that" in remember_response.text
+    assert "the office code is blue" in list_response.text
+    assert "I forgot that" in forget_response.text
+    assert "Memory cleared." in reset_response.text
+
+
+def test_assistant_core_rejects_sensitive_memory() -> None:
+    settings = AppSettings(_env_file=None, memory_enabled=True)
+    assistant = AssistantCore(settings=settings, openai_service=FakeOpenAIService())
+
+    response = assistant.handle_command("remember that my password is hunter2")
+
+    assert response.accepted is False
+    assert "cannot be stored" in response.text.lower() or "sensitive" in response.text.lower()
+
+
+def test_assistant_core_memory_disabled_fallback() -> None:
+    settings = AppSettings(_env_file=None, memory_enabled=False)
+    assistant = AssistantCore(settings=settings, openai_service=FakeOpenAIService())
+
+    response = assistant.handle_command("remember that the office code is blue")
+
+    assert response.source == "local"
+    assert response.text == "Memory is disabled."

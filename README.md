@@ -126,6 +126,15 @@ Jarvis is a Windows desktop AI assistant foundation. Phase 1 provides the applic
 - `reset conversation` clears only the current short-term history.
 - Conversation history is not written to disk.
 
+## Phase 11 Scope
+
+- SQLite-only persistent local memory.
+- Explicit memory commands only: `remember that ...`, `forget that ...`, `what do you remember`, and `reset memory`.
+- Memory settings: `MEMORY_ENABLED=true`, `MEMORY_DATABASE_PATH=data/jarvis_memory.db`.
+- Only user-approved facts are stored.
+- Sensitive secrets such as API keys, passwords, and payment card details are rejected.
+- Memory persists across restarts because it is stored in SQLite.
+
 ## Setup
 
 Install dependencies:
@@ -353,6 +362,14 @@ py main.py --chat-session
 ```
 
 The chat session keeps a single in-memory conversation open across turns. It reuses the current short-term history so follow-up questions can reference earlier turns in the same session. Type `reset conversation` to clear only the current history, or `exit`, `quit`, or `bye` to end the session.
+
+## Memory Test
+
+```powershell
+py main.py --memory-test
+```
+
+The memory test uses an isolated SQLite database and exercises remember, list, forget, and reset flows without touching the main memory database.
 
 ## Text To Speech Test
 

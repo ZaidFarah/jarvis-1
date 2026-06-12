@@ -11,6 +11,7 @@ logs/*.log
 logs/*.txt
 logs/audio/
 logs/comtypes_gen/
+data/*.db
 build/
 dist/
 *.spec

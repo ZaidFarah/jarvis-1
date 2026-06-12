@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import sys
+import tempfile
+from pathlib import Path
 
 from app.application import JarvisApplication
 from assistant.core import AssistantCore, AssistantResponse
 from config.settings import load_settings
 from services.logging_service import configure_logging
 from services.openai_service import OpenAIService, format_openai_check_report
+from memory.store import SQLiteMemoryStore
 from voice.audio_diagnostics import AudioDiagnostics, format_audio_check_report
 from voice.tts import TextToSpeechResult, format_tts_result, speak_text
 from voice.transcription_diagnostics import TranscriptionDiagnostics, format_transcription_report
@@ -109,6 +112,11 @@ def main(argv: list[str] | None = None) -> int:
         assistant = AssistantCore(settings=settings, openai_service=OpenAIService(settings))
         return _run_chat_session(assistant)
 
+    if "--memory-test" in args:
+        settings = load_settings()
+        configure_logging(settings, console=False)
+        return _run_memory_test(settings)
+
     application = JarvisApplication()
     return application.run()
 
@@ -189,6 +197,37 @@ def _run_chat_session(assistant: AssistantCore) -> int:
             print(f"Jarvis: {response.text}", flush=True)
     except KeyboardInterrupt:
         print("\nJarvis chat session interrupted. Exiting cleanly.", flush=True)
+        return 0
+
+
+def _run_memory_test(settings) -> int:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        memory_path = Path(temp_dir) / "jarvis_memory_test.db"
+        store = SQLiteMemoryStore(memory_path)
+        test_settings = settings.model_copy(
+            update={
+                "memory_enabled": True,
+                "memory_database_path": memory_path,
+                "openai_enabled": False,
+            }
+        )
+        assistant = AssistantCore(settings=test_settings, memory_store=store)
+
+        print("Jarvis memory test", flush=True)
+        print(f"memory database: {memory_path}", flush=True)
+
+        remember_response = assistant.handle_command("remember that the office code is blue")
+        print(f"remember: {remember_response.text}", flush=True)
+
+        list_response = assistant.handle_command("what do you remember")
+        print("remembered:", flush=True)
+        print(list_response.text, flush=True)
+
+        forget_response = assistant.handle_command("forget that the office code is blue")
+        print(f"forget: {forget_response.text}", flush=True)
+
+        reset_response = assistant.handle_command("reset memory")
+        print(f"reset: {reset_response.text}", flush=True)
         return 0
 
 

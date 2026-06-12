@@ -41,6 +41,8 @@ def test_openai_settings_defaults_are_safe() -> None:
     assert settings.system_prompt == "You are Jarvis, a helpful personal desktop AI assistant."
     assert settings.conversation_history_enabled is True
     assert settings.conversation_history_max_messages == 10
+    assert settings.memory_enabled is True
+    assert settings.memory_database_path.name == "jarvis_memory.db"
 
 
 def test_conversation_history_settings_read_environment(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -51,6 +53,16 @@ def test_conversation_history_settings_read_environment(monkeypatch: pytest.Monk
 
     assert settings.conversation_history_enabled is False
     assert settings.conversation_history_max_messages == 4
+
+
+def test_memory_settings_read_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MEMORY_ENABLED", "false")
+    monkeypatch.setenv("MEMORY_DATABASE_PATH", "data/custom_memory.db")
+
+    settings = AppSettings(_env_file=None)
+
+    assert settings.memory_enabled is False
+    assert settings.memory_database_path.name == "custom_memory.db"
 
 
 def test_openai_settings_read_environment(monkeypatch: pytest.MonkeyPatch) -> None:

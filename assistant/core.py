@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
-from config.settings import AppSettings, load_settings
 from assistant.conversation import ConversationHistory
+from memory.store import SensitiveMemoryError, SQLiteMemoryStore
+from config.settings import AppSettings, load_settings
 from services.openai_service import OpenAIService
 
 
@@ -23,13 +25,24 @@ class AssistantCore:
 
     placeholder = "Jarvis foundation is running. OpenAI is disabled or unavailable, so local fallback is active."
 
-    def __init__(self, settings: AppSettings | None = None, openai_service: OpenAIService | None = None) -> None:
+    def __init__(
+        self,
+        settings: AppSettings | None = None,
+        openai_service: OpenAIService | None = None,
+        memory_store: SQLiteMemoryStore | None = None,
+    ) -> None:
         self.settings = settings or load_settings()
         self.openai_service = openai_service or OpenAIService(self.settings)
         self.conversation_history = ConversationHistory(
             enabled=self.settings.conversation_history_enabled,
             max_messages=self.settings.conversation_history_max_messages,
         )
+        if memory_store is not None:
+            self.memory_store = memory_store
+        elif self.settings.memory_enabled:
+            self.memory_store = SQLiteMemoryStore(self.settings.memory_database_path)
+        else:
+            self.memory_store = None
 
     def reset_conversation(self) -> None:
         self.conversation_history.reset()
@@ -42,6 +55,10 @@ class AssistantCore:
         if cleaned.lower() == "reset conversation":
             self.reset_conversation()
             return AssistantResponse(text="Conversation history cleared.", accepted=True, source="local")
+
+        memory_response = self._handle_memory_command(cleaned)
+        if memory_response is not None:
+            return memory_response
 
         history_context = self.conversation_history.format_recent_history()
         self.conversation_history.add_user(cleaned)
@@ -73,3 +90,70 @@ class AssistantCore:
             source="fallback",
             error=error,
         )
+
+    def _handle_memory_command(self, command: str) -> AssistantResponse | None:
+        normalized = " ".join(command.lower().strip().split())
+
+        remember_match = re.match(r"(?i)^remember that\s+(.+)$", command.strip())
+        if remember_match:
+            return self._remember_fact(remember_match.group(1))
+        if normalized == "what do you remember":
+            return self._list_memories()
+        forget_match = re.match(r"(?i)^forget that\s+(.+)$", command.strip())
+        if forget_match:
+            return self._forget_fact(forget_match.group(1))
+        if normalized == "reset memory":
+            return self._reset_memory()
+        return None
+
+    def _remember_fact(self, fact: str) -> AssistantResponse:
+        if not self.settings.memory_enabled or self.memory_store is None:
+            return AssistantResponse(text="Memory is disabled.", accepted=True, source="local")
+
+        if not fact.strip():
+            return AssistantResponse(text="Please say what you want me to remember.", accepted=False, source="local")
+
+        try:
+            entry = self.memory_store.remember(fact, source="explicit")
+        except SensitiveMemoryError as exc:
+            return AssistantResponse(text=str(exc), accepted=False, source="local", error=str(exc))
+        except Exception as exc:
+            error = f"{type(exc).__name__}: {exc}"
+            return AssistantResponse(text="I couldn't store that memory.", accepted=False, source="local", error=error)
+
+        return AssistantResponse(
+            text=f"I'll remember that: {entry.text}",
+            accepted=True,
+            source="local",
+        )
+
+    def _list_memories(self) -> AssistantResponse:
+        if not self.settings.memory_enabled or self.memory_store is None:
+            return AssistantResponse(text="Memory is disabled.", accepted=True, source="local")
+
+        memories = self.memory_store.list_memories()
+        if not memories:
+            return AssistantResponse(text="I don't remember anything yet.", accepted=True, source="local")
+
+        lines = ["Here is what I remember:"]
+        lines.extend(f"{index}. {entry.text}" for index, entry in enumerate(memories, start=1))
+        return AssistantResponse(text="\n".join(lines), accepted=True, source="local")
+
+    def _forget_fact(self, fact: str) -> AssistantResponse:
+        if not self.settings.memory_enabled or self.memory_store is None:
+            return AssistantResponse(text="Memory is disabled.", accepted=True, source="local")
+
+        if not fact.strip():
+            return AssistantResponse(text="Please say what you want me to forget.", accepted=False, source="local")
+
+        removed = self.memory_store.forget(fact)
+        if removed:
+            return AssistantResponse(text=f"I forgot that: {fact.strip()}", accepted=True, source="local")
+        return AssistantResponse(text="I couldn't find that memory.", accepted=True, source="local")
+
+    def _reset_memory(self) -> AssistantResponse:
+        if not self.settings.memory_enabled or self.memory_store is None:
+            return AssistantResponse(text="Memory is disabled.", accepted=True, source="local")
+
+        removed = self.memory_store.reset()
+        return AssistantResponse(text=f"Memory cleared. Removed {removed} memories.", accepted=True, source="local")
