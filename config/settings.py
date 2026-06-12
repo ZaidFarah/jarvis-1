@@ -155,6 +155,27 @@ class AppSettings(BaseSettings):
         default=PROJECT_ROOT / "data" / "jarvis_memory.db",
         validation_alias=AliasChoices("MEMORY_DATABASE_PATH", "JARVIS_MEMORY_DATABASE_PATH"),
     )
+    weather_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("WEATHER_ENABLED", "JARVIS_WEATHER_ENABLED"),
+    )
+    weather_provider: str = Field(
+        default="openweathermap",
+        validation_alias=AliasChoices("WEATHER_PROVIDER", "JARVIS_WEATHER_PROVIDER"),
+    )
+    weather_api_key: str = Field(
+        default="",
+        repr=False,
+        validation_alias=AliasChoices("WEATHER_API_KEY", "JARVIS_WEATHER_API_KEY"),
+    )
+    weather_default_city: str = Field(
+        default="Nottingham",
+        validation_alias=AliasChoices("WEATHER_DEFAULT_CITY", "JARVIS_WEATHER_DEFAULT_CITY"),
+    )
+    weather_units: str = Field(
+        default="metric",
+        validation_alias=AliasChoices("WEATHER_UNITS", "JARVIS_WEATHER_UNITS"),
+    )
     openai_enabled: bool = Field(
         default=False,
         validation_alias=AliasChoices("OPENAI_ENABLED", "JARVIS_OPENAI_ENABLED"),
@@ -249,6 +270,37 @@ class AppSettings(BaseSettings):
             raise ValueError("Provider name cannot be empty.")
         return cleaned
 
+    @field_validator("weather_provider")
+    @classmethod
+    def normalize_weather_provider(cls, value: str) -> str:
+        cleaned = value.strip().lower()
+        allowed = {"openweathermap"}
+        if cleaned not in allowed:
+            raise ValueError(f"Unsupported weather provider: {value}")
+        return cleaned
+
+    @field_validator("weather_default_city")
+    @classmethod
+    def normalize_weather_default_city(cls, value: str) -> str:
+        cleaned = " ".join(value.strip().split())
+        if not cleaned:
+            raise ValueError("Weather default city cannot be empty.")
+        return cleaned
+
+    @field_validator("weather_units")
+    @classmethod
+    def normalize_weather_units(cls, value: str) -> str:
+        cleaned = value.strip().lower()
+        allowed = {"metric", "imperial", "standard"}
+        if cleaned not in allowed:
+            raise ValueError(f"Unsupported weather units: {value}")
+        return cleaned
+
+    @field_validator("weather_api_key")
+    @classmethod
+    def strip_weather_api_key(cls, value: str) -> str:
+        return value.strip()
+
     @field_validator("tts_voice_name")
     @classmethod
     def normalize_tts_voice_name(cls, value: str) -> str:
@@ -323,6 +375,10 @@ class AppSettings(BaseSettings):
     @property
     def has_openai_api_key(self) -> bool:
         return bool(self.openai_api_key)
+
+    @property
+    def has_weather_api_key(self) -> bool:
+        return bool(self.weather_api_key)
 
 
 def load_settings() -> AppSettings:

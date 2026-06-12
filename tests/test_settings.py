@@ -65,6 +65,33 @@ def test_memory_settings_read_environment(monkeypatch: pytest.MonkeyPatch) -> No
     assert settings.memory_database_path.name == "custom_memory.db"
 
 
+def test_weather_settings_defaults_are_safe() -> None:
+    settings = AppSettings(_env_file=None)
+
+    assert settings.weather_enabled is False
+    assert settings.weather_provider == "openweathermap"
+    assert settings.has_weather_api_key is False
+    assert settings.weather_default_city == "Nottingham"
+    assert settings.weather_units == "metric"
+
+
+def test_weather_settings_read_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("WEATHER_ENABLED", "true")
+    monkeypatch.setenv("WEATHER_PROVIDER", "openweathermap")
+    monkeypatch.setenv("WEATHER_API_KEY", "  key-123  ")
+    monkeypatch.setenv("WEATHER_DEFAULT_CITY", "  London  ")
+    monkeypatch.setenv("WEATHER_UNITS", "imperial")
+
+    settings = AppSettings(_env_file=None)
+
+    assert settings.weather_enabled is True
+    assert settings.weather_provider == "openweathermap"
+    assert settings.weather_api_key == "key-123"
+    assert settings.has_weather_api_key is True
+    assert settings.weather_default_city == "London"
+    assert settings.weather_units == "imperial"
+
+
 def test_openai_settings_read_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OPENAI_ENABLED", "true")
     monkeypatch.setenv("OPENAI_API_KEY", "  sk-test  ")

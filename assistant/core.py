@@ -4,6 +4,7 @@ import re
 from dataclasses import dataclass
 
 from assistant.conversation import ConversationHistory
+from integrations.weather_service import WeatherService
 from memory.store import SensitiveMemoryError, SQLiteMemoryStore
 from config.settings import AppSettings, load_settings
 from services.openai_service import OpenAIService
@@ -30,9 +31,11 @@ class AssistantCore:
         settings: AppSettings | None = None,
         openai_service: OpenAIService | None = None,
         memory_store: SQLiteMemoryStore | None = None,
+        weather_service: WeatherService | None = None,
     ) -> None:
         self.settings = settings or load_settings()
         self.openai_service = openai_service or OpenAIService(self.settings)
+        self.weather_service = weather_service or WeatherService(self.settings)
         self.conversation_history = ConversationHistory(
             enabled=self.settings.conversation_history_enabled,
             max_messages=self.settings.conversation_history_max_messages,
@@ -55,6 +58,10 @@ class AssistantCore:
         if cleaned.lower() == "reset conversation":
             self.reset_conversation()
             return AssistantResponse(text="Conversation history cleared.", accepted=True, source="local")
+
+        weather_response = self._handle_weather_command(cleaned)
+        if weather_response is not None:
+            return weather_response
 
         memory_response = self._handle_memory_command(cleaned)
         if memory_response is not None:
@@ -105,6 +112,34 @@ class AssistantCore:
         if normalized == "reset memory":
             return self._reset_memory()
         return None
+
+    def _handle_weather_command(self, command: str) -> AssistantResponse | None:
+        command_text = command.strip()
+        normalized = " ".join(command_text.lower().split())
+
+        weather_city: str | None = None
+        if normalized in {"what is the weather", "what's the weather", "weather today"}:
+            weather_city = None
+        else:
+            match = re.match(
+                r"(?i)^(?:what(?:'s| is) the weather|weather today)\s+in\s+(.+)$",
+                command_text,
+            )
+            if match:
+                weather_city = match.group(1).strip()
+            else:
+                return None
+
+        result = self.weather_service.current_weather(weather_city)
+        response = AssistantResponse(
+            text=result.text,
+            accepted=True,
+            source="weather",
+            error=result.safe_error,
+        )
+        self.conversation_history.add_user(command_text)
+        self.conversation_history.add_assistant(response.text)
+        return response
 
     def _remember_fact(self, fact: str) -> AssistantResponse:
         if not self.settings.memory_enabled or self.memory_store is None:

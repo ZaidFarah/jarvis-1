@@ -7,6 +7,7 @@ from pathlib import Path
 from app.application import JarvisApplication
 from assistant.core import AssistantCore, AssistantResponse
 from config.settings import load_settings
+from integrations.weather_service import WeatherService, format_weather_check_report
 from services.logging_service import configure_logging
 from services.openai_service import OpenAIService, format_openai_check_report
 from memory.store import SQLiteMemoryStore
@@ -79,6 +80,13 @@ def main(argv: list[str] | None = None) -> int:
         configure_logging(settings, console=False)
         report = OpenAIService(settings).run_check()
         print(format_openai_check_report(report))
+        return 0 if report.is_successful else 1
+
+    if "--weather-check" in args:
+        settings = load_settings()
+        configure_logging(settings, console=False)
+        report = WeatherService(settings).run_check()
+        print(format_weather_check_report(report))
         return 0 if report.is_successful else 1
 
     if "--tts-test" in args:

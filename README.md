@@ -135,6 +135,15 @@ Jarvis is a Windows desktop AI assistant foundation. Phase 1 provides the applic
 - Sensitive secrets such as API keys, passwords, and payment card details are rejected.
 - Memory persists across restarts because it is stored in SQLite.
 
+## Phase 12 Scope
+
+- Safe weather integration through OpenWeatherMap only.
+- CLI command: `py main.py --weather-check`.
+- Assistant weather prompts: `what is the weather`, `weather today`, and `what is the weather in <city>`.
+- Weather settings: `WEATHER_ENABLED=false`, `WEATHER_PROVIDER=openweathermap`, `WEATHER_API_KEY=`, `WEATHER_DEFAULT_CITY=Nottingham`, `WEATHER_UNITS=metric`.
+- Weather requests are skipped safely when disabled or missing a key.
+- Weather logs are saved to `logs/weather.log`.
+
 ## Setup
 
 Install dependencies:
@@ -371,6 +380,14 @@ py main.py --memory-test
 
 The memory test uses an isolated SQLite database and exercises remember, list, forget, and reset flows without touching the main memory database.
 
+## Weather Check
+
+```powershell
+py main.py --weather-check
+```
+
+The weather check reports whether weather is enabled, which provider is selected, whether an API key is present, the default city, and whether a live request was attempted. If weather is enabled and the key exists, Jarvis requests current weather from OpenWeatherMap. The command never prints the API key.
+
 ## Text To Speech Test
 
 ```powershell
@@ -427,6 +444,7 @@ Jarvis/
   app/
   assistant/
   config/
+  integrations/
   gui/
   voice/
   services/

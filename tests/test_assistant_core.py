@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from assistant.core import AssistantCore
 from config.settings import AppSettings
+from integrations.weather_service import WeatherQueryResult
 from services.openai_service import OpenAIChatResult
 from memory.store import SQLiteMemoryStore
 
@@ -26,6 +27,16 @@ class FakeOpenAIService:
         if self.error:
             raise self.error
         assert self.result is not None
+        return self.result
+
+
+class FakeWeatherService:
+    def __init__(self, result: WeatherQueryResult) -> None:
+        self.result = result
+        self.calls: list[str | None] = []
+
+    def current_weather(self, city: str | None = None) -> WeatherQueryResult:
+        self.calls.append(city)
         return self.result
 
 
@@ -168,3 +179,29 @@ def test_assistant_core_memory_disabled_fallback() -> None:
 
     assert response.source == "local"
     assert response.text == "Memory is disabled."
+
+
+def test_assistant_core_routes_weather_commands_without_openai() -> None:
+    weather_service = FakeWeatherService(
+        WeatherQueryResult(
+            success=True,
+            text="Current weather in London: clear sky.",
+            provider="openweathermap",
+            city="London",
+            request_attempted=True,
+            api_key_detected=True,
+        )
+    )
+    openai_service = FakeOpenAIService(error=AssertionError("OpenAI should not be called for weather"))
+    assistant = AssistantCore(
+        settings=AppSettings(_env_file=None, openai_enabled=False),
+        openai_service=openai_service,
+        weather_service=weather_service,
+    )
+
+    response = assistant.handle_command("what is the weather in London")
+
+    assert response.source == "weather"
+    assert response.text == "Current weather in London: clear sky."
+    assert weather_service.calls == ["London"]
+    assert openai_service.messages == []
