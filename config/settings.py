@@ -219,6 +219,16 @@ class AppSettings(BaseSettings):
         ),
         validation_alias=AliasChoices("FILE_ACCESS_ALLOWED_FOLDERS", "JARVIS_FILE_ACCESS_ALLOWED_FOLDERS"),
     )
+    confirmation_required: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("CONFIRMATION_REQUIRED", "JARVIS_CONFIRMATION_REQUIRED"),
+    )
+    confirmation_timeout_seconds: int = Field(
+        default=30,
+        ge=1,
+        le=300,
+        validation_alias=AliasChoices("CONFIRMATION_TIMEOUT_SECONDS", "JARVIS_CONFIRMATION_TIMEOUT_SECONDS"),
+    )
     notifications_enabled: bool = Field(
         default=False,
         validation_alias=AliasChoices("NOTIFICATIONS_ENABLED", "JARVIS_NOTIFICATIONS_ENABLED"),

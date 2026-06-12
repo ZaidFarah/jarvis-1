@@ -12,6 +12,7 @@ from services.notification_service import NotificationService, format_notificati
 from services.logging_service import configure_logging
 from services.openai_service import OpenAIService, format_openai_check_report
 from security.permissions import PermissionBroker, format_permission_check_report, format_permission_decision
+from security.confirmation import ConfirmationResult, confirm_action_cli, format_confirmation_result
 from tools.app_launcher import AppLauncher, format_app_launch_report, format_app_launcher_check_report, format_app_resolution_report
 from tools.file_access import FileAccess, format_file_access_check_report, format_file_search_report, format_folder_listing_report
 from tools.website_launcher import WebsiteLauncher, format_website_launcher_check_report, format_website_open_report
@@ -155,6 +156,12 @@ def main(argv: list[str] | None = None) -> int:
         decision = PermissionBroker(settings).check(action_name)
         print(format_permission_decision(decision))
         return 0 if decision.allowed else 1
+
+    if "--confirm-test" in args:
+        settings = load_settings()
+        configure_logging(settings, console=False)
+        action_name = _message_after_flag(args, "--confirm-test") or "read file contents"
+        return _run_confirm_test(settings, action_name)
 
     if "--file-access-check" in args:
         settings = load_settings()
@@ -432,6 +439,34 @@ def _run_notification_test(settings, message: str) -> int:
     result = NotificationService(settings).send_notification("Jarvis", message)
     print(format_notification_check_report(result), flush=True)
     return 0 if result.delivered else 1
+
+
+def _run_confirm_test(settings, action_name: str) -> int:
+    broker = PermissionBroker(settings)
+    decision = broker.check(action_name)
+    if not decision.allowed:
+        print(format_permission_decision(decision), flush=True)
+        return 1
+
+    if not decision.requires_confirmation:
+        result = ConfirmationResult(
+            approved=True,
+            denied=False,
+            timed_out=False,
+            reason="No confirmation required.",
+            log_file=settings.log_dir / "confirmations.log",
+        )
+        print(format_confirmation_result(result), flush=True)
+        return 0
+
+    result = confirm_action_cli(
+        settings,
+        decision.description,
+        timeout_seconds=settings.confirmation_timeout_seconds,
+        output_func=print,
+    )
+    print(format_confirmation_result(result), flush=True)
+    return 0 if result.approved else 1
 
 
 def _run_launch_app(settings, app_name: str) -> int:

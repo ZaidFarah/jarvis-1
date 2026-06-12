@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
 
 from assistant.core import AssistantCore
 from config.settings import AppSettings
+from security.confirmation import confirm_action_gui, format_confirmation_result
 from reminders.scheduler import ReminderWatcher
 from services.notification_service import NotificationService, format_notification_check_report
 from voice.audio_diagnostics import AudioDiagnostics, format_microphone_test_summary
@@ -137,6 +138,7 @@ class JarvisMainWindow(QMainWindow):
         self.launch_notepad_button = QPushButton("Launch Notepad")
         self.open_google_button = QPushButton("Open Google")
         self.list_downloads_button = QPushButton("List Downloads")
+        self.test_confirmation_button = QPushButton("Test Confirmation")
         self.start_reminder_watch_button = QPushButton("Start Watch")
         self.stop_reminder_watch_button = QPushButton("Stop Watch")
         self.send_button = QPushButton("Send")
@@ -149,6 +151,7 @@ class JarvisMainWindow(QMainWindow):
         self.app_launch_result_value = QLabel("Idle")
         self.website_result_value = QLabel("Idle")
         self.file_access_result_value = QLabel("Idle")
+        self.confirmation_result_value = QLabel("Idle")
         self.reminder_watch_status_value = QLabel("Idle")
         self.voice_loop_runner: VoiceLoopRunner | None = None
         self.voice_loop_thread: threading.Thread | None = None
@@ -168,6 +171,7 @@ class JarvisMainWindow(QMainWindow):
         self.launch_notepad_action: QAction | None = None
         self.open_google_action: QAction | None = None
         self.list_downloads_action: QAction | None = None
+        self.test_confirmation_action: QAction | None = None
         self.tray_icon = self._create_tray_icon()
 
         self._build_ui()
@@ -198,6 +202,7 @@ class JarvisMainWindow(QMainWindow):
         self.app_launch_result_value.setObjectName("voiceLoopValue")
         self.website_result_value.setObjectName("voiceLoopValue")
         self.file_access_result_value.setObjectName("voiceLoopValue")
+        self.confirmation_result_value.setObjectName("voiceLoopValue")
         self.reminder_watch_status_value.setObjectName("voiceLoopValue")
 
         minimize_button = QPushButton("-")
@@ -233,6 +238,7 @@ class JarvisMainWindow(QMainWindow):
         self.launch_notepad_button.setObjectName("secondaryButton")
         self.open_google_button.setObjectName("secondaryButton")
         self.list_downloads_button.setObjectName("secondaryButton")
+        self.test_confirmation_button.setObjectName("secondaryButton")
         self.start_reminder_watch_button.setObjectName("secondaryButton")
         self.stop_reminder_watch_button.setObjectName("secondaryButton")
         self.stop_reminder_watch_button.setEnabled(False)
@@ -249,6 +255,7 @@ class JarvisMainWindow(QMainWindow):
         input_row.addWidget(self.launch_notepad_button)
         input_row.addWidget(self.open_google_button)
         input_row.addWidget(self.list_downloads_button)
+        input_row.addWidget(self.test_confirmation_button)
         input_row.addWidget(self.start_reminder_watch_button)
         input_row.addWidget(self.stop_reminder_watch_button)
         input_row.addWidget(self.send_button)
@@ -291,6 +298,10 @@ class JarvisMainWindow(QMainWindow):
         file_access_row.addWidget(QLabel("File access"))
         file_access_row.addWidget(self.file_access_result_value, stretch=1)
 
+        confirmation_row = QHBoxLayout()
+        confirmation_row.addWidget(QLabel("Confirmation"))
+        confirmation_row.addWidget(self.confirmation_result_value, stretch=1)
+
         watch_row = QHBoxLayout()
         watch_row.addWidget(QLabel("Reminder watch"))
         watch_row.addWidget(self.reminder_watch_status_value, stretch=1)
@@ -303,6 +314,7 @@ class JarvisMainWindow(QMainWindow):
         loop_info_layout.addLayout(launch_row)
         loop_info_layout.addLayout(website_row)
         loop_info_layout.addLayout(file_access_row)
+        loop_info_layout.addLayout(confirmation_row)
         loop_info_layout.addLayout(watch_row)
 
         layout = QVBoxLayout(shell)
@@ -421,6 +433,7 @@ class JarvisMainWindow(QMainWindow):
         self.launch_notepad_button.clicked.connect(self.launch_notepad)
         self.open_google_button.clicked.connect(self.open_google)
         self.list_downloads_button.clicked.connect(self.list_downloads)
+        self.test_confirmation_button.clicked.connect(self.test_confirmation)
         self.start_reminder_watch_button.clicked.connect(self.start_reminder_watch)
         self.stop_reminder_watch_button.clicked.connect(self.stop_reminder_watch)
 
@@ -449,6 +462,8 @@ class JarvisMainWindow(QMainWindow):
         self.open_google_action.triggered.connect(self.open_google)
         self.list_downloads_action = QAction("List Downloads", self)
         self.list_downloads_action.triggered.connect(self.list_downloads)
+        self.test_confirmation_action = QAction("Test Confirmation", self)
+        self.test_confirmation_action.triggered.connect(self.test_confirmation)
         self.start_reminder_watch_action = QAction("Start Reminder Watch", self)
         self.start_reminder_watch_action.triggered.connect(self.start_reminder_watch)
         self.stop_reminder_watch_action = QAction("Stop Reminder Watch", self)
@@ -465,6 +480,7 @@ class JarvisMainWindow(QMainWindow):
         menu.addAction(self.launch_notepad_action)
         menu.addAction(self.open_google_action)
         menu.addAction(self.list_downloads_action)
+        menu.addAction(self.test_confirmation_action)
         menu.addAction(self.start_reminder_watch_action)
         menu.addAction(self.stop_reminder_watch_action)
         menu.addSeparator()
@@ -639,6 +655,30 @@ class JarvisMainWindow(QMainWindow):
         except Exception as exc:  # pragma: no cover - defensive GUI boundary
             self._append_message("Jarvis", f"File access failed: {exc}")
             self.file_access_result_value.setText("Error")
+            self.set_status(AssistantStatus.ERROR)
+            return
+
+        QTimer.singleShot(1200, lambda: self.set_status(AssistantStatus.SLEEPING))
+
+    def test_confirmation(self) -> None:
+        self._append_message("Jarvis", "Testing confirmation...")
+        self.confirmation_result_value.setText("Checking")
+        self.set_status(AssistantStatus.THINKING)
+        QApplication.processEvents()
+
+        try:
+            result = confirm_action_gui(
+                action_name="read file contents",
+                risk_level="medium",
+                description="Read file contents from a local file.",
+                parent=self,
+            )
+            self._append_message("Jarvis", format_confirmation_result(result))
+            self.confirmation_result_value.setText("Approved" if result.approved else "Denied")
+            self.set_status(AssistantStatus.SLEEPING if result.approved else AssistantStatus.ERROR)
+        except Exception as exc:  # pragma: no cover - defensive GUI boundary
+            self._append_message("Jarvis", f"Confirmation test failed: {exc}")
+            self.confirmation_result_value.setText("Error")
             self.set_status(AssistantStatus.ERROR)
             return
 

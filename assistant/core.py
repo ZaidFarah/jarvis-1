@@ -269,6 +269,10 @@ class AssistantCore:
             return AssistantResponse(text="File access is disabled.", accepted=True, source="local")
 
         result = self.file_access.find_file(query, folder_name)
+        self.permission_broker.check(
+            "list whitelisted folder filenames",
+            description=f"Search files in {folder_name} for {query}.",
+        )
         return AssistantResponse(
             text=self._file_search_response_text(result),
             accepted=result.request_attempted and not result.safe_error,

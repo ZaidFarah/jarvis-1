@@ -537,6 +537,15 @@ Jarvis can open only sites listed in `WEBSITE_ALLOWED_SITES`. If a site is missi
 - Existing low-risk actions are logged but not blocked yet.
 - Permission logs are saved to `logs/permissions.log`.
 
+## Phase 21 Scope
+
+- Confirmation layer for medium and high risk actions.
+- CLI command: `py main.py --confirm-test "read file contents"`.
+- GUI modal confirmation dialog with approve and deny buttons.
+- Confirmation settings: `CONFIRMATION_REQUIRED=true`, `CONFIRMATION_TIMEOUT_SECONDS=30`.
+- Confirmation prompts fail closed on timeout.
+- Confirmation logs are saved to `logs/confirmations.log`.
+
 ## Text To Speech Test
 
 ```powershell
