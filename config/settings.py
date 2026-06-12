@@ -184,6 +184,18 @@ class AppSettings(BaseSettings):
         default=False,
         validation_alias=AliasChoices("REMINDERS_WATCH_SPEAK", "JARVIS_REMINDERS_WATCH_SPEAK"),
     )
+    notifications_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("NOTIFICATIONS_ENABLED", "JARVIS_NOTIFICATIONS_ENABLED"),
+    )
+    notification_provider: str = Field(
+        default="windows_toast",
+        validation_alias=AliasChoices("NOTIFICATION_PROVIDER", "JARVIS_NOTIFICATION_PROVIDER"),
+    )
+    reminders_toast_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("REMINDERS_TOAST_ENABLED", "JARVIS_REMINDERS_TOAST_ENABLED"),
+    )
     reminders_database_path: Path = Field(
         default=PROJECT_ROOT / "data" / "jarvis_reminders.db",
         validation_alias=AliasChoices("REMINDERS_DATABASE_PATH", "JARVIS_REMINDERS_DATABASE_PATH"),
@@ -315,6 +327,15 @@ class AppSettings(BaseSettings):
         allowed = {"openweathermap"}
         if cleaned not in allowed:
             raise ValueError(f"Unsupported weather provider: {value}")
+        return cleaned
+
+    @field_validator("notification_provider")
+    @classmethod
+    def normalize_notification_provider(cls, value: str) -> str:
+        cleaned = value.strip().lower()
+        allowed = {"windows_toast"}
+        if cleaned not in allowed:
+            raise ValueError(f"Unsupported notification provider: {value}")
         return cleaned
 
     @field_validator("weather_default_city")

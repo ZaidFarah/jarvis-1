@@ -170,6 +170,14 @@ Jarvis is a Windows desktop AI assistant foundation. Phase 1 provides the applic
 - Watch settings: `REMINDERS_WATCH_ENABLED=false`, `REMINDERS_WATCH_SPEAK=false`.
 - The GUI includes `Start Watch` and `Stop Watch` controls and shows watcher status.
 
+## Phase 16 Scope
+
+- Optional Windows toast notifications through `winotify` when available.
+- CLI commands: `py main.py --notification-check` and `py main.py --notification-test "Hello from Jarvis"`.
+- Reminder checks and the reminder watcher can optionally emit toast notifications when `REMINDERS_TOAST_ENABLED=true`.
+- Notification settings: `NOTIFICATIONS_ENABLED=false`, `NOTIFICATION_PROVIDER=windows_toast`, `REMINDERS_TOAST_ENABLED=false`.
+- Notification logs are saved to `logs/notifications.log`.
+
 ## Setup
 
 Install dependencies:
@@ -437,6 +445,22 @@ py main.py --reminders-watch
 ```
 
 The reminder watcher checks due reminders every `REMINDERS_CHECK_INTERVAL_SECONDS` while Jarvis is running. It stops cleanly when you press Ctrl+C or close the GUI. Pass `--speak` to have due reminders spoken aloud.
+
+## Notification Check
+
+```powershell
+py main.py --notification-check
+```
+
+The notification check reports whether Windows toast notifications are enabled, which provider is selected, whether the provider is available, and whether a diagnostic toast was delivered. It never prints secrets.
+
+## Notification Test
+
+```powershell
+py main.py --notification-test "Hello from Jarvis"
+```
+
+The notification test sends a one-off toast using the configured provider when notifications are enabled and the provider is available. On unsupported platforms or when the provider cannot load, Jarvis fails safely and reports the reason.
 
 ## Text To Speech Test
 

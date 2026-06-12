@@ -104,6 +104,26 @@ def test_reminder_settings_defaults_are_safe() -> None:
     assert settings.reminders_database_path.name == "jarvis_reminders.db"
 
 
+def test_notification_settings_defaults_are_safe() -> None:
+    settings = AppSettings(_env_file=None)
+
+    assert settings.notifications_enabled is False
+    assert settings.notification_provider == "windows_toast"
+    assert settings.reminders_toast_enabled is False
+
+
+def test_notification_settings_read_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("NOTIFICATIONS_ENABLED", "true")
+    monkeypatch.setenv("NOTIFICATION_PROVIDER", "windows_toast")
+    monkeypatch.setenv("REMINDERS_TOAST_ENABLED", "true")
+
+    settings = AppSettings(_env_file=None)
+
+    assert settings.notifications_enabled is True
+    assert settings.notification_provider == "windows_toast"
+    assert settings.reminders_toast_enabled is True
+
+
 def test_reminder_settings_read_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("REMINDERS_ENABLED", "false")
     monkeypatch.setenv("REMINDERS_CHECK_ENABLED", "false")

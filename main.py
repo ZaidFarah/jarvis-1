@@ -8,6 +8,7 @@ from app.application import JarvisApplication
 from assistant.core import AssistantCore, AssistantResponse
 from config.settings import load_settings
 from integrations.weather_service import WeatherService, format_weather_check_report
+from services.notification_service import NotificationService, format_notification_check_report
 from services.logging_service import configure_logging
 from services.openai_service import OpenAIService, format_openai_check_report
 from memory.store import SQLiteMemoryStore
@@ -83,6 +84,19 @@ def main(argv: list[str] | None = None) -> int:
         report = OpenAIService(settings).run_check()
         print(format_openai_check_report(report))
         return 0 if report.is_successful else 1
+
+    if "--notification-check" in args:
+        settings = load_settings()
+        configure_logging(settings, console=False)
+        report = NotificationService(settings).run_check()
+        print(format_notification_check_report(report))
+        return 0 if report.is_successful else 1
+
+    if "--notification-test" in args:
+        settings = load_settings()
+        configure_logging(settings, console=False)
+        message = _message_after_flag(args, "--notification-test") or "Hello from Jarvis"
+        return _run_notification_test(settings, message)
 
     if "--weather-check" in args:
         settings = load_settings()
@@ -335,6 +349,12 @@ def _run_reminders_watch(settings, speak_requested: bool) -> int:
     finally:
         print(watcher.summary.format(), flush=True)
     return 0
+
+
+def _run_notification_test(settings, message: str) -> int:
+    result = NotificationService(settings).send_notification("Jarvis", message)
+    print(format_notification_check_report(result), flush=True)
+    return 0 if result.delivered else 1
 
 
 def _format_chat_test_report(

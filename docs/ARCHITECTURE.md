@@ -116,3 +116,5 @@ Phase 13 adds only local reminders backed by SQLite. It does not add background 
 Phase 14 adds only manual reminder checking. It does not add always-running scheduling, toast notifications, background daemons, or any broader notification system.
 
 Phase 15 adds only a local reminder watcher that runs while Jarvis is active. It does not add a Windows service, startup persistence, toast notifications, or a background daemon outside the app/CLI lifecycle.
+
+Phase 16 adds only optional Windows toast notifications. It does not add a startup service, background daemon, Gmail, Calendar, browser automation, desktop automation, file tools, vision, or LangGraph.

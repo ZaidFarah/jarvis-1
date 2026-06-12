@@ -11,6 +11,7 @@ from loguru import logger
 from config.settings import AppSettings
 from reminders.models import ReminderCheckResult, ReminderEntry
 from reminders.store import ReminderStore
+from services.notification_service import NotificationService
 
 
 _REMINDERS_LOG_SINK_ID: int | None = None
@@ -37,10 +38,12 @@ class ReminderService:
         self,
         settings: AppSettings,
         store: ReminderStore | None = None,
+        notification_service: NotificationService | None = None,
         now_provider: Callable[[], datetime] | None = None,
     ) -> None:
         self.settings = settings
         self.store = store or ReminderStore(settings.reminders_database_path)
+        self.notification_service = notification_service or self._build_notification_service()
         self.now_provider = now_provider or datetime.now
         self.log_file = self.settings.log_dir / "reminders.log"
         self.reminders_logger = logger.bind(reminders=True)
@@ -86,6 +89,12 @@ class ReminderService:
         for reminder in due_reminders:
             self.store.notify(reminder.id)
         self.reminders_logger.info("Reminder check reported {} due reminders at {}", len(due_reminders), now_text)
+        if self.settings.reminders_toast_enabled and self.notification_service is not None:
+            toast_result = self.notification_service.send_reminder_notification(due_reminders)
+            if toast_result.delivered:
+                self.reminders_logger.info("Reminder toast delivered")
+            elif toast_result.fallback_reason:
+                self.reminders_logger.warning("Reminder toast fallback: {}", toast_result.fallback_reason)
         lines = ["Due reminders:"]
         lines.extend(
             f"{entry.id}. {entry.title} at {entry.remind_at}"
@@ -181,3 +190,8 @@ class ReminderService:
             filter=lambda record: bool(record["extra"].get("reminders")),
         )
         _REMINDERS_LOG_FILE = self.log_file
+
+    def _build_notification_service(self) -> NotificationService | None:
+        if not self.settings.notifications_enabled and not self.settings.reminders_toast_enabled:
+            return None
+        return NotificationService(self.settings)
