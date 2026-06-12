@@ -3,6 +3,7 @@ from __future__ import annotations
 from assistant.core import AssistantCore
 from config.settings import AppSettings
 from integrations.weather_service import WeatherQueryResult
+from reminders.models import ReminderCheckResult
 from reminders.service import ReminderQueryResult
 from services.openai_service import OpenAIChatResult
 from memory.store import SQLiteMemoryStore
@@ -67,6 +68,10 @@ class FakeReminderService:
     def complete_reminder(self, reminder_id: int) -> ReminderQueryResult:
         self.calls.append(("complete", reminder_id))
         return ReminderQueryResult(success=True, text=f"Reminder {reminder_id} completed.")
+
+    def check_due_reminders(self) -> ReminderCheckResult:
+        self.calls.append(("check",))
+        return ReminderCheckResult(success=True, text="Due reminders:\n1. stretch at 2026-06-12 18:00", due_reminders=[])
 
 
 def test_assistant_core_returns_placeholder_response() -> None:
@@ -289,3 +294,50 @@ def test_assistant_core_disabled_reminders_fallback() -> None:
 
     assert response.source == "local"
     assert response.text == "Reminders are disabled."
+
+
+def test_assistant_core_disabled_due_reminders_fallback() -> None:
+    assistant = AssistantCore(
+        settings=AppSettings(_env_file=None, reminders_enabled=False, openai_enabled=False),
+        openai_service=FakeOpenAIService(),
+        weather_service=FakeWeatherService(
+            WeatherQueryResult(
+                success=True,
+                text="Current weather in Nottingham: clear sky.",
+                provider="openweathermap",
+                city="Nottingham",
+                request_attempted=False,
+                api_key_detected=False,
+            )
+        ),
+    )
+
+    response = assistant.handle_command("check reminders")
+
+    assert response.source == "local"
+    assert response.text == "Reminders are disabled."
+
+
+def test_assistant_core_routes_due_reminder_commands() -> None:
+    reminder_service = FakeReminderService()
+    assistant = AssistantCore(
+        settings=AppSettings(_env_file=None, openai_enabled=False),
+        openai_service=FakeOpenAIService(),
+        weather_service=FakeWeatherService(
+            WeatherQueryResult(
+                success=True,
+                text="Current weather in Nottingham: clear sky.",
+                provider="openweathermap",
+                city="Nottingham",
+                request_attempted=False,
+                api_key_detected=False,
+            )
+        ),
+        reminder_service=reminder_service,
+    )
+
+    response = assistant.handle_command("check reminders")
+
+    assert response.source == "reminders"
+    assert "Due reminders:" in response.text
+    assert reminder_service.calls == [("check",)]

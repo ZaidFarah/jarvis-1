@@ -17,8 +17,14 @@ def _app() -> QApplication:
 
 class StubAssistant:
     def handle_command(self, command: str) -> object:
-        del command
-        return object()
+        class Response:
+            def __init__(self, text: str, accepted: bool = True) -> None:
+                self.text = text
+                self.accepted = accepted
+
+        if command == "check reminders":
+            return Response("Due reminders:\n1. stretch at 2026-06-12 18:00", accepted=True)
+        return Response("handled")
 
 
 def test_voice_loop_gui_state_updates_controls_and_status_fields() -> None:
@@ -37,14 +43,17 @@ def test_voice_loop_gui_state_updates_controls_and_status_fields() -> None:
     assert window.stop_voice_loop_action is not None
     assert window.start_voice_loop_action.isEnabled() is False
     assert window.stop_voice_loop_action.isEnabled() is True
+    assert window.check_reminders_button.isEnabled() is True
 
     window._handle_voice_loop_status("Last recognized command: status report")
     window._handle_voice_loop_status("Last Jarvis response: handled status report")
     window._handle_voice_loop_status(RETURNING_TO_SLEEP_MESSAGE)
+    window.check_reminders()
 
     assert window.voice_loop_status_value.text() == RETURNING_TO_SLEEP_MESSAGE
     assert window.voice_loop_last_command_value.text() == "status report"
     assert window.voice_loop_last_response_value.text() == "handled status report"
+    assert window.reminders_check_value.text() == "Due reminders:"
 
     window.close()
     app.processEvents()

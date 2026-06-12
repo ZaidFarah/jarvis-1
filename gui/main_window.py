@@ -130,11 +130,13 @@ class JarvisMainWindow(QMainWindow):
         self.voice_command_button = QPushButton("Voice Test")
         self.start_voice_loop_button = QPushButton("Start Loop")
         self.stop_voice_loop_button = QPushButton("Stop Loop")
+        self.check_reminders_button = QPushButton("Check Reminders")
         self.send_button = QPushButton("Send")
         self.audio_diagnostics = AudioDiagnostics(settings)
         self.voice_loop_status_value = QLabel("Idle")
         self.voice_loop_last_command_value = QLabel("None")
         self.voice_loop_last_response_value = QLabel("None")
+        self.reminders_check_value = QLabel("Idle")
         self.voice_loop_runner: VoiceLoopRunner | None = None
         self.voice_loop_thread: threading.Thread | None = None
         self.voice_loop_events: Queue[str] = Queue()
@@ -167,6 +169,7 @@ class JarvisMainWindow(QMainWindow):
         self.voice_loop_status_value.setObjectName("voiceLoopValue")
         self.voice_loop_last_command_value.setObjectName("voiceLoopValue")
         self.voice_loop_last_response_value.setObjectName("voiceLoopValue")
+        self.reminders_check_value.setObjectName("voiceLoopValue")
 
         minimize_button = QPushButton("-")
         minimize_button.setObjectName("windowButton")
@@ -196,6 +199,7 @@ class JarvisMainWindow(QMainWindow):
         self.start_voice_loop_button.setObjectName("secondaryButton")
         self.stop_voice_loop_button.setObjectName("secondaryButton")
         self.stop_voice_loop_button.setEnabled(False)
+        self.check_reminders_button.setObjectName("secondaryButton")
         self.send_button.setObjectName("sendButton")
 
         input_row = QHBoxLayout()
@@ -204,6 +208,7 @@ class JarvisMainWindow(QMainWindow):
         input_row.addWidget(self.voice_command_button)
         input_row.addWidget(self.start_voice_loop_button)
         input_row.addWidget(self.stop_voice_loop_button)
+        input_row.addWidget(self.check_reminders_button)
         input_row.addWidget(self.send_button)
 
         loop_info = QFrame()
@@ -224,9 +229,14 @@ class JarvisMainWindow(QMainWindow):
         loop_response_row.addWidget(QLabel("Last response"))
         loop_response_row.addWidget(self.voice_loop_last_response_value, stretch=1)
 
+        reminders_row = QHBoxLayout()
+        reminders_row.addWidget(QLabel("Reminder check"))
+        reminders_row.addWidget(self.reminders_check_value, stretch=1)
+
         loop_info_layout.addLayout(loop_status_row)
         loop_info_layout.addLayout(loop_command_row)
         loop_info_layout.addLayout(loop_response_row)
+        loop_info_layout.addLayout(reminders_row)
 
         layout = QVBoxLayout(shell)
         layout.setContentsMargins(24, 22, 24, 24)
@@ -339,6 +349,7 @@ class JarvisMainWindow(QMainWindow):
         self.voice_command_button.clicked.connect(self.run_voice_command_test)
         self.start_voice_loop_button.clicked.connect(self.start_voice_loop)
         self.stop_voice_loop_button.clicked.connect(self.stop_voice_loop)
+        self.check_reminders_button.clicked.connect(self.check_reminders)
 
     def _create_tray_icon(self) -> QSystemTrayIcon:
         tray = QSystemTrayIcon(self._make_icon(), self)
@@ -355,6 +366,8 @@ class JarvisMainWindow(QMainWindow):
         self.start_voice_loop_action.triggered.connect(self.start_voice_loop)
         self.stop_voice_loop_action = QAction("Stop Voice Loop", self)
         self.stop_voice_loop_action.triggered.connect(self.stop_voice_loop)
+        check_reminders_action = QAction("Check Reminders", self)
+        check_reminders_action.triggered.connect(self.check_reminders)
         exit_action = QAction("Exit Jarvis", self)
         exit_action.triggered.connect(self.request_quit)
         menu.addAction(show_action)
@@ -362,6 +375,7 @@ class JarvisMainWindow(QMainWindow):
         menu.addAction(voice_command_action)
         menu.addAction(self.start_voice_loop_action)
         menu.addAction(self.stop_voice_loop_action)
+        menu.addAction(check_reminders_action)
         menu.addSeparator()
         menu.addAction(exit_action)
         tray.setContextMenu(menu)
@@ -440,6 +454,24 @@ class JarvisMainWindow(QMainWindow):
         self._append_message("Jarvis", format_voice_command_report(report))
         self.set_status(AssistantStatus.SPEAKING if report.wake_detected and report.assistant_response else AssistantStatus.SLEEPING)
         QTimer.singleShot(1800, lambda: self.set_status(AssistantStatus.SLEEPING))
+
+    def check_reminders(self) -> None:
+        self._append_message("Jarvis", "Checking reminders...")
+        self.set_status(AssistantStatus.THINKING)
+        QApplication.processEvents()
+
+        try:
+            response = self.assistant.handle_command("check reminders")
+            self._append_message("Jarvis", response.text)
+            self.reminders_check_value.setText(self._reminders_summary(response.text))
+            self.set_status(AssistantStatus.SLEEPING if response.accepted else AssistantStatus.ERROR)
+        except Exception as exc:  # pragma: no cover - defensive GUI boundary
+            self._append_message("Jarvis", f"Reminder check failed: {exc}")
+            self.reminders_check_value.setText("Error")
+            self.set_status(AssistantStatus.ERROR)
+            return
+
+        QTimer.singleShot(1200, lambda: self.set_status(AssistantStatus.SLEEPING))
 
     def _handle_voice_command_status(self, status: str) -> None:
         status_map = {
@@ -545,6 +577,11 @@ class JarvisMainWindow(QMainWindow):
         else:
             self.voice_loop_status_value.setText(status)
         self._append_message("Jarvis", status)
+
+    @staticmethod
+    def _reminders_summary(text: str) -> str:
+        first_line = text.splitlines()[0].strip() if text.splitlines() else text.strip()
+        return first_line or "Idle"
 
     def _set_voice_loop_running(self, running: bool) -> None:
         self.start_voice_loop_button.setEnabled(not running)

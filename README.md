@@ -153,6 +153,15 @@ Jarvis is a Windows desktop AI assistant foundation. Phase 1 provides the applic
 - Reminder settings: `REMINDERS_ENABLED=true`, `REMINDERS_DATABASE_PATH=data/jarvis_reminders.db`.
 - Reminder logs are saved to `logs/reminders.log`.
 
+## Phase 14 Scope
+
+- Manual reminder checking for due reminders.
+- Reminder commands: `due reminders` and `check reminders`.
+- CLI command: `py main.py --reminders-check`.
+- Optional spoken reminder output with `--speak`.
+- Reminder check settings: `REMINDERS_CHECK_ENABLED=true`, `REMINDERS_CHECK_INTERVAL_SECONDS=60`, `REMINDERS_SPEAK_DUE=false`.
+- The GUI includes a `Check Reminders` control and shows the last reminder check result.
+
 ## Setup
 
 Install dependencies:
@@ -404,6 +413,14 @@ py main.py --reminders-test
 ```
 
 The reminders test uses an isolated SQLite database and exercises reminder creation, listing, completion, and cancellation without touching the main reminders database.
+
+## Reminders Check
+
+```powershell
+py main.py --reminders-check
+```
+
+Jarvis checks for reminders where `remind_at` is due and `status` is still pending. Matching reminders are marked `notified` after they are reported, so they are not repeated on the next check. Pass `--speak` to speak the result aloud.
 
 ## Text To Speech Test
 

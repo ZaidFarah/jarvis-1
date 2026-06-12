@@ -56,10 +56,27 @@ class ReminderStore:
     def complete(self, reminder_id: int) -> bool:
         return self._set_status(reminder_id, "completed")
 
+    def notify(self, reminder_id: int) -> bool:
+        return self._set_status(reminder_id, "notified")
+
     def exists(self, reminder_id: int) -> bool:
         with self._connect() as connection:
             row = connection.execute("SELECT 1 FROM reminders WHERE id = ? LIMIT 1", (int(reminder_id),)).fetchone()
         return row is not None
+
+    def due_reminders(self, now_text: str) -> list[ReminderEntry]:
+        cleaned_now = self._clean_text(now_text)
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT id, title, remind_at, status, created_at, updated_at
+                FROM reminders
+                WHERE status = 'pending' AND remind_at <= ?
+                ORDER BY remind_at ASC, id ASC
+                """,
+                (cleaned_now,),
+            ).fetchall()
+        return [self._row_to_entry(row) for row in rows]
 
     def _set_status(self, reminder_id: int, status: str) -> bool:
         now = self._now()
@@ -118,4 +135,3 @@ class ReminderStore:
     @staticmethod
     def _now() -> str:
         return datetime.now(timezone.utc).isoformat()
-

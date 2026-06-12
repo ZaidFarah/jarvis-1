@@ -12,3 +12,10 @@ class ReminderEntry:
     created_at: str
     updated_at: str
 
+
+@dataclass(frozen=True)
+class ReminderCheckResult:
+    success: bool
+    text: str
+    due_reminders: list[ReminderEntry]
+    safe_error: str | None = None

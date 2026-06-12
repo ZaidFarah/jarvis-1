@@ -7,7 +7,7 @@ from assistant.conversation import ConversationHistory
 from integrations.weather_service import WeatherService
 from memory.store import SensitiveMemoryError, SQLiteMemoryStore
 from config.settings import AppSettings, load_settings
-from reminders.service import ReminderService, ReminderTimeError
+from reminders.service import ReminderService
 from services.openai_service import OpenAIService
 
 
@@ -156,11 +156,26 @@ class AssistantCore:
     def _handle_reminder_command(self, command: str) -> AssistantResponse | None:
         if not self.settings.reminders_enabled or self.reminder_service is None:
             normalized = " ".join(command.lower().strip().split())
-            if normalized.startswith("remind me to ") or normalized in {"list reminders", "show reminders"} or normalized.startswith("cancel reminder ") or normalized.startswith("complete reminder "):
+            if (
+                normalized.startswith("remind me to ")
+                or normalized in {"list reminders", "show reminders"}
+                or normalized.startswith("cancel reminder ")
+                or normalized.startswith("complete reminder ")
+                or ReminderService.is_due_reminder_command(command)
+            ):
                 return AssistantResponse(text="Reminders are disabled.", accepted=True, source="local")
             return None
 
         normalized = " ".join(command.lower().strip().split())
+        if ReminderService.is_due_reminder_command(command):
+            result = self.reminder_service.check_due_reminders()
+            return AssistantResponse(
+                text=result.text,
+                accepted=result.success,
+                source="reminders",
+                error=result.safe_error,
+            )
+
         if normalized in {"list reminders", "show reminders"}:
             result = self.reminder_service.list_reminders()
             return AssistantResponse(text=result.text, accepted=result.success, source="reminders", error=result.safe_error)

@@ -131,6 +131,11 @@ def main(argv: list[str] | None = None) -> int:
         configure_logging(settings, console=False)
         return _run_reminders_test(settings)
 
+    if "--reminders-check" in args:
+        settings = load_settings()
+        configure_logging(settings, console=False)
+        return _run_reminders_check(settings, speak_requested=_has_flag(args, "--speak"))
+
     application = JarvisApplication()
     return application.run()
 
@@ -279,6 +284,19 @@ def _run_reminders_test(settings) -> int:
         return 0
 
 
+def _run_reminders_check(settings, speak_requested: bool) -> int:
+    reminder_service = ReminderService(settings) if settings.reminders_enabled else None
+    assistant = AssistantCore(settings=settings, openai_service=OpenAIService(settings), reminder_service=reminder_service)
+    response = assistant.handle_command("check reminders")
+    tts_result = None
+    should_speak = speak_requested or settings.reminders_speak_due or settings.tts_enabled
+    if response.accepted and should_speak:
+        tts_result = speak_text(response.text, settings, speak_requested=should_speak)
+
+    print(_format_reminders_check_report(response, tts_result), flush=True)
+    return 0 if response.accepted and (tts_result is None or tts_result.spoken) else 1
+
+
 def _format_chat_test_report(
     message: str,
     response: AssistantResponse,
@@ -291,6 +309,42 @@ def _format_chat_test_report(
         f"response source: {response.source}",
         "",
         "Jarvis response:",
+        f"  {response.text}",
+    ]
+    if response.error:
+        lines.extend(["", "Fallback reason:", f"  {response.error}"])
+    if tts_result is not None:
+        lines.extend(
+            [
+                "",
+                "Text-to-speech:",
+                f"  provider: {tts_result.provider_name}",
+                f"  requested provider: {tts_result.requested_provider_name or tts_result.provider_name}",
+                f"  provider available: {_yes_no(tts_result.provider_available)}",
+                f"  fallback used: {_yes_no(tts_result.fallback_used)}",
+                f"  spoken: {_yes_no(tts_result.spoken)}",
+                f"  diagnostic log: {tts_result.log_file}",
+            ]
+        )
+        if tts_result.audio_file:
+            lines.append(f"  audio file: {tts_result.audio_file}")
+        if tts_result.fallback_reason:
+            lines.extend(["", "TTS fallback reason:", f"  {tts_result.fallback_reason}"])
+        if tts_result.error:
+            lines.extend(["", "TTS error:", f"  {tts_result.error}"])
+    return "\n".join(lines)
+
+
+def _format_reminders_check_report(
+    response: AssistantResponse,
+    tts_result: TextToSpeechResult | None = None,
+) -> str:
+    lines = [
+        "Jarvis Reminders Check",
+        "======================",
+        f"response source: {response.source}",
+        "",
+        "Reminders result:",
         f"  {response.text}",
     ]
     if response.error:

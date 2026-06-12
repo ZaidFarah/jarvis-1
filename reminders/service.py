@@ -4,12 +4,12 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from loguru import logger
 
 from config.settings import AppSettings
-from reminders.models import ReminderEntry
+from reminders.models import ReminderCheckResult, ReminderEntry
 from reminders.store import ReminderStore
 
 
@@ -33,9 +33,15 @@ class ReminderTimeError(ValueError):
 class ReminderService:
     """Local reminder service backed by SQLite only."""
 
-    def __init__(self, settings: AppSettings, store: ReminderStore | None = None) -> None:
+    def __init__(
+        self,
+        settings: AppSettings,
+        store: ReminderStore | None = None,
+        now_provider: Callable[[], datetime] | None = None,
+    ) -> None:
         self.settings = settings
         self.store = store or ReminderStore(settings.reminders_database_path)
+        self.now_provider = now_provider or datetime.now
         self.log_file = self.settings.log_dir / "reminders.log"
         self.reminders_logger = logger.bind(reminders=True)
         self._ensure_reminders_log_sink()
@@ -62,6 +68,30 @@ class ReminderService:
             text=f"Reminder created: {reminder.title} at {reminder.remind_at} (id {reminder.id}).",
             reminder=reminder,
         )
+
+    def check_due_reminders(self) -> ReminderCheckResult:
+        if not self.settings.reminders_check_enabled:
+            message = "Reminder checks are disabled."
+            self.reminders_logger.info(message)
+            return ReminderCheckResult(success=True, text=message, due_reminders=[])
+
+        now_text = self.now_provider().strftime("%Y-%m-%d %H:%M")
+        due_reminders = self.store.due_reminders(now_text)
+
+        if not due_reminders:
+            message = "No reminders are due right now."
+            self.reminders_logger.info("Reminder check found no due reminders at {}", now_text)
+            return ReminderCheckResult(success=True, text=message, due_reminders=[])
+
+        for reminder in due_reminders:
+            self.store.notify(reminder.id)
+        self.reminders_logger.info("Reminder check reported {} due reminders at {}", len(due_reminders), now_text)
+        lines = ["Due reminders:"]
+        lines.extend(
+            f"{entry.id}. {entry.title} at {entry.remind_at}"
+            for entry in due_reminders
+        )
+        return ReminderCheckResult(success=True, text="\n".join(lines), due_reminders=due_reminders)
 
     def list_reminders(self) -> ReminderQueryResult:
         reminders = self.store.list_reminders()
@@ -115,6 +145,11 @@ class ReminderService:
             remind_at = remind_at.strip()
             return task, remind_at or None
         return remainder, None
+
+    @staticmethod
+    def is_due_reminder_command(command: str) -> bool:
+        normalized = " ".join(command.lower().strip().split())
+        return normalized in {"due reminders", "check reminders"}
 
     @staticmethod
     def _clean_text(text: str) -> str:

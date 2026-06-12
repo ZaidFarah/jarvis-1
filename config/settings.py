@@ -159,6 +159,23 @@ class AppSettings(BaseSettings):
         default=True,
         validation_alias=AliasChoices("REMINDERS_ENABLED", "JARVIS_REMINDERS_ENABLED"),
     )
+    reminders_check_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("REMINDERS_CHECK_ENABLED", "JARVIS_REMINDERS_CHECK_ENABLED"),
+    )
+    reminders_check_interval_seconds: int = Field(
+        default=60,
+        ge=5,
+        le=3600,
+        validation_alias=AliasChoices(
+            "REMINDERS_CHECK_INTERVAL_SECONDS",
+            "JARVIS_REMINDERS_CHECK_INTERVAL_SECONDS",
+        ),
+    )
+    reminders_speak_due: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("REMINDERS_SPEAK_DUE", "JARVIS_REMINDERS_SPEAK_DUE"),
+    )
     reminders_database_path: Path = Field(
         default=PROJECT_ROOT / "data" / "jarvis_reminders.db",
         validation_alias=AliasChoices("REMINDERS_DATABASE_PATH", "JARVIS_REMINDERS_DATABASE_PATH"),

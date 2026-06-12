@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from datetime import datetime
 
 import pytest
 
@@ -81,6 +82,58 @@ def test_reminder_service_create_list_cancel_complete(tmp_path: Path) -> None:
     assert cancel_result.success is True
 
 
+def test_reminder_service_detects_due_reminders_and_marks_notified(tmp_path: Path) -> None:
+    fixed_now = lambda: datetime(2026, 6, 12, 18, 30)
+    settings = AppSettings(_env_file=None, reminders_database_path=tmp_path / "reminders.db")
+    service = ReminderService(settings, store=ReminderStore(settings.reminders_database_path), now_provider=fixed_now)
+
+    store = service.store
+    due_entry = store.create("stretch", "2026-06-12 18:00")
+    future_entry = store.create("drink water", "2026-06-12 19:00")
+    store.cancel(future_entry.id)
+
+    result = service.check_due_reminders()
+    second_result = service.check_due_reminders()
+
+    assert result.success is True
+    assert [entry.id for entry in result.due_reminders] == [due_entry.id]
+    assert "Due reminders:" in result.text
+    assert store.list_reminders()[0].status == "notified"
+    assert second_result.due_reminders == []
+    assert "No reminders are due right now." in second_result.text
+
+
+def test_reminder_service_ignores_future_reminders(tmp_path: Path) -> None:
+    fixed_now = lambda: datetime(2026, 6, 12, 18, 30)
+    settings = AppSettings(_env_file=None, reminders_database_path=tmp_path / "reminders.db")
+    service = ReminderService(settings, store=ReminderStore(settings.reminders_database_path), now_provider=fixed_now)
+
+    store = service.store
+    store.create("stretch", "2026-06-12 19:00")
+
+    result = service.check_due_reminders()
+
+    assert result.due_reminders == []
+    assert "No reminders are due right now." in result.text
+
+
+def test_reminder_service_ignores_cancelled_and_completed_reminders(tmp_path: Path) -> None:
+    fixed_now = lambda: datetime(2026, 6, 12, 18, 30)
+    settings = AppSettings(_env_file=None, reminders_database_path=tmp_path / "reminders.db")
+    service = ReminderService(settings, store=ReminderStore(settings.reminders_database_path), now_provider=fixed_now)
+
+    store = service.store
+    cancelled_entry = store.create("cancelled", "2026-06-12 18:00")
+    completed_entry = store.create("completed", "2026-06-12 18:00")
+    store.cancel(cancelled_entry.id)
+    store.complete(completed_entry.id)
+
+    result = service.check_due_reminders()
+
+    assert result.due_reminders == []
+    assert "No reminders are due right now." in result.text
+
+
 def test_reminder_disabled_fallback_uses_local_response() -> None:
     from assistant.core import AssistantCore
 
@@ -94,3 +147,23 @@ def test_reminder_disabled_fallback_uses_local_response() -> None:
 
     assert response.source == "local"
     assert response.text == "Reminders are disabled."
+
+
+def test_reminder_cli_check_uses_isolated_database(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys) -> None:
+    reminders_db = tmp_path / "cli_reminders.db"
+    monkeypatch.setenv("REMINDERS_DATABASE_PATH", str(reminders_db))
+    monkeypatch.setenv("REMINDERS_ENABLED", "true")
+    monkeypatch.setenv("REMINDERS_CHECK_ENABLED", "true")
+    monkeypatch.setenv("REMINDERS_SPEAK_DUE", "false")
+
+    service = ReminderService(AppSettings(_env_file=None, reminders_database_path=reminders_db), store=ReminderStore(reminders_db))
+    service.store.create("stretch", "2026-06-11 18:00")
+
+    from main import main
+
+    exit_code = main(["--reminders-check"])
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "Jarvis Reminders Check" in output
+    assert "Due reminders:" in output
