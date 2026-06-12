@@ -655,6 +655,19 @@ Jarvis can open only sites listed in `WEBSITE_ALLOWED_SITES`. If a site is missi
 - Jarvis does not send screenshots or OCR text to OpenAI, and it does not click or type on the screen.
 - Vision logs are saved to `logs/vision.log`.
 
+## Phase 31 Scope
+
+- OpenAI vision analysis for screenshots and local images only after confirmation.
+- Enable with `OPENAI_VISION_ENABLED=true`.
+- OpenAI vision model: `OPENAI_VISION_MODEL=gpt-4o-mini`.
+- Maximum image size: `OPENAI_VISION_MAX_IMAGE_BYTES=5000000`.
+- Run `py main.py --vision-analyze "<image_path>"` to analyze a whitelisted screenshot or test image after confirmation.
+- Assistant commands: `analyze screenshot`, `what is on my screen`, and `describe screen`.
+- Screenshot capture and image upload to OpenAI are both high risk and each require confirmation.
+- Jarvis blocks obvious password, banking, and secret screens before upload.
+- Jarvis does not click, type, or control the screen.
+- Vision analysis logs are saved to `logs/vision.log`, `logs/chat.log`, and `logs/confirmations.log`.
+
 ## Text To Speech Test
 
 ```powershell

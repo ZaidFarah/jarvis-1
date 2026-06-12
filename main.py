@@ -26,7 +26,13 @@ from security.confirmation import ConfirmationResult, confirm_action_cli, format
 from tools.app_launcher import AppLauncher, format_app_launch_report, format_app_launcher_check_report, format_app_resolution_report
 from tools.file_access import FileAccess, format_file_access_check_report, format_file_search_report, format_folder_listing_report
 from tools.website_launcher import WebsiteLauncher, format_website_launcher_check_report, format_website_open_report
-from vision.vision_service import VisionService, format_ocr_result, format_screenshot_result, format_vision_check_report
+from vision.vision_service import (
+    VisionService,
+    format_ocr_result,
+    format_screenshot_result,
+    format_vision_analysis_result,
+    format_vision_check_report,
+)
 from memory.store import SQLiteMemoryStore
 from reminders.service import ReminderService
 from reminders.scheduler import ReminderWatcher
@@ -122,6 +128,12 @@ def main(argv: list[str] | None = None) -> int:
         report = VisionService(settings).run_check()
         print(format_vision_check_report(report))
         return 0 if report.is_successful else 1
+
+    if "--vision-analyze" in args:
+        settings = load_settings()
+        configure_logging(settings, console=False)
+        image_path = _message_after_flag(args, "--vision-analyze")
+        return _run_vision_analyze(settings, image_path)
 
     if "--screenshot-test" in args:
         settings = load_settings()
@@ -551,7 +563,7 @@ def _run_notification_test(settings, message: str) -> int:
 
 
 def _run_screenshot_test(settings) -> int:
-    service = VisionService(settings, confirmation_handler=_cli_confirmation_handler(settings))
+    service = VisionService(settings, confirmation_handler=_cli_confirmation_handler(settings), openai_service=OpenAIService(settings))
     result = service.capture_screenshot()
     print(format_screenshot_result(result), flush=True)
     return 0 if result.success else 1
@@ -561,9 +573,23 @@ def _run_ocr_test(settings, image_path: str) -> int:
     if not image_path:
         print("Please provide an image path for OCR.", flush=True)
         return 1
-    service = VisionService(settings, confirmation_handler=_cli_confirmation_handler(settings))
+    service = VisionService(settings, confirmation_handler=_cli_confirmation_handler(settings), openai_service=OpenAIService(settings))
     result = service.ocr_image(image_path)
     print(format_ocr_result(result), flush=True)
+    return 0 if result.success else 1
+
+
+def _run_vision_analyze(settings, image_path: str) -> int:
+    if not image_path:
+        print("Please provide an image path for vision analysis.", flush=True)
+        return 1
+    service = VisionService(
+        settings,
+        confirmation_handler=_cli_confirmation_handler(settings),
+        openai_service=OpenAIService(settings),
+    )
+    result = service.analyze_image(image_path)
+    print(format_vision_analysis_result(result), flush=True)
     return 0 if result.success else 1
 
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -40,6 +41,18 @@ class OpenAIChatResult:
     success: bool
     text: str
     used_openai: bool
+    safe_error: str | None = None
+
+
+@dataclass(frozen=True)
+class OpenAIVisionResult:
+    success: bool
+    text: str
+    used_openai: bool
+    image_path: Path
+    model: str
+    request_attempted: bool
+    provider_available: bool
     safe_error: str | None = None
 
 
@@ -194,6 +207,92 @@ class OpenAIService:
             self.chat_logger.error("OpenAI chat request failed: {}", safe_error)
             return OpenAIChatResult(success=False, text="", used_openai=False, safe_error=safe_error)
 
+    def analyze_image(
+        self,
+        image_path: Path,
+        prompt: str,
+        system_prompt: str | None = None,
+    ) -> OpenAIVisionResult:
+        path = Path(image_path)
+        if not self.settings.openai_vision_enabled:
+            self.chat_logger.info("OpenAI vision fallback: OpenAI vision disabled")
+            return OpenAIVisionResult(
+                success=False,
+                text="OpenAI vision is disabled.",
+                used_openai=False,
+                image_path=path,
+                model=self.settings.openai_vision_model,
+                request_attempted=False,
+                provider_available=False,
+                safe_error="OpenAI vision is disabled.",
+            )
+
+        if not self.settings.has_openai_api_key:
+            self.chat_logger.warning("OpenAI vision fallback: missing API key")
+            return OpenAIVisionResult(
+                success=False,
+                text="OpenAI is enabled, but OPENAI_API_KEY is not set.",
+                used_openai=False,
+                image_path=path,
+                model=self.settings.openai_vision_model,
+                request_attempted=False,
+                provider_available=False,
+                safe_error="OpenAI is enabled, but OPENAI_API_KEY is not set.",
+            )
+
+        try:
+            image_bytes = path.read_bytes()
+            data_url = self._build_image_data_url(path, image_bytes)
+            client = self.client_factory(api_key=self.settings.openai_api_key)
+            request_prompt = prompt.strip() or "Describe this image clearly and concisely."
+            instructions = system_prompt or self.settings.system_prompt
+            self.chat_logger.info(
+                "Sending OpenAI vision request model={} image_bytes={} prompt_chars={}",
+                self.settings.openai_vision_model,
+                len(image_bytes),
+                len(request_prompt),
+            )
+            response = client.responses.create(
+                model=self.settings.openai_vision_model,
+                instructions=instructions,
+                input=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "input_text", "text": request_prompt},
+                            {"type": "input_image", "image_url": data_url},
+                        ],
+                    }
+                ],
+                max_output_tokens=300,
+            )
+            text = self._extract_response_text(response)
+            if not text:
+                raise RuntimeError("OpenAI returned an empty image analysis response.")
+            self.chat_logger.info("OpenAI vision request succeeded response_chars={}", len(text))
+            return OpenAIVisionResult(
+                success=True,
+                text=text,
+                used_openai=True,
+                image_path=path,
+                model=self.settings.openai_vision_model,
+                request_attempted=True,
+                provider_available=True,
+            )
+        except Exception as exc:
+            safe_error = format_openai_error(exc)
+            self.chat_logger.error("OpenAI vision request failed: {}", safe_error)
+            return OpenAIVisionResult(
+                success=False,
+                text="OpenAI vision is unavailable right now.",
+                used_openai=False,
+                image_path=path,
+                model=self.settings.openai_vision_model,
+                request_attempted=True,
+                provider_available=False,
+                safe_error=safe_error,
+            )
+
     def _report(
         self,
         enabled: bool,
@@ -236,6 +335,22 @@ class OpenAIService:
         if not history:
             return user_text
         return f"{history}\nUser: {user_text}"
+
+    @staticmethod
+    def _build_image_data_url(image_path: Path, image_bytes: bytes) -> str:
+        suffix = image_path.suffix.lower().lstrip(".")
+        mime_type = {
+            "jpg": "image/jpeg",
+            "jpeg": "image/jpeg",
+            "png": "image/png",
+            "webp": "image/webp",
+            "gif": "image/gif",
+            "bmp": "image/bmp",
+            "tif": "image/tiff",
+            "tiff": "image/tiff",
+        }.get(suffix, "image/png")
+        encoded = base64.b64encode(image_bytes).decode("ascii")
+        return f"data:{mime_type};base64,{encoded}"
 
     def _ensure_openai_log_sink(self) -> None:
         global _OPENAI_LOG_SINK_ID

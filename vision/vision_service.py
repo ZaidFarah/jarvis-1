@@ -9,6 +9,7 @@ from loguru import logger
 from config.settings import AppSettings
 from security.confirmation import ConfirmationResult
 from security.permissions import PermissionBroker
+from services.openai_service import OpenAIService, OpenAIVisionResult
 from vision.ocr import OCRExtractionResult, extract_text_from_image
 from vision.screenshot import ScreenshotCaptureError, capture_screenshot_image
 
@@ -27,8 +28,12 @@ class VisionCheckReport:
     enabled: bool
     screenshot_enabled: bool
     ocr_enabled: bool
+    openai_vision_enabled: bool
+    openai_api_key_detected: bool
     screenshot_save_dir: Path
     ocr_provider: str
+    openai_vision_model: str
+    openai_vision_max_image_bytes: int
     screenshot_dependency_available: bool
     ocr_dependency_available: bool
     request_attempted: bool
@@ -83,6 +88,25 @@ class VisionOCRResult:
         return self.success
 
 
+@dataclass(frozen=True)
+class VisionAnalysisResult:
+    enabled: bool
+    success: bool
+    text: str
+    provider: str
+    request_attempted: bool
+    openai_vision_enabled: bool
+    image_path: Path | None = None
+    provider_available: bool = False
+    safe_error: str | None = None
+    log_file: Path | None = None
+    errors: list[str] = field(default_factory=list)
+
+    @property
+    def is_successful(self) -> bool:
+        return self.success
+
+
 class VisionService:
     """Safe vision foundation with manual screenshot and OCR diagnostics only."""
 
@@ -92,12 +116,16 @@ class VisionService:
         confirmation_handler: ConfirmationHandler | None = None,
         screenshot_capturer: ScreenshotCapturer | None = None,
         ocr_reader: OCRReader | None = None,
+        openai_service: OpenAIService | None = None,
+        allowed_image_roots: set[Path] | None = None,
     ) -> None:
         self.settings = settings
         self.confirmation_handler = confirmation_handler
         self.screenshot_capturer = screenshot_capturer
         self.ocr_reader = ocr_reader
+        self.openai_service = openai_service or OpenAIService(self.settings)
         self.permission_broker = PermissionBroker(self.settings)
+        self.allowed_image_roots = {Path(root).expanduser().resolve() for root in (allowed_image_roots or set())}
         self.log_file = self.settings.log_dir / "vision.log"
         self.vision_logger = logger.bind(vision=True)
         self._ensure_vision_log_sink()
@@ -114,31 +142,52 @@ class VisionService:
                 safe_error=text,
                 screenshot_dependency_available=screenshot_support,
                 ocr_dependency_available=ocr_support,
+                openai_vision_enabled=self.settings.openai_vision_enabled,
+                openai_api_key_detected=self.settings.has_openai_api_key,
                 request_attempted=False,
             )
 
+        openai_vision_support = self.settings.openai_vision_enabled and self.settings.has_openai_api_key
+
         if not self.settings.screenshot_enabled and not self.settings.ocr_enabled:
-            text = "Vision is enabled, but screenshot and OCR are disabled."
+            if not openai_vision_support:
+                text = "Vision is enabled, but screenshot, OCR, and OpenAI vision are disabled."
+            else:
+                text = "Vision is enabled, but screenshot and OCR are disabled."
             return self._check_report(
                 success=False,
                 text=text,
                 safe_error=text,
                 screenshot_dependency_available=screenshot_support,
                 ocr_dependency_available=ocr_support,
+                openai_vision_enabled=self.settings.openai_vision_enabled,
+                openai_api_key_detected=self.settings.has_openai_api_key,
                 request_attempted=False,
             )
 
-        success = (not self.settings.screenshot_enabled or screenshot_support) and (
-            not self.settings.ocr_enabled or ocr_support
+        openai_key_ready = not self.settings.openai_vision_enabled or self.settings.has_openai_api_key
+        success = (
+            (not self.settings.screenshot_enabled or screenshot_support)
+            and (not self.settings.ocr_enabled or ocr_support)
+            and openai_key_ready
         )
-        text = "Vision diagnostics completed." if success else "Vision dependencies are missing."
-        safe_error = None if success else text
+        if success:
+            text = "Vision diagnostics completed."
+            safe_error = None
+        elif self.settings.openai_vision_enabled and not self.settings.has_openai_api_key:
+            text = "OpenAI vision is enabled, but OPENAI_API_KEY is not set."
+            safe_error = text
+        else:
+            text = "Vision dependencies are missing."
+            safe_error = text
         return self._check_report(
             success=success,
             text=text,
             safe_error=safe_error,
             screenshot_dependency_available=screenshot_support,
             ocr_dependency_available=ocr_support,
+            openai_vision_enabled=self.settings.openai_vision_enabled,
+            openai_api_key_detected=self.settings.has_openai_api_key,
             request_attempted=False,
         )
 
@@ -205,6 +254,15 @@ class VisionService:
         if not screenshot_result.success or screenshot_result.screenshot_path is None:
             return self._ocr_result_from_screenshot_failure(screenshot_result)
         return self._ocr_image_with_gates(screenshot_result.screenshot_path, already_confirmed=False)
+
+    def analyze_image(self, image_path: str | Path) -> VisionAnalysisResult:
+        return self._analyze_image_with_gates(Path(image_path))
+
+    def analyze_screenshot(self) -> VisionAnalysisResult:
+        screenshot_result = self.capture_screenshot()
+        if not screenshot_result.success or screenshot_result.screenshot_path is None:
+            return self._analysis_result_from_screenshot_failure(screenshot_result)
+        return self._analyze_image_with_gates(screenshot_result.screenshot_path, already_confirmed=False)
 
     def _ocr_image_with_gates(self, image_path: Path, already_confirmed: bool = False) -> VisionOCRResult:
         if not self.settings.vision_enabled or not self.settings.ocr_enabled:
@@ -312,6 +370,157 @@ class VisionService:
             safe_error=screenshot_result.safe_error,
         )
 
+    def _analysis_result_from_screenshot_failure(self, screenshot_result: ScreenshotResult) -> VisionAnalysisResult:
+        return self._analysis_result(
+            success=False,
+            text=screenshot_result.text,
+            image_path=screenshot_result.screenshot_path,
+            request_attempted=screenshot_result.request_attempted,
+            provider_available=False,
+            openai_vision_enabled=self.settings.openai_vision_enabled,
+            safe_error=screenshot_result.safe_error,
+        )
+
+    def _analyze_image_with_gates(self, image_path: Path, already_confirmed: bool = False) -> VisionAnalysisResult:
+        if not self.settings.vision_enabled or not self.settings.openai_vision_enabled:
+            message = self._analysis_disabled_message()
+            return self._analysis_result(
+                success=False,
+                text=message,
+                image_path=image_path,
+                request_attempted=False,
+                provider_available=False,
+                openai_vision_enabled=self.settings.openai_vision_enabled,
+                safe_error=message,
+            )
+
+        normalized_path, path_error = self._validate_analysis_path(image_path)
+        if path_error is not None or normalized_path is None:
+            message = path_error or "The image file cannot be analyzed."
+            return self._analysis_result(
+                success=False,
+                text=message,
+                image_path=image_path,
+                request_attempted=False,
+                provider_available=False,
+                openai_vision_enabled=self.settings.openai_vision_enabled,
+                safe_error=message,
+            )
+
+        if not self._is_supported_image(normalized_path):
+            message = "Only image files can be analyzed."
+            return self._analysis_result(
+                success=False,
+                text=message,
+                image_path=normalized_path,
+                request_attempted=False,
+                provider_available=False,
+                openai_vision_enabled=self.settings.openai_vision_enabled,
+                safe_error=message,
+            )
+
+        if normalized_path.stat().st_size > self.settings.openai_vision_max_image_bytes:
+            message = "The image is too large to analyze safely."
+            return self._analysis_result(
+                success=False,
+                text=message,
+                image_path=normalized_path,
+                request_attempted=False,
+                provider_available=False,
+                openai_vision_enabled=self.settings.openai_vision_enabled,
+                safe_error=message,
+            )
+
+        safety_error = self._screen_image_for_sensitive_content(normalized_path)
+        if safety_error is not None:
+            return self._analysis_result(
+                success=False,
+                text=safety_error,
+                image_path=normalized_path,
+                request_attempted=False,
+                provider_available=False,
+                openai_vision_enabled=self.settings.openai_vision_enabled,
+                safe_error=safety_error,
+            )
+
+        decision = self.permission_broker.check(
+            "send image to openai",
+            description=f"Analyze image {normalized_path.name} with OpenAI vision.",
+        )
+        if not decision.allowed:
+            return self._analysis_result(
+                success=False,
+                text=decision.reason,
+                image_path=normalized_path,
+                request_attempted=False,
+                provider_available=False,
+                openai_vision_enabled=self.settings.openai_vision_enabled,
+                safe_error=decision.reason,
+            )
+
+        if not already_confirmed:
+            if self.confirmation_handler is None:
+                return self._analysis_result(
+                    success=False,
+                    text="Confirmation is required before sending images to OpenAI.",
+                    image_path=normalized_path,
+                    request_attempted=False,
+                    provider_available=False,
+                    openai_vision_enabled=self.settings.openai_vision_enabled,
+                    safe_error="Confirmation handler is unavailable.",
+                )
+
+            confirmation = self.confirmation_handler(decision.action_name, decision.risk_level, decision.description)
+            if not confirmation.approved:
+                reason = confirmation.reason or "Image analysis canceled."
+                return self._analysis_result(
+                    success=False,
+                    text=reason,
+                    image_path=normalized_path,
+                    request_attempted=False,
+                    provider_available=False,
+                    openai_vision_enabled=self.settings.openai_vision_enabled,
+                    safe_error=reason,
+                )
+
+        try:
+            result = self.openai_service.analyze_image(
+                normalized_path,
+                prompt="Describe the visible screen or image content clearly and concisely.",
+                system_prompt=self.settings.system_prompt,
+            )
+            if not result.success:
+                return self._analysis_result(
+                    success=False,
+                    text=result.text,
+                    image_path=normalized_path,
+                    request_attempted=result.request_attempted,
+                    provider_available=result.provider_available,
+                    openai_vision_enabled=self.settings.openai_vision_enabled,
+                    safe_error=result.safe_error,
+                )
+            self.vision_logger.info("OpenAI vision analysis completed path={}", normalized_path)
+            return self._analysis_result(
+                success=True,
+                text=result.text,
+                image_path=normalized_path,
+                request_attempted=True,
+                provider_available=True,
+                openai_vision_enabled=self.settings.openai_vision_enabled,
+            )
+        except Exception as exc:
+            safe_error = format_vision_error(exc)
+            self.vision_logger.error("OpenAI vision analysis failed: {}", safe_error)
+            return self._analysis_result(
+                success=False,
+                text="OpenAI vision is unavailable right now.",
+                image_path=normalized_path,
+                request_attempted=True,
+                provider_available=False,
+                openai_vision_enabled=self.settings.openai_vision_enabled,
+                safe_error=safe_error,
+            )
+
     def _check_report(
         self,
         success: bool,
@@ -319,6 +528,8 @@ class VisionService:
         safe_error: str | None,
         screenshot_dependency_available: bool,
         ocr_dependency_available: bool,
+        openai_vision_enabled: bool,
+        openai_api_key_detected: bool,
         request_attempted: bool,
     ) -> VisionCheckReport:
         errors = [safe_error] if safe_error else []
@@ -326,8 +537,12 @@ class VisionService:
             enabled=self.settings.vision_enabled,
             screenshot_enabled=self.settings.screenshot_enabled,
             ocr_enabled=self.settings.ocr_enabled,
+            openai_vision_enabled=openai_vision_enabled,
+            openai_api_key_detected=openai_api_key_detected,
             screenshot_save_dir=self.settings.screenshot_save_dir,
             ocr_provider=self.settings.ocr_provider,
+            openai_vision_model=self.settings.openai_vision_model,
+            openai_vision_max_image_bytes=self.settings.openai_vision_max_image_bytes,
             screenshot_dependency_available=screenshot_dependency_available,
             ocr_dependency_available=ocr_dependency_available,
             request_attempted=request_attempted,
@@ -386,11 +601,43 @@ class VisionService:
             errors=errors,
         )
 
+    def _analysis_result(
+        self,
+        success: bool,
+        text: str,
+        image_path: Path | None,
+        request_attempted: bool,
+        provider_available: bool,
+        openai_vision_enabled: bool,
+        safe_error: str | None = None,
+    ) -> VisionAnalysisResult:
+        errors = [safe_error] if safe_error else []
+        return VisionAnalysisResult(
+            enabled=self.settings.vision_enabled,
+            success=success,
+            text=text,
+            provider=self.settings.openai_vision_model,
+            request_attempted=request_attempted,
+            openai_vision_enabled=openai_vision_enabled,
+            image_path=image_path,
+            provider_available=provider_available,
+            safe_error=safe_error,
+            log_file=self.log_file,
+            errors=errors,
+        )
+
     def _screenshot_disabled_message(self) -> str:
         return "Screenshot capture is disabled. Enable VISION_ENABLED and SCREENSHOT_ENABLED first."
 
     def _ocr_disabled_message(self) -> str:
         return "OCR is disabled. Enable VISION_ENABLED and OCR_ENABLED first."
+
+    def _analysis_disabled_message(self) -> str:
+        if not self.settings.vision_enabled:
+            return "Vision is disabled. Enable VISION_ENABLED first."
+        if not self.settings.openai_vision_enabled:
+            return "OpenAI vision is disabled. Enable OPENAI_VISION_ENABLED first."
+        return "Vision analysis is disabled."
 
     @staticmethod
     def _screenshot_dependency_available() -> bool:
@@ -408,6 +655,107 @@ class VisionService:
         except Exception:
             return False
         return True
+
+    @staticmethod
+    def _image_dependency_available() -> bool:
+        try:
+            from PIL import Image  # noqa: F401
+        except Exception:
+            return False
+        return True
+
+    @staticmethod
+    def _is_supported_image(image_path: Path) -> bool:
+        try:
+            from PIL import Image
+        except Exception:
+            return False
+
+        try:
+            with Image.open(image_path) as image:
+                image.verify()
+            return True
+        except Exception:
+            return False
+
+    def _validate_analysis_path(self, image_path: Path) -> tuple[Path | None, str | None]:
+        candidate = Path(image_path).expanduser()
+        try:
+            resolved = candidate.resolve(strict=False)
+        except Exception:
+            return None, "The image file cannot be resolved safely."
+
+        path_safety_error = self._scan_text_for_sensitive_keywords(str(resolved))
+        if path_safety_error is not None:
+            return None, path_safety_error
+
+        if not self._is_path_allowed(resolved):
+            return None, "The image path is not in an allowed location."
+
+        if not resolved.exists() or not resolved.is_file():
+            return None, "The image file does not exist."
+
+        return resolved, None
+
+    def _is_path_allowed(self, path: Path) -> bool:
+        allowed_roots = {self.settings.screenshot_save_dir.resolve(), *self.allowed_image_roots}
+        if not allowed_roots:
+            return False
+
+        for root in allowed_roots:
+            try:
+                if path == root or path.is_relative_to(root):
+                    return True
+            except Exception:
+                if str(path).startswith(str(root)):
+                    return True
+        return False
+
+    def _screen_image_for_sensitive_content(self, image_path: Path) -> str | None:
+        path_keywords = self._scan_text_for_sensitive_keywords(str(image_path))
+        if path_keywords is not None:
+            return path_keywords
+
+        if not self._ocr_dependency_available():
+            return None
+
+        try:
+            extracted = extract_text_from_image(image_path, max_output_chars=min(self.settings.ocr_max_output_chars, 10000), reader=self.ocr_reader)
+        except Exception:
+            return None
+
+        if extracted.safe_error is not None and not extracted.success:
+            return None
+
+        return self._scan_text_for_sensitive_keywords(extracted.text)
+
+    @staticmethod
+    def _scan_text_for_sensitive_keywords(text: str) -> str | None:
+        normalized = " ".join(text.lower().split())
+        keywords = (
+            "password",
+            "passcode",
+            "pin",
+            "bank",
+            "banking",
+            "credit card",
+            "debit card",
+            "card number",
+            "account number",
+            "routing number",
+            "ssn",
+            "social security",
+            "otp",
+            "one-time code",
+            "verification code",
+            "cvv",
+            "secret",
+            "login",
+            "sign in",
+        )
+        if any(keyword in normalized for keyword in keywords):
+            return "The image appears to contain sensitive content and will not be analyzed."
+        return None
 
     def _ensure_vision_log_sink(self) -> None:
         global _VISION_LOG_FILE, _VISION_LOG_SINK_ID
@@ -441,8 +789,12 @@ def format_vision_check_report(report: VisionCheckReport) -> str:
         f"Vision enabled: {'yes' if report.enabled else 'no'}",
         f"Screenshot enabled: {'yes' if report.screenshot_enabled else 'no'}",
         f"OCR enabled: {'yes' if report.ocr_enabled else 'no'}",
+        f"OpenAI vision enabled: {'yes' if report.openai_vision_enabled else 'no'}",
+        f"OpenAI API key detected: {'yes' if report.openai_api_key_detected else 'no'}",
         f"Screenshot save dir: {report.screenshot_save_dir}",
         f"OCR provider: {report.ocr_provider}",
+        f"OpenAI vision model: {report.openai_vision_model}",
+        f"OpenAI vision max image bytes: {report.openai_vision_max_image_bytes}",
         f"Screenshot dependency available: {'yes' if report.screenshot_dependency_available else 'no'}",
         f"OCR dependency available: {'yes' if report.ocr_dependency_available else 'no'}",
         f"Request attempted: {'yes' if report.request_attempted else 'no'}",
@@ -485,6 +837,26 @@ def format_ocr_result(result: VisionOCRResult) -> str:
         f"Request attempted: {'yes' if result.request_attempted else 'no'}",
         f"Provider available: {'yes' if result.provider_available else 'no'}",
         f"Output truncated: {'yes' if result.output_truncated else 'no'}",
+        f"Diagnostic log: {result.log_file}",
+    ]
+    if result.text:
+        lines.extend(["", "Result:", f"  {result.text}"])
+    if result.safe_error:
+        lines.extend(["", "Error:", f"  {result.safe_error}"])
+    if result.image_path:
+        lines.extend(["", f"Image path: {result.image_path}"])
+    return "\n".join(lines)
+
+
+def format_vision_analysis_result(result: VisionAnalysisResult) -> str:
+    lines = [
+        "Jarvis Vision Analysis",
+        "======================",
+        f"Vision enabled: {'yes' if result.enabled else 'no'}",
+        f"OpenAI vision enabled: {'yes' if result.openai_vision_enabled else 'no'}",
+        f"Provider: {result.provider}",
+        f"Request attempted: {'yes' if result.request_attempted else 'no'}",
+        f"Provider available: {'yes' if result.provider_available else 'no'}",
         f"Diagnostic log: {result.log_file}",
     ]
     if result.text:

@@ -83,7 +83,11 @@ class AssistantCore:
             self.reminder_service = ReminderService(self.settings)
         else:
             self.reminder_service = None
-        self.vision_service = vision_service or VisionService(self.settings, confirmation_handler=confirmation_handler)
+        self.vision_service = vision_service or VisionService(
+            self.settings,
+            confirmation_handler=confirmation_handler,
+            openai_service=self.openai_service,
+        )
         self.conversation_history = ConversationHistory(
             enabled=self.settings.conversation_history_enabled,
             max_messages=self.settings.conversation_history_max_messages,
@@ -227,6 +231,8 @@ class AssistantCore:
             return self._take_screenshot()
         if normalized == "read screen text":
             return self._read_screen_text()
+        if normalized in {"analyze screenshot", "what is on my screen", "describe screen"}:
+            return self._analyze_screenshot()
         return None
 
     def _take_screenshot(self) -> AssistantResponse:
@@ -246,6 +252,18 @@ class AssistantCore:
             return AssistantResponse(text="OCR is disabled.", accepted=True, source="local")
 
         result = self.vision_service.read_screen_text()
+        return AssistantResponse(
+            text=result.text,
+            accepted=result.success,
+            source="vision" if result.success else "local",
+            error=result.safe_error,
+        )
+
+    def _analyze_screenshot(self) -> AssistantResponse:
+        if self.vision_service is None or not self.settings.vision_enabled or not self.settings.openai_vision_enabled:
+            return AssistantResponse(text="OpenAI vision analysis is disabled.", accepted=True, source="local")
+
+        result = self.vision_service.analyze_screenshot()
         return AssistantResponse(
             text=result.text,
             accepted=result.success,

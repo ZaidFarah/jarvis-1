@@ -384,6 +384,23 @@ class AppSettings(BaseSettings):
         le=100_000,
         validation_alias=AliasChoices("OCR_MAX_OUTPUT_CHARS", "JARVIS_OCR_MAX_OUTPUT_CHARS"),
     )
+    openai_vision_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("OPENAI_VISION_ENABLED", "JARVIS_OPENAI_VISION_ENABLED"),
+    )
+    openai_vision_model: str = Field(
+        default="gpt-4o-mini",
+        validation_alias=AliasChoices("OPENAI_VISION_MODEL", "JARVIS_OPENAI_VISION_MODEL"),
+    )
+    openai_vision_max_image_bytes: int = Field(
+        default=5_000_000,
+        ge=1024,
+        le=50_000_000,
+        validation_alias=AliasChoices(
+            "OPENAI_VISION_MAX_IMAGE_BYTES",
+            "JARVIS_OPENAI_VISION_MAX_IMAGE_BYTES",
+        ),
+    )
     openai_enabled: bool = Field(
         default=False,
         validation_alias=AliasChoices("OPENAI_ENABLED", "JARVIS_OPENAI_ENABLED"),
@@ -608,6 +625,14 @@ class AppSettings(BaseSettings):
         cleaned = value.strip()
         if not cleaned:
             raise ValueError("OpenAI model cannot be empty.")
+        return cleaned
+
+    @field_validator("openai_vision_model")
+    @classmethod
+    def normalize_openai_vision_model(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("OpenAI vision model cannot be empty.")
         return cleaned
 
     @field_validator("system_prompt")

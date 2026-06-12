@@ -98,6 +98,9 @@ def test_vision_settings_defaults_are_safe() -> None:
     assert settings.vision_enabled is False
     assert settings.screenshot_enabled is False
     assert settings.ocr_enabled is False
+    assert settings.openai_vision_enabled is False
+    assert settings.openai_vision_model == "gpt-4o-mini"
+    assert settings.openai_vision_max_image_bytes == 5000000
     assert settings.screenshot_save_dir.name == "screenshots"
     assert settings.ocr_provider == "tesseract"
     assert settings.ocr_max_output_chars == 4000
@@ -107,6 +110,9 @@ def test_vision_settings_read_environment(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setenv("VISION_ENABLED", "true")
     monkeypatch.setenv("SCREENSHOT_ENABLED", "true")
     monkeypatch.setenv("OCR_ENABLED", "true")
+    monkeypatch.setenv("OPENAI_VISION_ENABLED", "true")
+    monkeypatch.setenv("OPENAI_VISION_MODEL", "gpt-4o-mini")
+    monkeypatch.setenv("OPENAI_VISION_MAX_IMAGE_BYTES", "123456")
     monkeypatch.setenv("SCREENSHOT_SAVE_DIR", "logs/custom-screenshots")
     monkeypatch.setenv("OCR_PROVIDER", "tesseract")
     monkeypatch.setenv("OCR_MAX_OUTPUT_CHARS", "1234")
@@ -116,6 +122,9 @@ def test_vision_settings_read_environment(monkeypatch: pytest.MonkeyPatch) -> No
     assert settings.vision_enabled is True
     assert settings.screenshot_enabled is True
     assert settings.ocr_enabled is True
+    assert settings.openai_vision_enabled is True
+    assert settings.openai_vision_model == "gpt-4o-mini"
+    assert settings.openai_vision_max_image_bytes == 123456
     assert settings.screenshot_save_dir.as_posix().endswith("logs/custom-screenshots")
     assert settings.ocr_provider == "tesseract"
     assert settings.ocr_max_output_chars == 1234

@@ -5,10 +5,11 @@ from vision.screenshot import ScreenshotCaptureError, capture_screenshot_image
 from vision.vision_service import (
     ScreenshotResult,
     VisionCheckReport,
+    VisionAnalysisResult,
     VisionOCRResult,
     VisionService,
     format_ocr_result,
     format_screenshot_result,
+    format_vision_analysis_result,
     format_vision_check_report,
 )
-
