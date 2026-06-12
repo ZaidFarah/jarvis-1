@@ -465,7 +465,7 @@ The notification test sends a one-off toast using the configured provider when n
 ## Phase 17 Scope
 
 - Safe local application launcher for whitelisted commands only.
-- CLI commands: `py main.py --app-launcher-check` and `py main.py --launch-app notepad`.
+- CLI commands: `py main.py --app-launcher-check`, `py main.py --resolve-app notepad`, and `py main.py --launch-app notepad`.
 - Assistant commands: `open notepad`, `launch calculator`, `open edge`, `open vscode`, and `open docker`.
 - Launcher settings: `APP_LAUNCHER_ENABLED=true`, `APP_LAUNCHER_ALLOWED_APPS=notepad=notepad.exe,calculator=calc.exe,chrome=,edge=,vscode=,docker=`.
 - Launcher logs are saved to `logs/app_launcher.log`.
@@ -477,6 +477,14 @@ py main.py --app-launcher-check
 ```
 
 The app launcher check prints whether the launcher is enabled, whether the platform is supported, and which apps are allowed. It never executes arbitrary commands.
+
+## Resolve App
+
+```powershell
+py main.py --resolve-app notepad
+```
+
+Jarvis resolves the whitelisted app to a concrete executable path or reports that the app cannot be resolved. It does not launch the app.
 
 ## Launch App
 

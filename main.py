@@ -11,7 +11,7 @@ from integrations.weather_service import WeatherService, format_weather_check_re
 from services.notification_service import NotificationService, format_notification_check_report
 from services.logging_service import configure_logging
 from services.openai_service import OpenAIService, format_openai_check_report
-from tools.app_launcher import AppLauncher, format_app_launch_report, format_app_launcher_check_report
+from tools.app_launcher import AppLauncher, format_app_launch_report, format_app_launcher_check_report, format_app_resolution_report
 from memory.store import SQLiteMemoryStore
 from reminders.service import ReminderService
 from reminders.scheduler import ReminderWatcher
@@ -105,6 +105,14 @@ def main(argv: list[str] | None = None) -> int:
         report = AppLauncher(settings).run_check()
         print(format_app_launcher_check_report(report))
         return 0 if report.is_successful else 1
+
+    if "--resolve-app" in args:
+        settings = load_settings()
+        configure_logging(settings, console=False)
+        app_name = _message_after_flag(args, "--resolve-app") or "notepad"
+        result = AppLauncher(settings).resolve_only(app_name)
+        print(format_app_resolution_report(result))
+        return 0 if result.resolved_path else 1
 
     if "--launch-app" in args:
         settings = load_settings()

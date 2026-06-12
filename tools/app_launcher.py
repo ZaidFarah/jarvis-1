@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import shlex
 import subprocess
+import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
@@ -30,6 +31,22 @@ class AppLauncherCheckReport:
 
 
 @dataclass(frozen=True)
+class AppResolutionResult:
+    enabled: bool
+    app_name: str
+    configured_command: str
+    resolved_command: str | None
+    resolved_path: str | None
+    launch_method: str | None
+    allowed: bool
+    configured: bool
+    platform_supported: bool
+    log_file: Path
+    safe_error: str | None = None
+    errors: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
 class AppLaunchResult:
     enabled: bool
     platform_supported: bool
@@ -39,6 +56,8 @@ class AppLaunchResult:
     request_attempted: bool
     launched: bool
     command: str | None
+    resolved_path: str | None
+    launch_method: str | None
     log_file: Path
     safe_error: str | None = None
     fallback_reason: str | None = None
@@ -79,6 +98,32 @@ class AppLauncher:
     def allowed_apps(self) -> dict[str, str]:
         return self.settings.app_launcher_allowed_apps_map
 
+    def resolve_app(self, app_name: str) -> AppResolutionResult:
+        cleaned_name = self._clean_app_name(app_name)
+        configured_command = self.allowed_apps.get(cleaned_name, "")
+        resolved_path, launch_method = self._resolve_command(cleaned_name, configured_command)
+        allowed = cleaned_name in self.allowed_apps
+        configured = allowed
+        safe_error: str | None = None
+        if not allowed:
+            safe_error = f"App '{cleaned_name}' is not allowed."
+        elif resolved_path is None:
+            safe_error = f"App '{cleaned_name}' is not configured."
+        return AppResolutionResult(
+            enabled=self.enabled,
+            app_name=cleaned_name,
+            configured_command=configured_command,
+            resolved_command=resolved_path,
+            resolved_path=resolved_path,
+            launch_method=launch_method,
+            allowed=allowed,
+            configured=configured,
+            platform_supported=self.platform_supported,
+            log_file=self.log_file,
+            safe_error=safe_error,
+            errors=[safe_error] if safe_error else [],
+        )
+
     def run_check(self) -> AppLauncherCheckReport:
         self.app_launcher_logger.info(
             "Running app launcher diagnostic enabled={} platform_supported={}",
@@ -96,17 +141,26 @@ class AppLauncher:
         return self._check_report(safe_error=None, errors=[])
 
     def launch_app(self, app_name: str) -> AppLaunchResult:
-        cleaned_name = self._clean_app_name(app_name)
-        self.app_launcher_logger.info("Launch request app={}", cleaned_name)
+        resolution = self.resolve_app(app_name)
+        cleaned_name = resolution.app_name
+        self.app_launcher_logger.info(
+            "Launch request app={} configured_command={} resolved_path={} method={}",
+            cleaned_name,
+            resolution.configured_command or "[not configured]",
+            resolution.resolved_path or "[unresolved]",
+            resolution.launch_method or "[none]",
+        )
 
         if not self.enabled:
             return self._launch_result(
                 app_name=cleaned_name,
-                allowed=False,
-                configured=False,
+                allowed=resolution.allowed,
+                configured=resolution.configured,
                 request_attempted=False,
                 launched=False,
-                command=None,
+                command=resolution.configured_command or None,
+                resolved_path=resolution.resolved_path,
+                launch_method=resolution.launch_method,
                 safe_error="App launcher is disabled.",
                 fallback_reason="App launcher is disabled.",
                 errors=[],
@@ -116,51 +170,67 @@ class AppLauncher:
             message = "App launcher is only available on Windows."
             return self._launch_result(
                 app_name=cleaned_name,
-                allowed=False,
-                configured=False,
+                allowed=resolution.allowed,
+                configured=resolution.configured,
                 request_attempted=False,
                 launched=False,
-                command=None,
+                command=resolution.configured_command or None,
+                resolved_path=resolution.resolved_path,
+                launch_method=resolution.launch_method,
                 safe_error=message,
                 fallback_reason=message,
                 errors=[message],
             )
 
-        if cleaned_name not in self.allowed_apps:
-            message = f"App '{cleaned_name}' is not allowed."
+        if not resolution.allowed:
+            message = resolution.safe_error or f"App '{cleaned_name}' is not allowed."
             return self._launch_result(
                 app_name=cleaned_name,
                 allowed=False,
-                configured=False,
+                configured=resolution.configured,
                 request_attempted=False,
                 launched=False,
-                command=None,
+                command=resolution.configured_command or None,
+                resolved_path=resolution.resolved_path,
+                launch_method=resolution.launch_method,
                 safe_error=message,
                 fallback_reason=message,
                 errors=[message],
             )
 
-        command = self.allowed_apps[cleaned_name].strip()
-        if not command:
-            message = f"App '{cleaned_name}' is not configured."
+        command = resolution.configured_command.strip()
+        resolved_path = resolution.resolved_path
+        launch_method = resolution.launch_method
+        if resolved_path is None:
+            message = resolution.safe_error or f"App '{cleaned_name}' could not be resolved."
             return self._launch_result(
                 app_name=cleaned_name,
                 allowed=True,
-                configured=False,
+                configured=resolution.configured,
                 request_attempted=False,
                 launched=False,
-                command=None,
+                command=command,
+                resolved_path=None,
+                launch_method=None,
                 safe_error=message,
                 fallback_reason=message,
                 errors=[message],
             )
 
         try:
-            command_parts = shlex.split(command, posix=False)
+            command_parts = [resolved_path]
+            if command.lower().endswith((".cmd", ".bat")) and len(shlex.split(command, posix=False)) > 1:
+                command_parts = shlex.split(command, posix=False)
             if not command_parts:
                 raise ValueError("Configured launch command is empty.")
             self.popen_factory(command_parts, shell=False)
-            self.app_launcher_logger.info("Launched app={} command={}", cleaned_name, command)
+            self.app_launcher_logger.info(
+                "Launched app={} command={} resolved_path={} method={}",
+                cleaned_name,
+                command,
+                resolved_path,
+                launch_method or "subprocess.Popen",
+            )
             return self._launch_result(
                 app_name=cleaned_name,
                 allowed=True,
@@ -168,19 +238,21 @@ class AppLauncher:
                 request_attempted=True,
                 launched=True,
                 command=command,
+                resolved_path=resolved_path,
+                launch_method=launch_method or "subprocess.Popen",
                 safe_error=None,
                 fallback_reason=None,
                 errors=[],
             )
         except OSError as exc:
             try:
-                import ctypes
-
-                shell_execute = ctypes.windll.shell32.ShellExecuteW  # type: ignore[attr-defined]
-                result_code = shell_execute(None, "open", command, None, None, 1)
-                if result_code <= 32:
-                    raise OSError(f"ShellExecuteW failed with code {result_code}.")
-                self.app_launcher_logger.info("Launched app via ShellExecuteW app={} command={}", cleaned_name, command)
+                os.startfile(resolved_path)
+                self.app_launcher_logger.info(
+                    "Launched app via os.startfile app={} command={} resolved_path={}",
+                    cleaned_name,
+                    command,
+                    resolved_path,
+                )
                 return self._launch_result(
                     app_name=cleaned_name,
                     allowed=True,
@@ -188,8 +260,10 @@ class AppLauncher:
                     request_attempted=True,
                     launched=True,
                     command=command,
+                    resolved_path=resolved_path,
+                    launch_method="os.startfile",
                     safe_error=None,
-                    fallback_reason="Used Windows shell execute fallback.",
+                    fallback_reason="Used Windows startfile fallback.",
                     errors=[],
                 )
             except Exception as fallback_exc:  # pragma: no cover - defensive boundary
@@ -202,6 +276,8 @@ class AppLauncher:
                     request_attempted=True,
                     launched=False,
                     command=command,
+                    resolved_path=resolved_path,
+                    launch_method=launch_method,
                     safe_error=safe_error,
                     fallback_reason=safe_error,
                     errors=[safe_error],
@@ -216,10 +292,23 @@ class AppLauncher:
                 request_attempted=True,
                 launched=False,
                 command=command,
+                resolved_path=resolved_path,
+                launch_method=launch_method,
                 safe_error=safe_error,
                 fallback_reason=safe_error,
                 errors=[safe_error],
             )
+
+    def resolve_only(self, app_name: str) -> AppResolutionResult:
+        resolution = self.resolve_app(app_name)
+        self.app_launcher_logger.info(
+            "Resolved app={} configured_command={} resolved_path={} method={}",
+            resolution.app_name,
+            resolution.configured_command or "[not configured]",
+            resolution.resolved_path or "[unresolved]",
+            resolution.launch_method or "[none]",
+        )
+        return resolution
 
     def _check_report(self, safe_error: str | None, errors: list[str]) -> AppLauncherCheckReport:
         return AppLauncherCheckReport(
@@ -239,6 +328,8 @@ class AppLauncher:
         request_attempted: bool,
         launched: bool,
         command: str | None,
+        resolved_path: str | None,
+        launch_method: str | None,
         safe_error: str | None,
         fallback_reason: str | None,
         errors: list[str],
@@ -252,6 +343,8 @@ class AppLauncher:
             request_attempted=request_attempted,
             launched=launched,
             command=command,
+            resolved_path=resolved_path,
+            launch_method=launch_method,
             log_file=self.log_file,
             safe_error=safe_error,
             fallback_reason=fallback_reason,
@@ -279,6 +372,45 @@ class AppLauncher:
     def _clean_app_name(app_name: str) -> str:
         cleaned = " ".join(app_name.strip().split()).lower()
         return cleaned
+
+    def _resolve_command(self, app_name: str, configured_command: str) -> tuple[str | None, str | None]:
+        candidates = self._resolution_candidates(app_name, configured_command)
+        if not candidates:
+            return None, None
+
+        for method, candidate in candidates:
+            if not candidate:
+                continue
+            if os.path.isabs(candidate) and Path(candidate).exists():
+                return candidate, method
+            if os.path.sep in candidate and Path(candidate).exists():
+                return candidate, method
+            found = shutil.which(candidate)
+            if found:
+                return found, method
+        return None, None
+
+    @staticmethod
+    def _resolution_candidates(app_name: str, configured_command: str) -> list[tuple[str, str]]:
+        command = configured_command.strip()
+        candidates: list[tuple[str, str]] = []
+        if command:
+            if command.lower() == "notepad.exe":
+                candidates.append(("subprocess.Popen", command))
+            elif command.lower() == "calc.exe":
+                candidates.append(("subprocess.Popen", command))
+            else:
+                candidates.append(("subprocess.Popen", command))
+
+        if app_name == "edge":
+            candidates.extend([("shutil.which", "msedge.exe"), ("shutil.which", "msedge")])
+        elif app_name == "chrome":
+            candidates.extend([("shutil.which", "chrome.exe"), ("shutil.which", "chrome")])
+        elif app_name == "vscode":
+            candidates.extend([("shutil.which", "code.cmd"), ("shutil.which", "Code.exe"), ("shutil.which", "code")])
+        elif app_name == "docker":
+            candidates.extend([("shutil.which", "Docker Desktop.exe"), ("shutil.which", "Docker Desktop"), ("shutil.which", "docker")])
+        return candidates
 
 
 def format_app_launcher_error(error: Exception) -> str:
@@ -319,10 +451,35 @@ def format_app_launch_report(result: AppLaunchResult) -> str:
         f"Launched: {_yes_no(result.launched)}",
         f"Diagnostic log: {result.log_file}",
     ]
+    if result.resolved_path:
+        lines.extend(["", f"Resolved path: {result.resolved_path}"])
+    if result.launch_method:
+        lines.extend(["", f"Launch method: {result.launch_method}"])
     if result.command:
         lines.extend(["", f"Command: {result.command}"])
     if result.fallback_reason:
         lines.extend(["", "Fallback reason:", f"  {result.fallback_reason}"])
+    if result.safe_error:
+        lines.extend(["", "Error:", f"  {result.safe_error}"])
+    return "\n".join(lines)
+
+
+def format_app_resolution_report(result: AppResolutionResult) -> str:
+    lines = [
+        "Jarvis App Resolution",
+        "=====================",
+        f"App launcher enabled: {_yes_no(result.enabled)}",
+        f"Platform supported: {_yes_no(result.platform_supported)}",
+        f"App: {result.app_name}",
+        f"Allowed: {_yes_no(result.allowed)}",
+        f"Configured: {_yes_no(result.configured)}",
+        f"Configured command: {result.configured_command or '[not configured]'}",
+        f"Diagnostic log: {result.log_file}",
+    ]
+    if result.resolved_path:
+        lines.extend(["", f"Resolved path: {result.resolved_path}"])
+    if result.launch_method:
+        lines.extend(["", f"Launch method: {result.launch_method}"])
     if result.safe_error:
         lines.extend(["", "Error:", f"  {result.safe_error}"])
     return "\n".join(lines)

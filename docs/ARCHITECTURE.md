@@ -120,4 +120,4 @@ Phase 15 adds only a local reminder watcher that runs while Jarvis is active. It
 
 Phase 16 adds only optional Windows toast notifications. It does not add a startup service, background daemon, Gmail, Calendar, browser automation, desktop automation, file tools, vision, or LangGraph.
 
-Phase 17 adds only a whitelisted local application launcher. It does not execute arbitrary shell commands, expose raw paths, add desktop automation, browser automation beyond whitelisted app launches, Gmail, Calendar, file tools, vision, startup services, or LangGraph.
+Phase 17 adds only a whitelisted local application launcher. It does not execute arbitrary shell commands, expose raw paths, add desktop automation, browser automation beyond whitelisted app launches, Gmail, Calendar, file tools, vision, startup services, or LangGraph. Phase 17.5 improves resolution and launch reliability by preferring `subprocess.Popen` for simple executables and only using `os.startfile` for whitelisted resolved paths.
