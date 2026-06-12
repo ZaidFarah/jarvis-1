@@ -8,14 +8,18 @@ from config.settings import AppSettings
 from integrations.gmail_service import (
     GmailAuthReport,
     GmailDraftResult,
+    GmailDraftListResult,
     GmailCheckReport,
     GmailService,
     GmailUnreadEmail,
     GmailUnreadResult,
+    GmailSendDraftResult,
+    format_gmail_draft_list_report,
     format_gmail_draft_report,
     format_gmail_auth_report,
     format_gmail_check_report,
     format_gmail_error,
+    format_gmail_send_draft_report,
     format_gmail_unread_report,
 )
 
@@ -24,6 +28,7 @@ class FakeGmailClient:
     def __init__(self, messages: list[dict[str, object]]) -> None:
         self.messages = messages
         self.calls: list[int] = []
+        self.drafts: list[dict[str, object]] = []
 
     def list_unread_messages(self, max_results: int) -> list[dict[str, object]]:
         self.calls.append(max_results)
@@ -32,6 +37,14 @@ class FakeGmailClient:
     def create_draft(self, to_address: str, subject: str, body: str) -> dict[str, object]:
         self.calls.append(len(body))
         return {"id": "draft-1", "message": {"id": "msg-1"}}
+
+    def list_drafts(self, max_results: int) -> list[dict[str, object]]:
+        self.calls.append(max_results)
+        return self.drafts
+
+    def send_draft(self, draft_id: str) -> dict[str, object]:
+        self.calls.append(len(draft_id))
+        return {"id": "msg-2", "message": {"id": "msg-2"}}
 
 
 def test_gmail_disabled_fallback(tmp_path: Path) -> None:
@@ -169,14 +182,48 @@ def test_gmail_reports_do_not_leak_token_or_secret_paths(tmp_path: Path) -> None
         safe_error="Google client secret file is missing.",
         log_file=tmp_path / "gmail.log",
     )
+    draft_list_report = GmailDraftListResult(
+        enabled=True,
+        success=False,
+        text="Gmail draft listing is disabled.",
+        provider="google_gmail",
+        request_attempted=False,
+        authenticated=False,
+        client_secret_detected=False,
+        token_detected=False,
+        draft_list_enabled=False,
+        drafts=[],
+        safe_error="Google client secret file is missing.",
+        log_file=tmp_path / "gmail.log",
+    )
+    send_report = GmailSendDraftResult(
+        enabled=True,
+        success=False,
+        text="Gmail draft sending is disabled.",
+        provider="google_gmail",
+        request_attempted=False,
+        authenticated=False,
+        client_secret_detected=False,
+        token_detected=False,
+        send_enabled=False,
+        draft_id="draft-1",
+        safe_error="Google client secret file is missing.",
+        log_file=tmp_path / "gmail.log",
+    )
 
     auth_text = format_gmail_auth_report(auth_report)
     draft_text = format_gmail_draft_report(draft_report)
+    draft_list_text = format_gmail_draft_list_report(draft_list_report)
+    send_text = format_gmail_send_draft_report(send_report)
 
     assert "token_gmail.json" not in auth_text
     assert "google_client_secret.json" not in auth_text
     assert "token_gmail.json" not in draft_text
     assert "google_client_secret.json" not in draft_text
+    assert "token_gmail.json" not in draft_list_text
+    assert "google_client_secret.json" not in draft_list_text
+    assert "token_gmail.json" not in send_text
+    assert "google_client_secret.json" not in send_text
 
 
 def test_gmail_draft_disabled_fallback(tmp_path: Path) -> None:
@@ -256,6 +303,104 @@ def test_gmail_draft_success_with_mocked_client(tmp_path: Path) -> None:
     assert "Draft ID: draft-1" in format_gmail_draft_report(result)
 
 
+def test_gmail_draft_list_disabled_fallback(tmp_path: Path) -> None:
+    settings = AppSettings(_env_file=None, gmail_enabled=True, gmail_send_draft_enabled=False, log_dir=tmp_path)
+    service = GmailService(settings)
+
+    result = service.list_drafts()
+
+    assert result.success is False
+    assert "Gmail draft listing is disabled" in result.text
+
+
+def test_gmail_draft_list_success_with_mocked_client(tmp_path: Path) -> None:
+    secret = tmp_path / "google_client_secret.json"
+    token = tmp_path / "token_gmail.json"
+    secret.write_text("{}", encoding="utf-8")
+    token.write_text("{}", encoding="utf-8")
+    client = FakeGmailClient([])
+    client.drafts = [
+        {
+            "id": "draft-1",
+            "message": {
+                "payload": {"headers": [{"name": "To", "value": "recipient@example.com"}, {"name": "Subject", "value": "Hello"}]},
+                "snippet": "Draft preview",
+            },
+        }
+    ]
+    settings = AppSettings(_env_file=None, gmail_enabled=True, gmail_send_draft_enabled=True, gmail_client_secret_path=secret, gmail_token_path=token, log_dir=tmp_path)
+    service = GmailService(settings, client_factory=lambda _: client)
+
+    class Creds:
+        def has_scopes(self, scopes):
+            del scopes
+            return True
+
+    service._load_credentials = lambda scopes=None: Creds()  # type: ignore[method-assign]
+
+    result = service.list_drafts()
+
+    assert result.success is True
+    assert len(result.drafts) == 1
+    assert result.drafts[0].draft_id == "draft-1"
+    assert result.drafts[0].recipient == "recipient@example.com"
+    assert "Saved Gmail drafts (1):" in format_gmail_draft_list_report(result)
+
+
+def test_gmail_send_draft_invalid_id_rejected(tmp_path: Path) -> None:
+    settings = AppSettings(_env_file=None, gmail_enabled=True, gmail_send_draft_enabled=True, log_dir=tmp_path)
+    service = GmailService(settings)
+
+    result = service.send_draft("bad draft id")
+
+    assert result.success is False
+    assert "valid Gmail draft ID" in result.text
+
+
+def test_gmail_send_draft_missing_scope_message(tmp_path: Path) -> None:
+    secret = tmp_path / "google_client_secret.json"
+    token = tmp_path / "token_gmail.json"
+    secret.write_text("{}", encoding="utf-8")
+    token.write_text("{}", encoding="utf-8")
+    settings = AppSettings(_env_file=None, gmail_enabled=True, gmail_send_draft_enabled=True, gmail_client_secret_path=secret, gmail_token_path=token, log_dir=tmp_path)
+    service = GmailService(settings, client_factory=lambda _: FakeGmailClient([]))
+
+    class Creds:
+        def has_scopes(self, scopes):
+            del scopes
+            return False
+
+    service._load_credentials = lambda scopes=None: Creds()  # type: ignore[method-assign]
+
+    result = service.send_draft("draft-1")
+
+    assert result.success is False
+    assert result.text == "Gmail send scope is required. Re-run Gmail auth after enabling send draft."
+
+
+def test_gmail_send_draft_success_with_mocked_client(tmp_path: Path) -> None:
+    secret = tmp_path / "google_client_secret.json"
+    token = tmp_path / "token_gmail.json"
+    secret.write_text("{}", encoding="utf-8")
+    token.write_text("{}", encoding="utf-8")
+    client = FakeGmailClient([])
+    settings = AppSettings(_env_file=None, gmail_enabled=True, gmail_send_draft_enabled=True, gmail_client_secret_path=secret, gmail_token_path=token, log_dir=tmp_path)
+    service = GmailService(settings, client_factory=lambda _: client)
+
+    class Creds:
+        def has_scopes(self, scopes):
+            del scopes
+            return True
+
+    service._load_credentials = lambda scopes=None: Creds()  # type: ignore[method-assign]
+
+    result = service.send_draft("draft-1")
+
+    assert result.success is True
+    assert "Sent Gmail draft draft-1" in result.text
+    assert "Message ID: msg-2" in format_gmail_send_draft_report(result)
+
+
 def test_gmail_cli_commands(monkeypatch: pytest.MonkeyPatch, capsys, tmp_path: Path) -> None:
     from main import main
 
@@ -311,6 +456,37 @@ def test_gmail_cli_commands(monkeypatch: pytest.MonkeyPatch, capsys, tmp_path: P
                 draft_id="draft-1",
             )
 
+        def list_drafts(self) -> GmailDraftListResult:
+            return GmailDraftListResult(
+                enabled=True,
+                success=True,
+                text="Saved Gmail drafts (1):",
+                provider="google_gmail",
+                request_attempted=True,
+                authenticated=True,
+                client_secret_detected=True,
+                token_detected=True,
+                draft_list_enabled=True,
+                drafts=[],
+                log_file=tmp_path / "gmail.log",
+            )
+
+        def send_draft(self, draft_id: str) -> GmailSendDraftResult:
+            return GmailSendDraftResult(
+                enabled=True,
+                success=True,
+                text=f"Sent Gmail draft {draft_id}.",
+                provider="google_gmail",
+                request_attempted=True,
+                authenticated=True,
+                client_secret_detected=True,
+                token_detected=True,
+                send_enabled=True,
+                draft_id=draft_id,
+                log_file=tmp_path / "gmail.log",
+                sent_message_id="msg-2",
+            )
+
     class DummyAssistant:
         def handle_command(self, command: str):
             return type("Response", (), {"accepted": True, "text": f"Handled: {command}", "source": "gmail", "error": None})()
@@ -326,6 +502,10 @@ def test_gmail_cli_commands(monkeypatch: pytest.MonkeyPatch, capsys, tmp_path: P
     unread_output = capsys.readouterr().out
     draft_exit = main(["--gmail-draft", "recipient@example.com", "Subject", "Body text"])
     draft_output = capsys.readouterr().out
+    drafts_exit = main(["--gmail-drafts"])
+    drafts_output = capsys.readouterr().out
+    send_exit = main(["--gmail-send-draft", "draft-1"])
+    send_output = capsys.readouterr().out
 
     assert check_exit == 0
     assert "Jarvis Gmail Check" in check_output
@@ -335,3 +515,7 @@ def test_gmail_cli_commands(monkeypatch: pytest.MonkeyPatch, capsys, tmp_path: P
     assert "Handled: read my unread emails" in unread_output
     assert draft_exit == 0
     assert "Jarvis Gmail Draft" in draft_output
+    assert drafts_exit == 0
+    assert "Jarvis Gmail Drafts" in drafts_output
+    assert send_exit == 0
+    assert "Jarvis Gmail Send Draft" in send_output

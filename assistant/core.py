@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 from assistant.conversation import ConversationHistory
 from integrations.calendar_service import CalendarCreateResult, CalendarService, CalendarQueryResult
-from integrations.gmail_service import GmailDraftResult, GmailService, GmailUnreadResult
+from integrations.gmail_service import GmailDraftListResult, GmailDraftResult, GmailSendDraftResult, GmailService, GmailUnreadResult
 from integrations.weather_service import WeatherService
 from memory.store import SensitiveMemoryError, SQLiteMemoryStore
 from security.confirmation import ConfirmationResult
@@ -289,6 +289,13 @@ class AssistantCore:
 
     def _handle_gmail_command(self, command: str) -> AssistantResponse | None:
         normalized = " ".join(command.lower().strip().split())
+        if self._parse_gmail_draft_list_command(command):
+            return self._list_gmail_drafts()
+
+        send_draft_request = self._parse_gmail_send_draft_command(command)
+        if send_draft_request is not None:
+            return self._send_gmail_draft(send_draft_request)
+
         draft_request = self._parse_gmail_draft_command(command)
         if draft_request is not None:
             recipient, subject, body = draft_request
@@ -333,6 +340,38 @@ class AssistantCore:
             error=result.safe_error,
         )
 
+    def _list_gmail_drafts(self) -> AssistantResponse:
+        if self.gmail_service is None or not self.settings.gmail_enabled or not self.settings.gmail_send_draft_enabled:
+            return AssistantResponse(text="Gmail draft listing is disabled.", accepted=True, source="local")
+
+        decision = self.permission_broker.check(
+            "read emails",
+            description="List Gmail draft metadata.",
+        )
+        if not decision.allowed:
+            return AssistantResponse(text=decision.reason, accepted=False, source="local", error=decision.reason)
+
+        if self.confirmation_handler is None:
+            return AssistantResponse(
+                text="Confirmation is required before listing Gmail drafts.",
+                accepted=False,
+                source="local",
+                error="Confirmation handler is unavailable.",
+            )
+
+        confirmation = self.confirmation_handler(decision.action_name, decision.risk_level, decision.description)
+        if not confirmation.approved:
+            reason = confirmation.reason or "Gmail draft listing canceled."
+            return AssistantResponse(text=reason, accepted=False, source="local", error=reason)
+
+        result = self.gmail_service.list_drafts()
+        return AssistantResponse(
+            text=self._gmail_draft_list_response_text(result),
+            accepted=result.success,
+            source="gmail",
+            error=result.safe_error,
+        )
+
     def _create_gmail_draft(self, recipient: str, subject: str, body: str) -> AssistantResponse:
         if self.gmail_service is None or not self.settings.gmail_enabled or not self.settings.gmail_draft_enabled:
             return AssistantResponse(text="Gmail draft creation is disabled.", accepted=True, source="local")
@@ -360,6 +399,38 @@ class AssistantCore:
         result = self.gmail_service.create_draft(recipient, subject, body)
         return AssistantResponse(
             text=self._gmail_draft_response_text(result),
+            accepted=result.success,
+            source="gmail",
+            error=result.safe_error,
+        )
+
+    def _send_gmail_draft(self, draft_id: str) -> AssistantResponse:
+        if self.gmail_service is None or not self.settings.gmail_enabled or not self.settings.gmail_send_draft_enabled:
+            return AssistantResponse(text="Gmail draft sending is disabled.", accepted=True, source="local")
+
+        decision = self.permission_broker.check(
+            "send email",
+            description=f"Send Gmail draft {draft_id}.",
+        )
+        if not decision.allowed:
+            return AssistantResponse(text=decision.reason, accepted=False, source="local", error=decision.reason)
+
+        if self.confirmation_handler is None:
+            return AssistantResponse(
+                text="Confirmation is required before sending Gmail drafts.",
+                accepted=False,
+                source="local",
+                error="Confirmation handler is unavailable.",
+            )
+
+        confirmation = self.confirmation_handler(decision.action_name, decision.risk_level, decision.description)
+        if not confirmation.approved:
+            reason = confirmation.reason or "Gmail draft send canceled."
+            return AssistantResponse(text=reason, accepted=False, source="local", error=reason)
+
+        result = self.gmail_service.send_draft(draft_id)
+        return AssistantResponse(
+            text=self._gmail_send_draft_response_text(result),
             accepted=result.success,
             source="gmail",
             error=result.safe_error,
@@ -784,6 +855,22 @@ class AssistantCore:
         return result.text
 
     @staticmethod
+    def _gmail_draft_list_response_text(result: GmailDraftListResult) -> str:
+        if result.safe_error:
+            return result.safe_error
+        if not result.drafts:
+            return "No Gmail drafts found."
+        entries = ", ".join(f"{draft.draft_id} -> {draft.recipient} / {draft.subject}" for draft in result.drafts[:5])
+        suffix = "" if len(result.drafts) <= 5 else f" and {len(result.drafts) - 5} more"
+        return f"Gmail drafts: {entries}{suffix}."
+
+    @staticmethod
+    def _gmail_send_draft_response_text(result: GmailSendDraftResult) -> str:
+        if result.safe_error:
+            return result.safe_error
+        return result.text
+
+    @staticmethod
     def _parse_calendar_create_command(command: str) -> tuple[str, str, int] | None:
         match = re.match(
             r"(?i)^(?:create calendar event|schedule)\s+(.+?)\s+at\s+(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2})\s+for\s+(\d+)\s*$",
@@ -814,6 +901,19 @@ class AssistantCore:
         if not recipient or not subject or not body:
             return None
         return recipient, subject, body
+
+    @staticmethod
+    def _parse_gmail_draft_list_command(command: str) -> bool:
+        normalized = " ".join(command.lower().strip().split())
+        return normalized in {"list email drafts", "show email drafts"}
+
+    @staticmethod
+    def _parse_gmail_send_draft_command(command: str) -> str | None:
+        match = re.match(r"(?i)^send email draft\s+(.+)$", command.strip())
+        if not match:
+            return None
+        draft_id = match.group(1).strip()
+        return draft_id or None
 
     @staticmethod
     def _file_listing_response_text(result) -> str:

@@ -17,6 +17,8 @@ _GMAIL_LOG_FILE: Path | None = None
 class GmailClient(Protocol):
     def list_unread_messages(self, max_results: int) -> list[dict[str, Any]]: ...
     def create_draft(self, to_address: str, subject: str, body: str) -> dict[str, Any]: ...
+    def list_drafts(self, max_results: int) -> list[dict[str, Any]]: ...
+    def send_draft(self, draft_id: str) -> dict[str, Any]: ...
 
 
 GmailClientFactory = Callable[[AppSettings], GmailClient]
@@ -117,6 +119,57 @@ class GmailDraftResult:
     safe_error: str | None = None
     log_file: Path | None = None
     draft_id: str | None = None
+    errors: list[str] = field(default_factory=list)
+
+    @property
+    def is_successful(self) -> bool:
+        return self.success
+
+
+@dataclass(frozen=True)
+class GmailDraftItem:
+    draft_id: str
+    recipient: str
+    subject: str
+    snippet: str
+
+
+@dataclass(frozen=True)
+class GmailDraftListResult:
+    enabled: bool
+    success: bool
+    text: str
+    provider: str
+    request_attempted: bool
+    authenticated: bool
+    client_secret_detected: bool
+    token_detected: bool
+    draft_list_enabled: bool
+    drafts: list[GmailDraftItem]
+    safe_error: str | None = None
+    log_file: Path | None = None
+    errors: list[str] = field(default_factory=list)
+
+    @property
+    def is_successful(self) -> bool:
+        return self.success
+
+
+@dataclass(frozen=True)
+class GmailSendDraftResult:
+    enabled: bool
+    success: bool
+    text: str
+    provider: str
+    request_attempted: bool
+    authenticated: bool
+    client_secret_detected: bool
+    token_detected: bool
+    send_enabled: bool
+    draft_id: str
+    safe_error: str | None = None
+    log_file: Path | None = None
+    sent_message_id: str | None = None
     errors: list[str] = field(default_factory=list)
 
     @property
@@ -593,6 +646,257 @@ class GmailService:
                 safe_error=safe_error,
             )
 
+    def list_drafts(self) -> GmailDraftListResult:
+        provider = "google_gmail"
+        client_secret_detected = self.settings.has_gmail_client_secret
+        token_detected = self.settings.has_gmail_token
+
+        self.gmail_logger.info(
+            "Gmail draft list enabled={} client_secret_detected={} token_detected={}",
+            self.settings.gmail_send_draft_enabled,
+            client_secret_detected,
+            token_detected,
+        )
+
+        if not self.settings.gmail_enabled or not self.settings.gmail_send_draft_enabled:
+            message = self._draft_list_disabled_message()
+            return self._draft_list_result(
+                enabled=self.settings.gmail_enabled,
+                success=False,
+                text=message,
+                provider=provider,
+                request_attempted=False,
+                authenticated=False,
+                client_secret_detected=client_secret_detected,
+                token_detected=token_detected,
+                draft_list_enabled=self.settings.gmail_send_draft_enabled,
+                drafts=[],
+                safe_error=message,
+            )
+
+        if not client_secret_detected:
+            message = "Gmail is enabled, but the Google client secret file is missing."
+            return self._draft_list_result(
+                enabled=self.settings.gmail_enabled,
+                success=False,
+                text=self._credentials_missing_message(),
+                provider=provider,
+                request_attempted=False,
+                authenticated=False,
+                client_secret_detected=False,
+                token_detected=token_detected,
+                draft_list_enabled=self.settings.gmail_send_draft_enabled,
+                drafts=[],
+                safe_error=message,
+            )
+
+        if not token_detected:
+            message = "Gmail is enabled, but the Gmail token file is missing."
+            return self._draft_list_result(
+                enabled=self.settings.gmail_enabled,
+                success=False,
+                text=self._credentials_missing_message(),
+                provider=provider,
+                request_attempted=False,
+                authenticated=False,
+                client_secret_detected=True,
+                token_detected=False,
+                draft_list_enabled=self.settings.gmail_send_draft_enabled,
+                drafts=[],
+                safe_error=message,
+            )
+
+        try:
+            credentials = self._load_credentials(self.settings.gmail_send_scopes_list)
+            send_scope_detected = self._credentials_has_scopes(credentials, self.settings.gmail_send_scopes_list)
+            if not send_scope_detected:
+                message = "Gmail send scope is required. Re-run Gmail auth after enabling send draft."
+                return self._draft_list_result(
+                    enabled=self.settings.gmail_enabled,
+                    success=False,
+                    text=message,
+                    provider=provider,
+                    request_attempted=False,
+                    authenticated=False,
+                    client_secret_detected=True,
+                    token_detected=True,
+                    draft_list_enabled=self.settings.gmail_send_draft_enabled,
+                    drafts=[],
+                    safe_error=message,
+                )
+
+            client = self.client_factory(self.settings) if self._custom_client_factory else self._build_gmail_client(
+                self.settings,
+                scopes=self.settings.gmail_send_scopes_list,
+            )
+            drafts = [self._normalize_draft(item) for item in client.list_drafts(self.settings.gmail_max_results)]
+            text = self._format_draft_list(drafts)
+            self.gmail_logger.info("Gmail draft list succeeded count={}", len(drafts))
+            return self._draft_list_result(
+                enabled=self.settings.gmail_enabled,
+                success=True,
+                text=text,
+                provider=provider,
+                request_attempted=True,
+                authenticated=True,
+                client_secret_detected=True,
+                token_detected=True,
+                draft_list_enabled=self.settings.gmail_send_draft_enabled,
+                drafts=drafts,
+            )
+        except Exception as exc:
+            safe_error = format_gmail_error(exc)
+            self.gmail_logger.error("Gmail draft list failed: {}", safe_error)
+            return self._draft_list_result(
+                enabled=self.settings.gmail_enabled,
+                success=False,
+                text="I couldn't fetch Gmail drafts right now. Please try again later.",
+                provider=provider,
+                request_attempted=True,
+                authenticated=False,
+                client_secret_detected=True,
+                token_detected=True,
+                draft_list_enabled=self.settings.gmail_send_draft_enabled,
+                drafts=[],
+                safe_error=safe_error,
+            )
+
+    def send_draft(self, draft_id: str) -> GmailSendDraftResult:
+        provider = "google_gmail"
+        draft_id_text = draft_id.strip()
+        client_secret_detected = self.settings.has_gmail_client_secret
+        token_detected = self.settings.has_gmail_token
+        send_scope_detected = False
+
+        self.gmail_logger.info(
+            "Gmail send draft enabled={} draft_id={} client_secret_detected={} token_detected={}",
+            self.settings.gmail_send_draft_enabled,
+            draft_id_text,
+            client_secret_detected,
+            token_detected,
+        )
+
+        if not self.settings.gmail_enabled or not self.settings.gmail_send_draft_enabled:
+            message = self._send_draft_disabled_message()
+            return self._send_draft_result(
+                enabled=self.settings.gmail_enabled,
+                success=False,
+                text=message,
+                provider=provider,
+                request_attempted=False,
+                authenticated=False,
+                client_secret_detected=client_secret_detected,
+                token_detected=token_detected,
+                send_enabled=self.settings.gmail_send_draft_enabled,
+                draft_id=draft_id_text,
+                safe_error=message,
+            )
+
+        if not self._looks_like_draft_id(draft_id_text):
+            message = "Please provide a valid Gmail draft ID."
+            return self._send_draft_result(
+                enabled=self.settings.gmail_enabled,
+                success=False,
+                text=message,
+                provider=provider,
+                request_attempted=False,
+                authenticated=False,
+                client_secret_detected=client_secret_detected,
+                token_detected=token_detected,
+                send_enabled=self.settings.gmail_send_draft_enabled,
+                draft_id=draft_id_text,
+                safe_error=message,
+            )
+
+        if not client_secret_detected:
+            message = "Gmail is enabled, but the Google client secret file is missing."
+            return self._send_draft_result(
+                enabled=self.settings.gmail_enabled,
+                success=False,
+                text=self._credentials_missing_message(),
+                provider=provider,
+                request_attempted=False,
+                authenticated=False,
+                client_secret_detected=False,
+                token_detected=token_detected,
+                send_enabled=self.settings.gmail_send_draft_enabled,
+                draft_id=draft_id_text,
+                safe_error=message,
+            )
+
+        if not token_detected:
+            message = "Gmail is enabled, but the Gmail token file is missing."
+            return self._send_draft_result(
+                enabled=self.settings.gmail_enabled,
+                success=False,
+                text=self._credentials_missing_message(),
+                provider=provider,
+                request_attempted=False,
+                authenticated=False,
+                client_secret_detected=True,
+                token_detected=False,
+                send_enabled=self.settings.gmail_send_draft_enabled,
+                draft_id=draft_id_text,
+                safe_error=message,
+            )
+
+        try:
+            credentials = self._load_credentials(self.settings.gmail_send_scopes_list)
+            send_scope_detected = self._credentials_has_scopes(credentials, self.settings.gmail_send_scopes_list)
+            if not send_scope_detected:
+                message = "Gmail send scope is required. Re-run Gmail auth after enabling send draft."
+                return self._send_draft_result(
+                    enabled=self.settings.gmail_enabled,
+                    success=False,
+                    text=message,
+                    provider=provider,
+                    request_attempted=False,
+                    authenticated=False,
+                    client_secret_detected=True,
+                    token_detected=True,
+                    send_enabled=self.settings.gmail_send_draft_enabled,
+                    draft_id=draft_id_text,
+                    safe_error=message,
+                )
+
+            client = self.client_factory(self.settings) if self._custom_client_factory else self._build_gmail_client(
+                self.settings,
+                scopes=self.settings.gmail_send_scopes_list,
+            )
+            sent = client.send_draft(draft_id_text)
+            sent_message_id = str(sent.get("message", {}).get("id") or sent.get("id") or "").strip() or None
+            text = self._format_send_draft_result(draft_id_text, sent_message_id)
+            self.gmail_logger.info("Gmail draft sent draft_id={} message_id={}", draft_id_text, sent_message_id)
+            return self._send_draft_result(
+                enabled=self.settings.gmail_enabled,
+                success=True,
+                text=text,
+                provider=provider,
+                request_attempted=True,
+                authenticated=True,
+                client_secret_detected=True,
+                token_detected=True,
+                send_enabled=self.settings.gmail_send_draft_enabled,
+                draft_id=draft_id_text,
+                sent_message_id=sent_message_id,
+            )
+        except Exception as exc:
+            safe_error = format_gmail_error(exc)
+            self.gmail_logger.error("Gmail send draft failed: {}", safe_error)
+            return self._send_draft_result(
+                enabled=self.settings.gmail_enabled,
+                success=False,
+                text="I couldn't send that Gmail draft right now. Please try again later.",
+                provider=provider,
+                request_attempted=True,
+                authenticated=False,
+                client_secret_detected=True,
+                token_detected=True,
+                send_enabled=self.settings.gmail_send_draft_enabled,
+                draft_id=draft_id_text,
+                safe_error=safe_error,
+            )
+
     def _default_client_factory(self, settings: AppSettings) -> GmailClient:
         return self._build_gmail_client(settings, scopes=settings.gmail_scopes_list)
 
@@ -719,6 +1023,70 @@ class GmailService:
             errors=errors,
         )
 
+    def _draft_list_result(
+        self,
+        enabled: bool,
+        success: bool,
+        text: str,
+        provider: str,
+        request_attempted: bool,
+        authenticated: bool,
+        client_secret_detected: bool,
+        token_detected: bool,
+        draft_list_enabled: bool,
+        drafts: list[GmailDraftItem],
+        safe_error: str | None = None,
+    ) -> GmailDraftListResult:
+        errors = [safe_error] if safe_error else []
+        return GmailDraftListResult(
+            enabled=enabled,
+            success=success,
+            text=text,
+            provider=provider,
+            request_attempted=request_attempted,
+            authenticated=authenticated,
+            client_secret_detected=client_secret_detected,
+            token_detected=token_detected,
+            draft_list_enabled=draft_list_enabled,
+            drafts=drafts,
+            safe_error=safe_error,
+            log_file=self.log_file,
+            errors=errors,
+        )
+
+    def _send_draft_result(
+        self,
+        enabled: bool,
+        success: bool,
+        text: str,
+        provider: str,
+        request_attempted: bool,
+        authenticated: bool,
+        client_secret_detected: bool,
+        token_detected: bool,
+        send_enabled: bool,
+        draft_id: str,
+        safe_error: str | None = None,
+        sent_message_id: str | None = None,
+    ) -> GmailSendDraftResult:
+        errors = [safe_error] if safe_error else []
+        return GmailSendDraftResult(
+            enabled=enabled,
+            success=success,
+            text=text,
+            provider=provider,
+            request_attempted=request_attempted,
+            authenticated=authenticated,
+            client_secret_detected=client_secret_detected,
+            token_detected=token_detected,
+            send_enabled=send_enabled,
+            draft_id=draft_id,
+            safe_error=safe_error,
+            log_file=self.log_file,
+            sent_message_id=sent_message_id,
+            errors=errors,
+        )
+
     def _auth_guide_message(self, missing_client_secret: bool, missing_token: bool) -> str:
         lines = [
             "Gmail setup is incomplete.",
@@ -777,6 +1145,18 @@ class GmailService:
         return (
             "Gmail draft creation is disabled. Enable GMAIL_DRAFT_ENABLED and provide Google credentials "
             "before creating drafts."
+        )
+
+    def _draft_list_disabled_message(self) -> str:
+        return (
+            "Gmail draft listing is disabled. Enable GMAIL_SEND_DRAFT_ENABLED and provide Google credentials "
+            "before listing drafts."
+        )
+
+    def _send_draft_disabled_message(self) -> str:
+        return (
+            "Gmail draft sending is disabled. Enable GMAIL_SEND_DRAFT_ENABLED and provide Google credentials "
+            "before sending drafts."
         )
 
     def _load_credentials(self, scopes: list[str] | None = None) -> Any | None:
@@ -887,6 +1267,37 @@ class GmailService:
                 )
                 return dict(response)
 
+            def list_drafts(self, max_results: int) -> list[dict[str, Any]]:
+                response = (
+                    self.gmail_service.users()
+                    .drafts()
+                    .list(userId="me", maxResults=max_results)
+                    .execute()
+                )
+                drafts = list(response.get("drafts", []))
+                results: list[dict[str, Any]] = []
+                for draft in drafts:
+                    draft_id = draft.get("id")
+                    if not draft_id:
+                        continue
+                    details = (
+                        self.gmail_service.users()
+                        .drafts()
+                        .get(userId="me", id=draft_id)
+                        .execute()
+                    )
+                    results.append(dict(details))
+                return results
+
+            def send_draft(self, draft_id: str) -> dict[str, Any]:
+                response = (
+                    self.gmail_service.users()
+                    .drafts()
+                    .send(userId="me", body={"id": draft_id})
+                    .execute()
+                )
+                return dict(response)
+
             @staticmethod
             def _encode_message(to_address: str, subject: str, body: str) -> str:
                 import base64
@@ -934,13 +1345,23 @@ class GmailService:
             lines.append(f"Draft ID: {draft_id}")
         return "\n".join(lines)
 
-    def _format_draft_result(self, recipient: str, subject: str, draft_id: str | None) -> str:
-        lines = [
-            f"Created Gmail draft for {recipient}.",
-            f"Subject: {subject}",
-        ]
-        if draft_id:
-            lines.append(f"Draft ID: {draft_id}")
+    def _format_draft_list(self, drafts: list[GmailDraftItem]) -> str:
+        if not drafts:
+            return "No Gmail drafts found."
+
+        lines = [f"Saved Gmail drafts ({len(drafts)}):"]
+        for index, draft in enumerate(drafts, start=1):
+            lines.append(f"{index}. Draft ID: {draft.draft_id}")
+            lines.append(f"   Recipient: {draft.recipient}")
+            lines.append(f"   Subject: {draft.subject}")
+            if draft.snippet:
+                lines.append(f"   Snippet: {draft.snippet}")
+        return "\n".join(lines)
+
+    def _format_send_draft_result(self, draft_id: str, sent_message_id: str | None) -> str:
+        lines = [f"Sent Gmail draft {draft_id}."]
+        if sent_message_id:
+            lines.append(f"Message ID: {sent_message_id}")
         return "\n".join(lines)
 
     @staticmethod
@@ -949,6 +1370,31 @@ class GmailService:
         if not cleaned or any(sep in cleaned for sep in (" ", "/", "\\", "..")):
             return False
         return bool(re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", cleaned))
+
+    @staticmethod
+    def _looks_like_draft_id(value: str) -> bool:
+        cleaned = value.strip()
+        if not cleaned or any(sep in cleaned for sep in (" ", "/", "\\", "..")):
+            return False
+        return bool(re.match(r"^[A-Za-z0-9._-]+$", cleaned))
+
+    @staticmethod
+    def _normalize_draft(draft: dict[str, Any]) -> GmailDraftItem:
+        draft_id = str(draft.get("id") or "").strip() or "unknown"
+        message = draft.get("message") or {}
+        payload = message.get("payload") or {}
+        headers = payload.get("headers") or []
+        header_map = {
+            str(header.get("name") or "").lower(): str(header.get("value") or "").strip()
+            for header in headers
+            if isinstance(header, dict)
+        }
+        return GmailDraftItem(
+            draft_id=draft_id,
+            recipient=header_map.get("to", "Unknown recipient"),
+            subject=header_map.get("subject", "No subject"),
+            snippet=str(message.get("snippet") or draft.get("snippet") or "").strip(),
+        )
 
     @staticmethod
     def _normalize_email(message: dict[str, Any]) -> GmailUnreadEmail:
@@ -1078,6 +1524,46 @@ def format_gmail_draft_report(report: GmailDraftResult) -> str:
         lines.extend(["", "Error:", f"  {report.safe_error}"])
     if report.draft_id:
         lines.extend(["", f"Draft ID: {report.draft_id}"])
+    return "\n".join(lines)
+
+
+def format_gmail_draft_list_report(report: GmailDraftListResult) -> str:
+    lines = [
+        "Jarvis Gmail Drafts",
+        "===================",
+        f"Gmail enabled: {_yes_no(report.enabled)}",
+        f"Draft list enabled: {_yes_no(report.draft_list_enabled)}",
+        f"Provider: {report.provider}",
+        f"Draft count: {len(report.drafts)}",
+        f"Request attempted: {_yes_no(report.request_attempted)}",
+        f"Authenticated: {_yes_no(report.authenticated)}",
+        f"Diagnostic log: {report.log_file}",
+    ]
+    if report.text:
+        lines.extend(["", "Result:", f"  {report.text}"])
+    if report.safe_error:
+        lines.extend(["", "Error:", f"  {report.safe_error}"])
+    return "\n".join(lines)
+
+
+def format_gmail_send_draft_report(report: GmailSendDraftResult) -> str:
+    lines = [
+        "Jarvis Gmail Send Draft",
+        "=======================",
+        f"Gmail enabled: {_yes_no(report.enabled)}",
+        f"Send enabled: {_yes_no(report.send_enabled)}",
+        f"Provider: {report.provider}",
+        f"Draft ID: {report.draft_id}",
+        f"Request attempted: {_yes_no(report.request_attempted)}",
+        f"Authenticated: {_yes_no(report.authenticated)}",
+        f"Diagnostic log: {report.log_file}",
+    ]
+    if report.text:
+        lines.extend(["", "Result:", f"  {report.text}"])
+    if report.safe_error:
+        lines.extend(["", "Error:", f"  {report.safe_error}"])
+    if report.sent_message_id:
+        lines.extend(["", f"Message ID: {report.sent_message_id}"])
     return "\n".join(lines)
 
 

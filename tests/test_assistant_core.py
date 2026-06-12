@@ -140,6 +140,8 @@ class FakeGmailService:
         )
         self.calls = 0
         self.draft_calls: list[tuple[str, str, str]] = []
+        self.draft_list_calls = 0
+        self.send_draft_calls: list[str] = []
 
     def unread_emails(self) -> GmailUnreadResult:
         self.calls += 1
@@ -153,6 +155,42 @@ class FakeGmailService:
             {
                 "success": True,
                 "text": f"Created Gmail draft for {recipient}.",
+                "safe_error": None,
+            },
+        )()
+
+    def list_drafts(self):
+        self.draft_list_calls += 1
+        return type(
+            "DraftListResult",
+            (),
+            {
+                "success": True,
+                "text": "Gmail drafts: draft-1 -> recipient@example.com / Hello.",
+                "safe_error": None,
+                "drafts": [
+                    type(
+                        "DraftItem",
+                        (),
+                        {
+                            "draft_id": "draft-1",
+                            "recipient": "recipient@example.com",
+                            "subject": "Hello",
+                            "snippet": "Draft preview",
+                        },
+                    )()
+                ],
+            },
+        )()
+
+    def send_draft(self, draft_id: str):
+        self.send_draft_calls.append(draft_id)
+        return type(
+            "SendDraftResult",
+            (),
+            {
+                "success": True,
+                "text": f"Sent Gmail draft {draft_id}.",
                 "safe_error": None,
             },
         )()
@@ -510,6 +548,73 @@ def test_assistant_core_gmail_confirmation_denied_blocks_read() -> None:
     assert response.accepted is False
     assert response.text == "Denied."
     assert gmail_service.calls == 0
+
+
+def test_assistant_core_routes_gmail_draft_list_commands() -> None:
+    gmail_service = FakeGmailService()
+    assistant = AssistantCore(
+        settings=AppSettings(_env_file=None, openai_enabled=False, gmail_enabled=True, gmail_send_draft_enabled=True),
+        openai_service=FakeOpenAIService(error=AssertionError("OpenAI should not be called for Gmail")),
+        gmail_service=gmail_service,
+        confirmation_handler=lambda *args: ConfirmationResult(
+            approved=True,
+            denied=False,
+            timed_out=False,
+            reason="Approved.",
+            log_file=Path("confirmations.log"),
+        ),
+    )
+
+    response = assistant.handle_command("list email drafts")
+
+    assert response.source == "gmail"
+    assert "Gmail drafts" in response.text
+    assert gmail_service.draft_list_calls == 1
+
+
+def test_assistant_core_routes_gmail_send_draft_commands() -> None:
+    gmail_service = FakeGmailService()
+    assistant = AssistantCore(
+        settings=AppSettings(_env_file=None, openai_enabled=False, gmail_enabled=True, gmail_send_draft_enabled=True),
+        openai_service=FakeOpenAIService(error=AssertionError("OpenAI should not be called for Gmail")),
+        gmail_service=gmail_service,
+        confirmation_handler=lambda *args: ConfirmationResult(
+            approved=True,
+            denied=False,
+            timed_out=False,
+            reason="Approved.",
+            log_file=Path("confirmations.log"),
+        ),
+    )
+
+    response = assistant.handle_command("send email draft draft-1")
+
+    assert response.source == "gmail"
+    assert "Sent Gmail draft draft-1" in response.text
+    assert gmail_service.send_draft_calls == ["draft-1"]
+
+
+def test_assistant_core_gmail_send_draft_confirmation_denied_blocks_send() -> None:
+    gmail_service = FakeGmailService()
+    assistant = AssistantCore(
+        settings=AppSettings(_env_file=None, openai_enabled=False, gmail_enabled=True, gmail_send_draft_enabled=True),
+        openai_service=FakeOpenAIService(error=AssertionError("OpenAI should not be called for Gmail")),
+        gmail_service=gmail_service,
+        confirmation_handler=lambda *args: ConfirmationResult(
+            approved=False,
+            denied=True,
+            timed_out=False,
+            reason="Denied.",
+            log_file=Path("confirmations.log"),
+        ),
+    )
+
+    response = assistant.handle_command("send email draft draft-1")
+
+    assert response.source == "local"
+    assert response.accepted is False
+    assert response.text == "Denied."
+    assert gmail_service.send_draft_calls == []
 
 
 def test_assistant_core_routes_gmail_draft_commands() -> None:

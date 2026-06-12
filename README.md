@@ -628,6 +628,18 @@ Jarvis can open only sites listed in `WEBSITE_ALLOWED_SITES`. If a site is missi
 - If the token only has the Gmail read-only scope, Jarvis reports: `Gmail compose scope is required. Re-run Gmail auth after enabling draft.`
 - Gmail logs are saved to `logs/gmail.log`.
 
+## Phase 29 Scope
+
+- Gmail draft listing and draft sending by draft ID only.
+- Enable send-draft mode with `GMAIL_SEND_DRAFT_ENABLED=true`.
+- Send scope: `GMAIL_SEND_SCOPES=https://www.googleapis.com/auth/gmail.modify`.
+- Run `py main.py --gmail-drafts` to list draft metadata after confirmation.
+- Run `py main.py --gmail-send-draft draft-id` to send a saved draft after confirmation.
+- Assistant commands: `list email drafts`, `show email drafts`, and `send email draft <draft_id>`.
+- Gmail draft listing and draft sending are high risk and require permission plus confirmation.
+- If the token only has Gmail read-only scope, Jarvis reports: `Gmail send scope is required. Re-run Gmail auth after enabling send draft.`
+- Gmail logs are saved to `logs/gmail.log`.
+
 ## Text To Speech Test
 
 ```powershell
