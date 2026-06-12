@@ -44,6 +44,20 @@ def test_voice_loop_gui_state_updates_controls_and_status_fields() -> None:
     assert window.start_voice_loop_action.isEnabled() is False
     assert window.stop_voice_loop_action.isEnabled() is True
     assert window.check_reminders_button.isEnabled() is True
+    assert window.start_reminder_watch_button.isEnabled() is True
+    assert window.stop_reminder_watch_button.isEnabled() is False
+
+    window._set_reminder_watch_running(True)
+    assert window.start_reminder_watch_button.isEnabled() is False
+    assert window.stop_reminder_watch_button.isEnabled() is True
+    assert window.start_reminder_watch_action is not None
+    assert window.stop_reminder_watch_action is not None
+    assert window.start_reminder_watch_action.isEnabled() is False
+    assert window.stop_reminder_watch_action.isEnabled() is True
+    window._handle_reminder_watch_status("Reminder watcher started.")
+    window._handle_reminder_watch_status("Due reminders:\n1. stretch at 2026-06-12 18:00")
+    window._handle_reminder_watch_status("Reminder watcher summary: checks=1, due notifications=1, errors=0")
+    window._set_reminder_watch_running(False)
 
     window._handle_voice_loop_status("Last recognized command: status report")
     window._handle_voice_loop_status("Last Jarvis response: handled status report")
@@ -54,6 +68,7 @@ def test_voice_loop_gui_state_updates_controls_and_status_fields() -> None:
     assert window.voice_loop_last_command_value.text() == "status report"
     assert window.voice_loop_last_response_value.text() == "handled status report"
     assert window.reminders_check_value.text() == "Due reminders:"
+    assert window.reminder_watch_status_value.text() == "Idle"
 
     window.close()
     app.processEvents()

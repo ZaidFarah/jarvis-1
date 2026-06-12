@@ -167,3 +167,13 @@ def test_reminder_cli_check_uses_isolated_database(monkeypatch: pytest.MonkeyPat
     assert exit_code == 0
     assert "Jarvis Reminders Check" in output
     assert "Due reminders:" in output
+
+
+def test_reminder_cli_watch_disabled_fallback(capsys) -> None:
+    from main import main
+
+    exit_code = main(["--reminders-watch"])
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "Reminder watcher is disabled." in output

@@ -99,6 +99,8 @@ def test_reminder_settings_defaults_are_safe() -> None:
     assert settings.reminders_check_enabled is True
     assert settings.reminders_check_interval_seconds == 60
     assert settings.reminders_speak_due is False
+    assert settings.reminders_watch_enabled is False
+    assert settings.reminders_watch_speak is False
     assert settings.reminders_database_path.name == "jarvis_reminders.db"
 
 
@@ -107,6 +109,8 @@ def test_reminder_settings_read_environment(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setenv("REMINDERS_CHECK_ENABLED", "false")
     monkeypatch.setenv("REMINDERS_CHECK_INTERVAL_SECONDS", "120")
     monkeypatch.setenv("REMINDERS_SPEAK_DUE", "true")
+    monkeypatch.setenv("REMINDERS_WATCH_ENABLED", "true")
+    monkeypatch.setenv("REMINDERS_WATCH_SPEAK", "true")
     monkeypatch.setenv("REMINDERS_DATABASE_PATH", "data/custom_reminders.db")
 
     settings = AppSettings(_env_file=None)
@@ -115,6 +119,8 @@ def test_reminder_settings_read_environment(monkeypatch: pytest.MonkeyPatch) -> 
     assert settings.reminders_check_enabled is False
     assert settings.reminders_check_interval_seconds == 120
     assert settings.reminders_speak_due is True
+    assert settings.reminders_watch_enabled is True
+    assert settings.reminders_watch_speak is True
     assert settings.reminders_database_path.name == "custom_reminders.db"
 
 

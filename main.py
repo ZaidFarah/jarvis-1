@@ -12,6 +12,7 @@ from services.logging_service import configure_logging
 from services.openai_service import OpenAIService, format_openai_check_report
 from memory.store import SQLiteMemoryStore
 from reminders.service import ReminderService
+from reminders.scheduler import ReminderWatcher
 from voice.audio_diagnostics import AudioDiagnostics, format_audio_check_report
 from voice.tts import TextToSpeechResult, format_tts_result, speak_text
 from voice.transcription_diagnostics import TranscriptionDiagnostics, format_transcription_report
@@ -136,6 +137,11 @@ def main(argv: list[str] | None = None) -> int:
         configure_logging(settings, console=False)
         return _run_reminders_check(settings, speak_requested=_has_flag(args, "--speak"))
 
+    if "--reminders-watch" in args:
+        settings = load_settings()
+        configure_logging(settings, console=False)
+        return _run_reminders_watch(settings, speak_requested=_has_flag(args, "--speak"))
+
     application = JarvisApplication()
     return application.run()
 
@@ -196,6 +202,20 @@ def _voice_loop_status_callback(status: str) -> None:
         VOICE_LOOP_STOPPED_MESSAGE,
     }
     visible_prefixes = ("Last recognized command:", "Last Jarvis response:", "Voice loop summary:")
+    if status in visible_statuses or status.startswith(visible_prefixes):
+        print(status, flush=True)
+
+
+def _reminder_watch_status_callback(status: str) -> None:
+    visible_statuses = {
+        "Reminder watcher started.",
+        "Reminder watcher stopped.",
+        "Reminder watcher is disabled.",
+        "Checking reminders...",
+        "No reminders are due right now.",
+        "Due reminders:",
+    }
+    visible_prefixes = ("Reminder watcher summary:", "Reminder watcher failed:")
     if status in visible_statuses or status.startswith(visible_prefixes):
         print(status, flush=True)
 
@@ -295,6 +315,26 @@ def _run_reminders_check(settings, speak_requested: bool) -> int:
 
     print(_format_reminders_check_report(response, tts_result), flush=True)
     return 0 if response.accepted and (tts_result is None or tts_result.spoken) else 1
+
+
+def _run_reminders_watch(settings, speak_requested: bool) -> int:
+    watcher = ReminderWatcher(
+        settings=settings,
+        speak_requested=speak_requested,
+        status_callback=_reminder_watch_status_callback,
+    )
+    if not watcher.available:
+        print("Reminder watcher is disabled.", flush=True)
+        return 0
+
+    try:
+        watcher.run_forever()
+    except KeyboardInterrupt:
+        watcher.stop()
+        print("\nJarvis reminder watcher interrupted. Exiting cleanly.", flush=True)
+    finally:
+        print(watcher.summary.format(), flush=True)
+    return 0
 
 
 def _format_chat_test_report(

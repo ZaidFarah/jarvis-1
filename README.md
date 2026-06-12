@@ -162,6 +162,14 @@ Jarvis is a Windows desktop AI assistant foundation. Phase 1 provides the applic
 - Reminder check settings: `REMINDERS_CHECK_ENABLED=true`, `REMINDERS_CHECK_INTERVAL_SECONDS=60`, `REMINDERS_SPEAK_DUE=false`.
 - The GUI includes a `Check Reminders` control and shows the last reminder check result.
 
+## Phase 15 Scope
+
+- Local reminder watcher that runs only while Jarvis is running.
+- CLI command: `py main.py --reminders-watch`.
+- Optional spoken watcher output with `--reminders-watch --speak`.
+- Watch settings: `REMINDERS_WATCH_ENABLED=false`, `REMINDERS_WATCH_SPEAK=false`.
+- The GUI includes `Start Watch` and `Stop Watch` controls and shows watcher status.
+
 ## Setup
 
 Install dependencies:
@@ -421,6 +429,14 @@ py main.py --reminders-check
 ```
 
 Jarvis checks for reminders where `remind_at` is due and `status` is still pending. Matching reminders are marked `notified` after they are reported, so they are not repeated on the next check. Pass `--speak` to speak the result aloud.
+
+## Reminders Watch
+
+```powershell
+py main.py --reminders-watch
+```
+
+The reminder watcher checks due reminders every `REMINDERS_CHECK_INTERVAL_SECONDS` while Jarvis is running. It stops cleanly when you press Ctrl+C or close the GUI. Pass `--speak` to have due reminders spoken aloud.
 
 ## Text To Speech Test
 
