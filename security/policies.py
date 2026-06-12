@@ -28,6 +28,8 @@ def default_policies() -> list[PolicyRule]:
         PolicyRule("send text to openai", "medium", "Send user text to OpenAI chat or TTS.", True, True, "Requires confirmation."),
         PolicyRule("create reminder", "medium", "Create a local reminder entry.", True, True, "Requires confirmation."),
         PolicyRule("show notification", "medium", "Display a local notification.", True, True, "Requires confirmation."),
+        PolicyRule("take screenshot", "high", "Capture a screenshot of the current screen.", True, True, "Requires confirmation."),
+        PolicyRule("read screen text", "high", "Run OCR on a screenshot or image.", True, True, "Requires confirmation."),
         PolicyRule("send email", "high", "Send an email.", True, True, "Requires confirmation."),
         PolicyRule("create calendar event", "high", "Create a calendar event.", True, True, "Requires confirmation."),
         PolicyRule("read emails", "high", "Read email content.", True, True, "Requires confirmation."),

@@ -17,6 +17,7 @@ from tools.app_launcher import AppLauncher
 from tools.website_launcher import WebsiteLauncher
 from reminders.service import ReminderService
 from services.openai_service import OpenAIService
+from vision.vision_service import ScreenshotResult, VisionOCRResult, VisionService
 
 
 @dataclass(frozen=True)
@@ -44,6 +45,7 @@ class AssistantCore:
         calendar_service: CalendarService | None = None,
         gmail_service: GmailService | None = None,
         reminder_service: ReminderService | None = None,
+        vision_service: VisionService | None = None,
         confirmation_handler: Callable[[str, str, str], ConfirmationResult] | None = None,
     ) -> None:
         self.settings = settings or load_settings()
@@ -81,6 +83,7 @@ class AssistantCore:
             self.reminder_service = ReminderService(self.settings)
         else:
             self.reminder_service = None
+        self.vision_service = vision_service or VisionService(self.settings, confirmation_handler=confirmation_handler)
         self.conversation_history = ConversationHistory(
             enabled=self.settings.conversation_history_enabled,
             max_messages=self.settings.conversation_history_max_messages,
@@ -107,6 +110,10 @@ class AssistantCore:
         weather_response = self._handle_weather_command(cleaned)
         if weather_response is not None:
             return weather_response
+
+        vision_response = self._handle_vision_command(cleaned)
+        if vision_response is not None:
+            return vision_response
 
         app_launch_response = self._handle_app_launcher_command(cleaned)
         if app_launch_response is not None:
@@ -213,6 +220,38 @@ class AssistantCore:
         self.conversation_history.add_user(command_text)
         self.conversation_history.add_assistant(response.text)
         return response
+
+    def _handle_vision_command(self, command: str) -> AssistantResponse | None:
+        normalized = " ".join(command.lower().strip().split())
+        if normalized == "take screenshot":
+            return self._take_screenshot()
+        if normalized == "read screen text":
+            return self._read_screen_text()
+        return None
+
+    def _take_screenshot(self) -> AssistantResponse:
+        if self.vision_service is None or not self.settings.vision_enabled or not self.settings.screenshot_enabled:
+            return AssistantResponse(text="Screenshot capture is disabled.", accepted=True, source="local")
+
+        result = self.vision_service.capture_screenshot()
+        return AssistantResponse(
+            text=result.text,
+            accepted=result.success,
+            source="vision" if result.success else "local",
+            error=result.safe_error,
+        )
+
+    def _read_screen_text(self) -> AssistantResponse:
+        if self.vision_service is None or not self.settings.vision_enabled or not self.settings.ocr_enabled:
+            return AssistantResponse(text="OCR is disabled.", accepted=True, source="local")
+
+        result = self.vision_service.read_screen_text()
+        return AssistantResponse(
+            text=result.text,
+            accepted=result.success,
+            source="vision" if result.success else "local",
+            error=result.safe_error,
+        )
 
     def _handle_calendar_command(self, command: str) -> AssistantResponse | None:
         normalized = " ".join(command.lower().strip().split())

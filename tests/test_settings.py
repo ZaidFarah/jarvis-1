@@ -92,6 +92,35 @@ def test_weather_settings_read_environment(monkeypatch: pytest.MonkeyPatch) -> N
     assert settings.weather_units == "imperial"
 
 
+def test_vision_settings_defaults_are_safe() -> None:
+    settings = AppSettings(_env_file=None)
+
+    assert settings.vision_enabled is False
+    assert settings.screenshot_enabled is False
+    assert settings.ocr_enabled is False
+    assert settings.screenshot_save_dir.name == "screenshots"
+    assert settings.ocr_provider == "tesseract"
+    assert settings.ocr_max_output_chars == 4000
+
+
+def test_vision_settings_read_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("VISION_ENABLED", "true")
+    monkeypatch.setenv("SCREENSHOT_ENABLED", "true")
+    monkeypatch.setenv("OCR_ENABLED", "true")
+    monkeypatch.setenv("SCREENSHOT_SAVE_DIR", "logs/custom-screenshots")
+    monkeypatch.setenv("OCR_PROVIDER", "tesseract")
+    monkeypatch.setenv("OCR_MAX_OUTPUT_CHARS", "1234")
+
+    settings = AppSettings(_env_file=None)
+
+    assert settings.vision_enabled is True
+    assert settings.screenshot_enabled is True
+    assert settings.ocr_enabled is True
+    assert settings.screenshot_save_dir.as_posix().endswith("logs/custom-screenshots")
+    assert settings.ocr_provider == "tesseract"
+    assert settings.ocr_max_output_chars == 1234
+
+
 def test_reminder_settings_defaults_are_safe() -> None:
     settings = AppSettings(_env_file=None)
 

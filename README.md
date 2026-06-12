@@ -640,6 +640,21 @@ Jarvis can open only sites listed in `WEBSITE_ALLOWED_SITES`. If a site is missi
 - If the token only has Gmail read-only scope, Jarvis reports: `Gmail send scope is required. Re-run Gmail auth after enabling send draft.`
 - Gmail logs are saved to `logs/gmail.log`.
 
+## Phase 30 Scope
+
+- Vision foundation for manual screenshot capture and OCR diagnostics only.
+- Enable with `VISION_ENABLED=true`, `SCREENSHOT_ENABLED=true`, and `OCR_ENABLED=true`.
+- Screenshot tests save only under `SCREENSHOT_SAVE_DIR=logs/screenshots`.
+- OCR provider: `OCR_PROVIDER=tesseract`.
+- OCR output is capped by `OCR_MAX_OUTPUT_CHARS=4000`.
+- Run `py main.py --vision-check` to inspect screenshot/OCR readiness.
+- Run `py main.py --screenshot-test` to capture a screenshot after confirmation.
+- Run `py main.py --ocr-test "<image_path>"` to OCR a local image after confirmation.
+- Assistant commands: `take screenshot` and `read screen text`.
+- Screenshot capture and OCR are high risk and require permission plus confirmation.
+- Jarvis does not send screenshots or OCR text to OpenAI, and it does not click or type on the screen.
+- Vision logs are saved to `logs/vision.log`.
+
 ## Text To Speech Test
 
 ```powershell

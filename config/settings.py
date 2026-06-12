@@ -358,6 +358,32 @@ class AppSettings(BaseSettings):
         default="metric",
         validation_alias=AliasChoices("WEATHER_UNITS", "JARVIS_WEATHER_UNITS"),
     )
+    vision_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("VISION_ENABLED", "JARVIS_VISION_ENABLED"),
+    )
+    screenshot_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("SCREENSHOT_ENABLED", "JARVIS_SCREENSHOT_ENABLED"),
+    )
+    ocr_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("OCR_ENABLED", "JARVIS_OCR_ENABLED"),
+    )
+    screenshot_save_dir: Path = Field(
+        default=PROJECT_ROOT / "logs" / "screenshots",
+        validation_alias=AliasChoices("SCREENSHOT_SAVE_DIR", "JARVIS_SCREENSHOT_SAVE_DIR"),
+    )
+    ocr_provider: str = Field(
+        default="tesseract",
+        validation_alias=AliasChoices("OCR_PROVIDER", "JARVIS_OCR_PROVIDER"),
+    )
+    ocr_max_output_chars: int = Field(
+        default=4000,
+        ge=1,
+        le=100_000,
+        validation_alias=AliasChoices("OCR_MAX_OUTPUT_CHARS", "JARVIS_OCR_MAX_OUTPUT_CHARS"),
+    )
     openai_enabled: bool = Field(
         default=False,
         validation_alias=AliasChoices("OPENAI_ENABLED", "JARVIS_OPENAI_ENABLED"),
