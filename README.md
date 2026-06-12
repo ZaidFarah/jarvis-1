@@ -144,6 +144,15 @@ Jarvis is a Windows desktop AI assistant foundation. Phase 1 provides the applic
 - Weather requests are skipped safely when disabled or missing a key.
 - Weather logs are saved to `logs/weather.log`.
 
+## Phase 13 Scope
+
+- Local reminders backed by SQLite.
+- Reminder commands: `remind me to <task>`, `remind me to <task> at <time>`, `list reminders`, `show reminders`, `cancel reminder <id>`, and `complete reminder <id>`.
+- Reminder time parsing stays simple and expects `YYYY-MM-DD HH:MM` or a close ISO-like equivalent.
+- CLI command: `py main.py --reminders-test`.
+- Reminder settings: `REMINDERS_ENABLED=true`, `REMINDERS_DATABASE_PATH=data/jarvis_reminders.db`.
+- Reminder logs are saved to `logs/reminders.log`.
+
 ## Setup
 
 Install dependencies:
@@ -388,6 +397,14 @@ py main.py --weather-check
 
 The weather check reports whether weather is enabled, which provider is selected, whether an API key is present, the default city, and whether a live request was attempted. If weather is enabled and the key exists, Jarvis requests current weather from OpenWeatherMap. The command never prints the API key.
 
+## Reminders Test
+
+```powershell
+py main.py --reminders-test
+```
+
+The reminders test uses an isolated SQLite database and exercises reminder creation, listing, completion, and cancellation without touching the main reminders database.
+
 ## Text To Speech Test
 
 ```powershell
@@ -445,6 +462,7 @@ Jarvis/
   assistant/
   config/
   integrations/
+  reminders/
   gui/
   voice/
   services/

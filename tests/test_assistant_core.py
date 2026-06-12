@@ -3,6 +3,7 @@ from __future__ import annotations
 from assistant.core import AssistantCore
 from config.settings import AppSettings
 from integrations.weather_service import WeatherQueryResult
+from reminders.service import ReminderQueryResult
 from services.openai_service import OpenAIChatResult
 from memory.store import SQLiteMemoryStore
 
@@ -38,6 +39,34 @@ class FakeWeatherService:
     def current_weather(self, city: str | None = None) -> WeatherQueryResult:
         self.calls.append(city)
         return self.result
+
+
+class FakeReminderService:
+    def __init__(self, list_result: ReminderQueryResult | None = None) -> None:
+        self.list_result = list_result or ReminderQueryResult(success=True, text="Here are your reminders:")
+        self.calls: list[tuple[object, ...]] = []
+
+    def parse_reminder_command(self, command: str) -> tuple[str, str | None]:
+        self.calls.append(("parse", command))
+        if command.lower().startswith("remind me to "):
+            return command.removeprefix("remind me to ").strip(), None
+        raise ValueError("Not a reminder command.")
+
+    def create_reminder(self, title: str, remind_at_text: str | None = None) -> ReminderQueryResult:
+        self.calls.append(("create", title, remind_at_text))
+        return ReminderQueryResult(success=True, text=f"Reminder created: {title}")
+
+    def list_reminders(self) -> ReminderQueryResult:
+        self.calls.append(("list",))
+        return self.list_result
+
+    def cancel_reminder(self, reminder_id: int) -> ReminderQueryResult:
+        self.calls.append(("cancel", reminder_id))
+        return ReminderQueryResult(success=True, text=f"Reminder {reminder_id} cancelled.")
+
+    def complete_reminder(self, reminder_id: int) -> ReminderQueryResult:
+        self.calls.append(("complete", reminder_id))
+        return ReminderQueryResult(success=True, text=f"Reminder {reminder_id} completed.")
 
 
 def test_assistant_core_returns_placeholder_response() -> None:
@@ -205,3 +234,58 @@ def test_assistant_core_routes_weather_commands_without_openai() -> None:
     assert response.text == "Current weather in London: clear sky."
     assert weather_service.calls == ["London"]
     assert openai_service.messages == []
+
+
+def test_assistant_core_routes_reminder_commands() -> None:
+    reminder_service = FakeReminderService()
+    openai_service = FakeOpenAIService(error=AssertionError("OpenAI should not be called for reminders"))
+    assistant = AssistantCore(
+        settings=AppSettings(_env_file=None, openai_enabled=False),
+        openai_service=openai_service,
+        weather_service=FakeWeatherService(
+            WeatherQueryResult(
+                success=True,
+                text="Current weather in Nottingham: clear sky.",
+                provider="openweathermap",
+                city="Nottingham",
+                request_attempted=False,
+                api_key_detected=False,
+            )
+        ),
+        reminder_service=reminder_service,
+    )
+
+    create_response = assistant.handle_command("remind me to stretch")
+    list_response = assistant.handle_command("show reminders")
+    cancel_response = assistant.handle_command("cancel reminder 7")
+    complete_response = assistant.handle_command("complete reminder 8")
+
+    assert create_response.source == "reminders"
+    assert "Reminder created" in create_response.text
+    assert list_response.text == "Here are your reminders:"
+    assert cancel_response.text == "Reminder 7 cancelled."
+    assert complete_response.text == "Reminder 8 completed."
+    assert [call[0] for call in reminder_service.calls] == ["parse", "create", "list", "cancel", "complete"]
+    assert openai_service.messages == []
+
+
+def test_assistant_core_disabled_reminders_fallback() -> None:
+    assistant = AssistantCore(
+        settings=AppSettings(_env_file=None, reminders_enabled=False, openai_enabled=False),
+        openai_service=FakeOpenAIService(),
+        weather_service=FakeWeatherService(
+            WeatherQueryResult(
+                success=True,
+                text="Current weather in Nottingham: clear sky.",
+                provider="openweathermap",
+                city="Nottingham",
+                request_attempted=False,
+                api_key_detected=False,
+            )
+        ),
+    )
+
+    response = assistant.handle_command("remind me to stretch at 2026-06-12 18:30")
+
+    assert response.source == "local"
+    assert response.text == "Reminders are disabled."

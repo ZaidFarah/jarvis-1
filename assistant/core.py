@@ -7,6 +7,7 @@ from assistant.conversation import ConversationHistory
 from integrations.weather_service import WeatherService
 from memory.store import SensitiveMemoryError, SQLiteMemoryStore
 from config.settings import AppSettings, load_settings
+from reminders.service import ReminderService, ReminderTimeError
 from services.openai_service import OpenAIService
 
 
@@ -32,10 +33,17 @@ class AssistantCore:
         openai_service: OpenAIService | None = None,
         memory_store: SQLiteMemoryStore | None = None,
         weather_service: WeatherService | None = None,
+        reminder_service: ReminderService | None = None,
     ) -> None:
         self.settings = settings or load_settings()
         self.openai_service = openai_service or OpenAIService(self.settings)
         self.weather_service = weather_service or WeatherService(self.settings)
+        if reminder_service is not None:
+            self.reminder_service = reminder_service
+        elif self.settings.reminders_enabled:
+            self.reminder_service = ReminderService(self.settings)
+        else:
+            self.reminder_service = None
         self.conversation_history = ConversationHistory(
             enabled=self.settings.conversation_history_enabled,
             max_messages=self.settings.conversation_history_max_messages,
@@ -62,6 +70,10 @@ class AssistantCore:
         weather_response = self._handle_weather_command(cleaned)
         if weather_response is not None:
             return weather_response
+
+        reminder_response = self._handle_reminder_command(cleaned)
+        if reminder_response is not None:
+            return reminder_response
 
         memory_response = self._handle_memory_command(cleaned)
         if memory_response is not None:
@@ -141,6 +153,51 @@ class AssistantCore:
         self.conversation_history.add_assistant(response.text)
         return response
 
+    def _handle_reminder_command(self, command: str) -> AssistantResponse | None:
+        if not self.settings.reminders_enabled or self.reminder_service is None:
+            normalized = " ".join(command.lower().strip().split())
+            if normalized.startswith("remind me to ") or normalized in {"list reminders", "show reminders"} or normalized.startswith("cancel reminder ") or normalized.startswith("complete reminder "):
+                return AssistantResponse(text="Reminders are disabled.", accepted=True, source="local")
+            return None
+
+        normalized = " ".join(command.lower().strip().split())
+        if normalized in {"list reminders", "show reminders"}:
+            result = self.reminder_service.list_reminders()
+            return AssistantResponse(text=result.text, accepted=result.success, source="reminders", error=result.safe_error)
+
+        if normalized.startswith("cancel reminder "):
+            reminder_id = self._parse_reminder_id(normalized.removeprefix("cancel reminder "))
+            if reminder_id is None:
+                return AssistantResponse(
+                    text="Please provide a numeric reminder id.",
+                    accepted=False,
+                    source="reminders",
+                )
+            result = self.reminder_service.cancel_reminder(reminder_id)
+            return AssistantResponse(text=result.text, accepted=result.success, source="reminders", error=result.safe_error)
+
+        if normalized.startswith("complete reminder "):
+            reminder_id = self._parse_reminder_id(normalized.removeprefix("complete reminder "))
+            if reminder_id is None:
+                return AssistantResponse(
+                    text="Please provide a numeric reminder id.",
+                    accepted=False,
+                    source="reminders",
+                )
+            result = self.reminder_service.complete_reminder(reminder_id)
+            return AssistantResponse(text=result.text, accepted=result.success, source="reminders", error=result.safe_error)
+
+        try:
+            title, remind_at_text = self.reminder_service.parse_reminder_command(command)
+        except ValueError:
+            return None
+
+        if normalized.startswith("remind me to "):
+            result = self.reminder_service.create_reminder(title, remind_at_text)
+            return AssistantResponse(text=result.text, accepted=result.success, source="reminders", error=result.safe_error)
+
+        return None
+
     def _remember_fact(self, fact: str) -> AssistantResponse:
         if not self.settings.memory_enabled or self.memory_store is None:
             return AssistantResponse(text="Memory is disabled.", accepted=True, source="local")
@@ -192,3 +249,10 @@ class AssistantCore:
 
         removed = self.memory_store.reset()
         return AssistantResponse(text=f"Memory cleared. Removed {removed} memories.", accepted=True, source="local")
+
+    @staticmethod
+    def _parse_reminder_id(value: str) -> int | None:
+        cleaned = value.strip()
+        if not cleaned.isdigit():
+            return None
+        return int(cleaned)

@@ -11,6 +11,7 @@ from integrations.weather_service import WeatherService, format_weather_check_re
 from services.logging_service import configure_logging
 from services.openai_service import OpenAIService, format_openai_check_report
 from memory.store import SQLiteMemoryStore
+from reminders.service import ReminderService
 from voice.audio_diagnostics import AudioDiagnostics, format_audio_check_report
 from voice.tts import TextToSpeechResult, format_tts_result, speak_text
 from voice.transcription_diagnostics import TranscriptionDiagnostics, format_transcription_report
@@ -125,6 +126,11 @@ def main(argv: list[str] | None = None) -> int:
         configure_logging(settings, console=False)
         return _run_memory_test(settings)
 
+    if "--reminders-test" in args:
+        settings = load_settings()
+        configure_logging(settings, console=False)
+        return _run_reminders_test(settings)
+
     application = JarvisApplication()
     return application.run()
 
@@ -236,6 +242,40 @@ def _run_memory_test(settings) -> int:
 
         reset_response = assistant.handle_command("reset memory")
         print(f"reset: {reset_response.text}", flush=True)
+        return 0
+
+
+def _run_reminders_test(settings) -> int:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        reminders_path = Path(temp_dir) / "jarvis_reminders_test.db"
+        test_settings = settings.model_copy(
+            update={
+                "reminders_enabled": True,
+                "reminders_database_path": reminders_path,
+                "openai_enabled": False,
+            }
+        )
+        service = ReminderService(test_settings)
+        assistant = AssistantCore(settings=test_settings, reminder_service=service)
+
+        print("Jarvis reminders test", flush=True)
+        print(f"reminders database: {reminders_path}", flush=True)
+
+        invalid_response = assistant.handle_command("remind me to stretch")
+        print(f"invalid time: {invalid_response.text}", flush=True)
+
+        create_response = assistant.handle_command("remind me to stretch at 2026-06-12 18:30")
+        print(f"create: {create_response.text}", flush=True)
+
+        list_response = assistant.handle_command("list reminders")
+        print("reminders:", flush=True)
+        print(list_response.text, flush=True)
+
+        complete_response = assistant.handle_command("complete reminder 1")
+        print(f"complete: {complete_response.text}", flush=True)
+
+        cancel_response = assistant.handle_command("cancel reminder 1")
+        print(f"cancel: {cancel_response.text}", flush=True)
         return 0
 
 

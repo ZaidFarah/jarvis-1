@@ -155,6 +155,14 @@ class AppSettings(BaseSettings):
         default=PROJECT_ROOT / "data" / "jarvis_memory.db",
         validation_alias=AliasChoices("MEMORY_DATABASE_PATH", "JARVIS_MEMORY_DATABASE_PATH"),
     )
+    reminders_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("REMINDERS_ENABLED", "JARVIS_REMINDERS_ENABLED"),
+    )
+    reminders_database_path: Path = Field(
+        default=PROJECT_ROOT / "data" / "jarvis_reminders.db",
+        validation_alias=AliasChoices("REMINDERS_DATABASE_PATH", "JARVIS_REMINDERS_DATABASE_PATH"),
+    )
     weather_enabled: bool = Field(
         default=False,
         validation_alias=AliasChoices("WEATHER_ENABLED", "JARVIS_WEATHER_ENABLED"),
@@ -260,6 +268,11 @@ class AppSettings(BaseSettings):
     @field_validator("memory_database_path")
     @classmethod
     def expand_memory_database_path(cls, value: Path) -> Path:
+        return value.expanduser().resolve()
+
+    @field_validator("reminders_database_path")
+    @classmethod
+    def expand_reminders_database_path(cls, value: Path) -> Path:
         return value.expanduser().resolve()
 
     @field_validator("speech_to_text_provider", "tts_provider", "whisper_device", "whisper_compute_type")
@@ -379,6 +392,10 @@ class AppSettings(BaseSettings):
     @property
     def has_weather_api_key(self) -> bool:
         return bool(self.weather_api_key)
+
+    @property
+    def has_reminders_database(self) -> bool:
+        return bool(self.reminders_database_path)
 
 
 def load_settings() -> AppSettings:

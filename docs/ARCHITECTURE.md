@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Jarvis is being built as a production-quality Windows desktop assistant. Phase 1 created the safe desktop foundation. Phase 2 added a limited local voice foundation for microphone diagnostics and provider interfaces. Phase 2.5 improved diagnostic reliability and reporting. Phase 3 added one-shot Faster Whisper transcription testing. Phase 4 added controlled wake phrase detection as a test mode only. Phase 5 added a controlled one-shot voice command test mode. Phase 6 added OpenAI connection diagnostics. Phase 7 connects `AssistantCore` to OpenAI chat with local fallback. Phase 8 adds safe local text-to-speech for Jarvis responses. Phase 8.5 adds OpenAI TTS as the preferred voice provider with local `pyttsx3` fallback. Phase 8.6 improves one-shot command capture timing after wake detection. Phase 9 adds the first continuous voice loop. Phase 9.5 polishes that loop with spoken status feedback, cooldowns, summary counters, and richer GUI state. Phase 10 adds short-term in-memory conversation history for the current session. Phase 11 adds SQLite-backed persistent local memory for explicit user-approved facts only. Phase 12 adds safe weather lookups through OpenWeatherMap with explicit configuration and fallback handling.
+Jarvis is being built as a production-quality Windows desktop assistant. Phase 1 created the safe desktop foundation. Phase 2 added a limited local voice foundation for microphone diagnostics and provider interfaces. Phase 2.5 improved diagnostic reliability and reporting. Phase 3 added one-shot Faster Whisper transcription testing. Phase 4 added controlled wake phrase detection as a test mode only. Phase 5 added a controlled one-shot voice command test mode. Phase 6 added OpenAI connection diagnostics. Phase 7 connects `AssistantCore` to OpenAI chat with local fallback. Phase 8 adds safe local text-to-speech for Jarvis responses. Phase 8.5 adds OpenAI TTS as the preferred voice provider with local `pyttsx3` fallback. Phase 8.6 improves one-shot command capture timing after wake detection. Phase 9 adds the first continuous voice loop. Phase 9.5 polishes that loop with spoken status feedback, cooldowns, summary counters, and richer GUI state. Phase 10 adds short-term in-memory conversation history for the current session. Phase 11 adds SQLite-backed persistent local memory for explicit user-approved facts only. Phase 12 adds safe weather lookups through OpenWeatherMap with explicit configuration and fallback handling. Phase 13 adds local SQLite reminders with simple explicit command routing.
 
 ## Phase 1 Components
 
@@ -53,6 +53,8 @@ OpenAI chat uses the configured `SYSTEM_PROMPT`. The default is: `You are Jarvis
 - `conversation.py`: keeps short-term in-memory conversation turns, trims to the configured maximum, and formats recent history for prompts.
 - `memory/store.py`: manages SQLite persistence for explicit user-approved memories, rejects sensitive secrets, and supports remember/list/forget/reset operations.
 - `integrations/weather_service.py`: performs explicit weather checks, fetches current weather only when enabled and keyed, redacts secret-like error text, and writes `logs/weather.log`.
+- `reminders/service.py`: manages explicit reminder commands, parses simple time strings, routes to SQLite storage, and writes `logs/reminders.log`.
+- `reminders/store.py`: persists reminders with title, remind_at, status, created_at, and updated_at fields.
 
 No ElevenLabs, voice cloning, real-time OpenAI voice conversation, permissions system, startup background service, or tool execution is implemented in Phase 9.
 
@@ -88,6 +90,7 @@ Future phases should add capabilities behind explicit approval gates:
 - Phase 8.6: clearer one-shot command capture timing after wake detection
 - Phase 9: first continuous one-command-at-a-time voice loop
 - Phase 12: safe OpenWeatherMap weather lookups
+- Phase 13: local SQLite reminders
 - Phase 3: OpenAI provider, agent routing, typed tool interfaces
 - Phase 4: local memory and summaries
 - Phase 5: permission-gated file, browser, and desktop tools
@@ -104,3 +107,5 @@ Phase 10 adds only in-memory conversation context. It does not persist history t
 Phase 11 adds only SQLite-backed memory for explicit user-approved facts. It does not add embeddings, vector databases, long-term semantic search, or automatic conversation logging into memory.
 
 Phase 12 adds only explicit weather lookups through OpenWeatherMap. It does not add automatic location tracking, Gmail, Calendar, browser automation, desktop automation, file tools, vision, or a broader tools system.
+
+Phase 13 adds only local reminders backed by SQLite. It does not add background notifications, scheduled delivery, Gmail, Calendar, browser automation, desktop automation, file tools, vision, or a broader scheduler.

@@ -92,6 +92,23 @@ def test_weather_settings_read_environment(monkeypatch: pytest.MonkeyPatch) -> N
     assert settings.weather_units == "imperial"
 
 
+def test_reminder_settings_defaults_are_safe() -> None:
+    settings = AppSettings(_env_file=None)
+
+    assert settings.reminders_enabled is True
+    assert settings.reminders_database_path.name == "jarvis_reminders.db"
+
+
+def test_reminder_settings_read_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("REMINDERS_ENABLED", "false")
+    monkeypatch.setenv("REMINDERS_DATABASE_PATH", "data/custom_reminders.db")
+
+    settings = AppSettings(_env_file=None)
+
+    assert settings.reminders_enabled is False
+    assert settings.reminders_database_path.name == "custom_reminders.db"
+
+
 def test_openai_settings_read_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OPENAI_ENABLED", "true")
     monkeypatch.setenv("OPENAI_API_KEY", "  sk-test  ")
