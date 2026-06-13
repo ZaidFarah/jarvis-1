@@ -11,3 +11,5 @@ google-auth>=2.38
 google-auth-oauthlib>=1.2
 Pillow>=10.0
 pytesseract>=0.3.13
+langgraph>=0.2.0
+langchain-core>=0.3.0

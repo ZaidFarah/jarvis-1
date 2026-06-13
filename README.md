@@ -670,6 +670,14 @@ Jarvis can open only sites listed in `WEBSITE_ALLOWED_SITES`. If a site is missi
 - Jarvis does not click, type, or control the screen.
 - Vision analysis logs are saved to `logs/vision.log`, `logs/chat.log`, and `logs/confirmations.log`.
 
+## Phase 33 Scope
+
+- Experimental LangGraph-style agent runtime that sits beside `AssistantCore`.
+- Additions are limited to request classification and dispatch; existing command routing remains the source of truth for permissions and confirmations.
+- Run `py main.py --agent-test "what is the weather"` to inspect routing.
+- The agent still routes through the existing weather, reminders, app launcher, website launcher, file access, calendar, Gmail, and vision paths.
+- It does not add autonomous behavior, background execution, self-modifying logic, desktop automation, browser automation, or code execution.
+
 ## Text To Speech Test
 
 ```powershell

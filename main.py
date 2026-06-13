@@ -5,6 +5,7 @@ import tempfile
 from pathlib import Path
 
 from app.application import JarvisApplication
+from agent.runtime import AgentRuntime
 from assistant.core import AssistantCore, AssistantResponse
 from config.settings import load_settings
 from integrations.calendar_service import CalendarService, format_calendar_auth_report, format_calendar_check_report
@@ -107,6 +108,12 @@ def main(argv: list[str] | None = None) -> int:
         report = OpenAIService(settings).run_check()
         print(format_openai_check_report(report))
         return 0 if report.is_successful else 1
+
+    if "--agent-test" in args:
+        settings = load_settings()
+        configure_logging(settings, console=False)
+        user_input = _message_after_flag(args, "--agent-test")
+        return _run_agent_test(settings, user_input)
 
     if "--notification-check" in args:
         settings = load_settings()
@@ -579,6 +586,16 @@ def _run_ocr_test(settings, image_path: str) -> int:
     return 0 if result.success else 1
 
 
+def _run_agent_test(settings, user_input: str) -> int:
+    if not user_input:
+        print("Please provide an agent test input.", flush=True)
+        return 1
+    runtime = AgentRuntime(settings=settings)
+    result = runtime.run(user_input)
+    print(_format_agent_test_report(result), flush=True)
+    return 0 if result.final_response else 1
+
+
 def _run_vision_analyze(settings, image_path: str) -> int:
     if not image_path:
         print("Please provide an image path for vision analysis.", flush=True)
@@ -901,6 +918,24 @@ def _format_reminders_check_report(
             lines.extend(["", "TTS fallback reason:", f"  {tts_result.fallback_reason}"])
         if tts_result.error:
             lines.extend(["", "TTS error:", f"  {tts_result.error}"])
+    return "\n".join(lines)
+
+
+def _format_agent_test_report(result) -> str:
+    lines = [
+        "Jarvis Agent Test",
+        "=================",
+        f"user: {result.user_input}",
+        f"selected tool: {result.selected_tool}",
+        f"reason: {result.reason}",
+        "",
+        "final response:",
+        f"  {result.final_response}",
+    ]
+    if result.tool_result and result.tool_result != result.final_response:
+        lines.extend(["", "tool result:", f"  {result.tool_result}"])
+    if getattr(result.response, "error", None):
+        lines.extend(["", "fallback reason:", f"  {result.response.error}"])
     return "\n".join(lines)
 
 
