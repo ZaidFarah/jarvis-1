@@ -9,9 +9,12 @@ __pycache__/
 .ruff_cache/
 logs/*.log
 logs/*.txt
+logs/
 logs/audio/
 logs/comtypes_gen/
 data/*.db
 build/
 dist/
 *.spec
+credentials/token_*.json
+credentials/google_client_secret.json

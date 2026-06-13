@@ -9,6 +9,7 @@ from agent.runtime import AgentRuntime
 from assistant.core import AssistantCore, AssistantResponse
 from diagnostics.health import HealthService, format_health_check_report
 from config.settings import load_settings
+from packaging.runtime_paths import format_runtime_check_report, resolve_runtime_paths
 from integrations.calendar_service import CalendarService, format_calendar_auth_report, format_calendar_check_report
 from integrations.gmail_service import (
     GmailService,
@@ -70,6 +71,13 @@ def main(argv: list[str] | None = None) -> int:
         configure_logging(settings, console=False)
         report = HealthService(settings).run_check()
         print(format_health_check_report(report))
+        return 0
+
+    if "--runtime-check" in args:
+        settings = load_settings()
+        configure_logging(settings, console=False)
+        report = resolve_runtime_paths(settings)
+        print(format_runtime_check_report(report))
         return 0
 
     if "--transcribe-test" in args:

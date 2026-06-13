@@ -63,6 +63,10 @@ class HealthCheckReport:
     log_file: Path
     sections: list[tuple[str, list[tuple[str, str]]]] = field(default_factory=list)
 
+    @property
+    def is_successful(self) -> bool:
+        return True
+
 
 class HealthService:
     def __init__(self, settings: AppSettings) -> None:

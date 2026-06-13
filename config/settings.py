@@ -20,7 +20,14 @@ class AppSettings(BaseSettings):
         populate_by_name=True,
     )
 
-    app_name: str = "Jarvis"
+    app_name: str = Field(
+        default="Jarvis",
+        validation_alias=AliasChoices("APP_NAME", "JARVIS_APP_NAME"),
+    )
+    runtime_mode: str = Field(
+        default="source",
+        validation_alias=AliasChoices("RUNTIME_MODE", "JARVIS_RUNTIME_MODE"),
+    )
     environment: str = "development"
     log_level: str = "INFO"
     log_dir: Path = Field(default=PROJECT_ROOT / "logs")
@@ -484,6 +491,15 @@ class AppSettings(BaseSettings):
         if normalized not in allowed:
             raise ValueError(f"Unsupported log level: {value}")
         return normalized
+
+    @field_validator("runtime_mode")
+    @classmethod
+    def normalize_runtime_mode(cls, value: str) -> str:
+        cleaned = value.strip().lower()
+        allowed = {"source", "packaged"}
+        if cleaned not in allowed:
+            raise ValueError(f"Unsupported runtime mode: {value}")
+        return cleaned
 
     @field_validator("log_dir")
     @classmethod

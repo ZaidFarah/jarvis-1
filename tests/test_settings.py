@@ -9,6 +9,7 @@ def test_settings_defaults_are_safe() -> None:
     settings = AppSettings(_env_file=None)
 
     assert settings.app_name == "Jarvis"
+    assert settings.runtime_mode == "source"
     assert settings.environment == "development"
     assert settings.log_level == "INFO"
     assert settings.always_on_top is True
@@ -18,11 +19,21 @@ def test_settings_defaults_are_safe() -> None:
 def test_settings_read_jarvis_prefixed_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("JARVIS_APP_NAME", "Jarvis Test")
     monkeypatch.setenv("JARVIS_LOG_LEVEL", "debug")
+    monkeypatch.setenv("RUNTIME_MODE", "packaged")
 
     settings = AppSettings(_env_file=None)
 
     assert settings.app_name == "Jarvis Test"
     assert settings.log_level == "DEBUG"
+    assert settings.runtime_mode == "packaged"
+
+
+def test_runtime_mode_read_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RUNTIME_MODE", "packaged")
+
+    settings = AppSettings(_env_file=None)
+
+    assert settings.runtime_mode == "packaged"
 
 
 def test_invalid_log_level_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:

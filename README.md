@@ -382,6 +382,14 @@ The health check prints one safe snapshot of the current Jarvis configuration: P
 logs/health.log
 ```
 
+## Runtime Check
+
+```powershell
+py main.py --runtime-check
+```
+
+The runtime check reports whether Jarvis is running in source mode or packaged mode and shows the resolved paths for `.env`, `logs/`, `data/`, `credentials/`, and `assets/`. It does not print any secrets or tokens. The packaging scaffold also includes `build_exe.bat` and notes for a future PyInstaller build, but Phase 36 does not build the EXE yet.
+
 ## Chat Test
 
 ```powershell
