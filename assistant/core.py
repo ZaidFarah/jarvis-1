@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
 
 from assistant.conversation import ConversationHistory
 from integrations.calendar_service import CalendarCreateResult, CalendarService, CalendarQueryResult
@@ -92,6 +93,9 @@ class AssistantCore:
             enabled=self.settings.conversation_history_enabled,
             max_messages=self.settings.conversation_history_max_messages,
         )
+        self.agent_runtime: Any | None = None
+        if self.settings.agent_enabled:
+            self.agent_runtime = self._create_agent_runtime()
         if memory_store is not None:
             self.memory_store = memory_store
         elif self.settings.memory_enabled:
@@ -103,6 +107,17 @@ class AssistantCore:
         self.conversation_history.reset()
 
     def handle_command(self, command: str) -> AssistantResponse:
+        cleaned = command.strip()
+        if not cleaned:
+            return AssistantResponse(text="Please enter a command first.", accepted=False)
+
+        if self.settings.agent_enabled and self.agent_runtime is not None:
+            result = self.agent_runtime.run(cleaned)
+            return result.response
+
+        return self.handle_command_direct(cleaned)
+
+    def handle_command_direct(self, command: str) -> AssistantResponse:
         cleaned = command.strip()
         if not cleaned:
             return AssistantResponse(text="Please enter a command first.", accepted=False)
@@ -169,6 +184,11 @@ class AssistantCore:
         response = self._fallback_response(cleaned, error=chat_result.safe_error)
         self.conversation_history.add_assistant(response.text)
         return response
+
+    def _create_agent_runtime(self) -> Any:
+        from agent.runtime import AgentRuntime
+
+        return AgentRuntime(settings=self.settings, assistant=self)
 
     def _fallback_response(self, command: str, error: str | None = None) -> AssistantResponse:
         return AssistantResponse(

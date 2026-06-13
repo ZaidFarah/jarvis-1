@@ -115,6 +115,12 @@ def main(argv: list[str] | None = None) -> int:
         user_input = _message_after_flag(args, "--agent-test")
         return _run_agent_test(settings, user_input)
 
+    if "--agent-chat-test" in args:
+        settings = load_settings()
+        configure_logging(settings, console=False)
+        user_input = _message_after_flag(args, "--agent-chat-test")
+        return _run_agent_chat_test(settings, user_input)
+
     if "--notification-check" in args:
         settings = load_settings()
         configure_logging(settings, console=False)
@@ -596,6 +602,16 @@ def _run_agent_test(settings, user_input: str) -> int:
     return 0 if result.final_response else 1
 
 
+def _run_agent_chat_test(settings, user_input: str) -> int:
+    if not user_input:
+        print("Please provide an agent chat test input.", flush=True)
+        return 1
+    assistant = _build_cli_assistant(settings)
+    response = assistant.handle_command(user_input)
+    print(_format_agent_chat_test_report(user_input, response, settings.agent_enabled), flush=True)
+    return 0 if response.accepted else 1
+
+
 def _run_vision_analyze(settings, image_path: str) -> int:
     if not image_path:
         print("Please provide an image path for vision analysis.", flush=True)
@@ -936,6 +952,22 @@ def _format_agent_test_report(result) -> str:
         lines.extend(["", "tool result:", f"  {result.tool_result}"])
     if getattr(result.response, "error", None):
         lines.extend(["", "fallback reason:", f"  {result.response.error}"])
+    return "\n".join(lines)
+
+
+def _format_agent_chat_test_report(user_input: str, response: AssistantResponse, agent_enabled: bool) -> str:
+    lines = [
+        "Jarvis Agent Chat Test",
+        "======================",
+        f"user: {user_input}",
+        f"agent enabled: {_yes_no(agent_enabled)}",
+        f"response source: {response.source}",
+        "",
+        "Jarvis response:",
+        f"  {response.text}",
+    ]
+    if response.error:
+        lines.extend(["", "Fallback reason:", f"  {response.error}"])
     return "\n".join(lines)
 
 

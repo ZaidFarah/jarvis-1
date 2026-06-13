@@ -131,6 +131,14 @@ class AppSettings(BaseSettings):
         default=True,
         validation_alias=AliasChoices("VOICE_LOOP_SPEAK_STATUS", "JARVIS_VOICE_LOOP_SPEAK_STATUS"),
     )
+    agent_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("AGENT_ENABLED", "JARVIS_AGENT_ENABLED"),
+    )
+    agent_experimental: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("AGENT_EXPERIMENTAL", "JARVIS_AGENT_EXPERIMENTAL"),
+    )
     conversation_history_enabled: bool = Field(
         default=True,
         validation_alias=AliasChoices(

@@ -124,7 +124,10 @@ class AgentRuntime:
     def _dispatch_node(self, state: AgentState) -> AgentState:
         user_input = state.get("user_input", "")
         self.agent_logger.info("Dispatching agent tool={}", state.get("selected_tool", "chat"))
-        response = self.assistant.handle_command(user_input)
+        if hasattr(self.assistant, "handle_command_direct"):
+            response = self.assistant.handle_command_direct(user_input)
+        else:
+            response = self.assistant.handle_command(user_input)
         state["tool_result"] = response.text
         state["final_response"] = response.text
         state["conversation_history"] = self.assistant.conversation_history.format_recent_history()

@@ -153,6 +153,7 @@ class JarvisMainWindow(QMainWindow):
         self.voice_loop_status_value = QLabel("Idle")
         self.voice_loop_last_command_value = QLabel("None")
         self.voice_loop_last_response_value = QLabel("None")
+        self.agent_enabled_value = QLabel("Enabled" if settings.agent_enabled else "Disabled")
         self.reminders_check_value = QLabel("Idle")
         self.notification_result_value = QLabel("Idle")
         self.app_launch_result_value = QLabel("Idle")
@@ -206,6 +207,7 @@ class JarvisMainWindow(QMainWindow):
         self.voice_loop_status_value.setObjectName("voiceLoopValue")
         self.voice_loop_last_command_value.setObjectName("voiceLoopValue")
         self.voice_loop_last_response_value.setObjectName("voiceLoopValue")
+        self.agent_enabled_value.setObjectName("voiceLoopValue")
         self.reminders_check_value.setObjectName("voiceLoopValue")
         self.notification_result_value.setObjectName("voiceLoopValue")
         self.app_launch_result_value.setObjectName("voiceLoopValue")
@@ -335,13 +337,16 @@ class JarvisMainWindow(QMainWindow):
         diagnostics_layout.setContentsMargins(12, 12, 12, 12)
         diagnostics_layout.setHorizontalSpacing(10)
         diagnostics_layout.setVerticalSpacing(10)
+        self.agent_test_button = QPushButton("Agent Test")
+        self.agent_test_button.setObjectName("secondaryButton")
         diagnostics_layout.addWidget(self.notification_test_button, 0, 0)
         diagnostics_layout.addWidget(self.weather_check_button, 0, 1)
         diagnostics_layout.addWidget(self.vision_check_button, 1, 0)
         diagnostics_layout.addWidget(self.test_confirmation_button, 1, 1)
+        diagnostics_layout.addWidget(self.agent_test_button, 2, 0)
         diagnostics_intro = QLabel("Diagnostics stay read-only and use existing safe routes.")
         diagnostics_intro.setObjectName("sectionNote")
-        diagnostics_layout.addWidget(diagnostics_intro, 2, 0, 1, 2)
+        diagnostics_layout.addWidget(diagnostics_intro, 3, 0, 1, 2)
 
         self.tabs.addTab(voice_tab, "Voice")
         self.tabs.addTab(tools_tab, "Tools")
@@ -391,6 +396,10 @@ class JarvisMainWindow(QMainWindow):
         confirmation_row.addWidget(QLabel("Confirmation"))
         confirmation_row.addWidget(self.confirmation_result_value, stretch=1)
 
+        agent_row = QHBoxLayout()
+        agent_row.addWidget(QLabel("Agent enabled"))
+        agent_row.addWidget(self.agent_enabled_value, stretch=1)
+
         watch_row = QHBoxLayout()
         watch_row.addWidget(QLabel("Reminder watch"))
         watch_row.addWidget(self.reminder_watch_status_value, stretch=1)
@@ -404,6 +413,7 @@ class JarvisMainWindow(QMainWindow):
         loop_info_layout.addLayout(website_row)
         loop_info_layout.addLayout(file_access_row)
         loop_info_layout.addLayout(confirmation_row)
+        loop_info_layout.addLayout(agent_row)
         loop_info_layout.addLayout(watch_row)
 
         layout = QVBoxLayout(shell)
@@ -562,6 +572,7 @@ class JarvisMainWindow(QMainWindow):
         self.list_downloads_button.clicked.connect(self.list_downloads)
         self.vision_check_button.clicked.connect(self.vision_check)
         self.test_confirmation_button.clicked.connect(self.test_confirmation)
+        self.agent_test_button.clicked.connect(self.agent_test)
         self.start_reminder_watch_button.clicked.connect(self.start_reminder_watch)
         self.stop_reminder_watch_button.clicked.connect(self.stop_reminder_watch)
 
@@ -795,6 +806,26 @@ class JarvisMainWindow(QMainWindow):
             self.set_status(AssistantStatus.SLEEPING if report.is_successful else AssistantStatus.ERROR)
         except Exception as exc:  # pragma: no cover - defensive GUI boundary
             self._append_message("Jarvis", f"Vision check failed: {exc}")
+            self.set_status(AssistantStatus.ERROR)
+            self._set_mode("Error")
+            return
+
+        QTimer.singleShot(1200, lambda: self.set_status(AssistantStatus.SLEEPING))
+        QTimer.singleShot(1200, lambda: self._set_mode("Idle"))
+
+    def agent_test(self) -> None:
+        self._set_mode("Diagnostics")
+        self._append_message("Jarvis", "Running agent test...")
+        self.agent_enabled_value.setText("Enabled" if self.settings.agent_enabled else "Disabled")
+        self.set_status(AssistantStatus.THINKING)
+        QApplication.processEvents()
+
+        try:
+            response = self.assistant.handle_command("what is the weather")
+            self._append_message("Jarvis", response.text)
+            self.set_status(AssistantStatus.SLEEPING if response.accepted else AssistantStatus.ERROR)
+        except Exception as exc:  # pragma: no cover - defensive GUI boundary
+            self._append_message("Jarvis", f"Agent test failed: {exc}")
             self.set_status(AssistantStatus.ERROR)
             self._set_mode("Error")
             return

@@ -678,6 +678,14 @@ Jarvis can open only sites listed in `WEBSITE_ALLOWED_SITES`. If a site is missi
 - The agent still routes through the existing weather, reminders, app launcher, website launcher, file access, calendar, Gmail, and vision paths.
 - It does not add autonomous behavior, background execution, self-modifying logic, desktop automation, browser automation, or code execution.
 
+## Phase 34 Scope
+
+- Optional agent execution path controlled by `AGENT_ENABLED=false`.
+- `AssistantCore` keeps the existing direct path unless the agent toggle is enabled.
+- Run `py main.py --agent-chat-test "what is the weather"` to exercise the optional agent path through the normal assistant entry point.
+- The voice loop uses the agent path automatically when the toggle is enabled.
+- The GUI shows whether the agent path is enabled and includes an `Agent Test` action.
+
 ## Text To Speech Test
 
 ```powershell

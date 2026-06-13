@@ -41,11 +41,13 @@ def test_voice_loop_gui_state_updates_controls_and_status_fields() -> None:
         "Diagnostics",
     ]
     assert window.mode_value.text() == "Idle"
+    assert window.agent_enabled_value.text() in {"Enabled", "Disabled"}
     assert window.start_voice_loop_button.isEnabled() is True
     assert window.stop_voice_loop_button.isEnabled() is False
     assert window.chat_test_button.text() == "Chat Test"
     assert window.weather_check_button.text() == "Weather Check"
     assert window.vision_check_button.text() == "Vision Check"
+    assert window.agent_test_button.text() == "Agent Test"
 
     window._set_voice_loop_running(True)
 

@@ -55,6 +55,23 @@ def test_conversation_history_settings_read_environment(monkeypatch: pytest.Monk
     assert settings.conversation_history_max_messages == 4
 
 
+def test_agent_settings_defaults_are_safe() -> None:
+    settings = AppSettings(_env_file=None)
+
+    assert settings.agent_enabled is False
+    assert settings.agent_experimental is True
+
+
+def test_agent_settings_read_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AGENT_ENABLED", "true")
+    monkeypatch.setenv("AGENT_EXPERIMENTAL", "false")
+
+    settings = AppSettings(_env_file=None)
+
+    assert settings.agent_enabled is True
+    assert settings.agent_experimental is False
+
+
 def test_memory_settings_read_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MEMORY_ENABLED", "false")
     monkeypatch.setenv("MEMORY_DATABASE_PATH", "data/custom_memory.db")
