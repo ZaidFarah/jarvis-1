@@ -7,6 +7,7 @@ from pathlib import Path
 from app.application import JarvisApplication
 from agent.runtime import AgentRuntime
 from assistant.core import AssistantCore, AssistantResponse
+from diagnostics.health import HealthService, format_health_check_report
 from config.settings import load_settings
 from integrations.calendar_service import CalendarService, format_calendar_auth_report, format_calendar_check_report
 from integrations.gmail_service import (
@@ -63,6 +64,13 @@ def main(argv: list[str] | None = None) -> int:
         report = AudioDiagnostics(settings).run_full_check()
         print(format_audio_check_report(report))
         return 0 if report.is_successful else 1
+
+    if "--health-check" in args:
+        settings = load_settings()
+        configure_logging(settings, console=False)
+        report = HealthService(settings).run_check()
+        print(format_health_check_report(report))
+        return 0
 
     if "--transcribe-test" in args:
         settings = load_settings()

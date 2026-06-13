@@ -370,6 +370,18 @@ Detailed OpenAI diagnostic logs are saved to:
 logs/openai_diagnostics.log
 ```
 
+## Health Check
+
+```powershell
+py main.py --health-check
+```
+
+The health check prints one safe snapshot of the current Jarvis configuration: Python and OS version, OpenAI, voice, memory, reminders, weather, notifications, launchers, file access, calendar, Gmail, vision, and agent flags. It reports detected credentials and keys only as `yes` or `no` and never prints the actual secret values. Detailed health logs are saved to:
+
+```text
+logs/health.log
+```
+
 ## Chat Test
 
 ```powershell

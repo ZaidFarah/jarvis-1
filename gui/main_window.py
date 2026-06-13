@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
 
 from assistant.core import AssistantCore
 from config.settings import AppSettings
+from diagnostics.health import HealthService, format_health_check_report
 from security.confirmation import confirm_action_gui, format_confirmation_result
 from reminders.scheduler import ReminderWatcher
 from services.notification_service import NotificationService, format_notification_check_report
@@ -142,6 +143,7 @@ class JarvisMainWindow(QMainWindow):
         self.stop_voice_loop_button = QPushButton("Stop Loop")
         self.check_reminders_button = QPushButton("Check Reminders")
         self.notification_test_button = QPushButton("Test Notification")
+        self.health_check_button = QPushButton("Run Health Check")
         self.launch_notepad_button = QPushButton("Launch Notepad")
         self.open_google_button = QPushButton("Open Google")
         self.list_downloads_button = QPushButton("List Downloads")
@@ -156,6 +158,7 @@ class JarvisMainWindow(QMainWindow):
         self.agent_enabled_value = QLabel("Enabled" if settings.agent_enabled else "Disabled")
         self.reminders_check_value = QLabel("Idle")
         self.notification_result_value = QLabel("Idle")
+        self.health_result_value = QLabel("Idle")
         self.app_launch_result_value = QLabel("Idle")
         self.website_result_value = QLabel("Idle")
         self.file_access_result_value = QLabel("Idle")
@@ -176,6 +179,7 @@ class JarvisMainWindow(QMainWindow):
         self.start_reminder_watch_action: QAction | None = None
         self.stop_reminder_watch_action: QAction | None = None
         self.notification_test_action: QAction | None = None
+        self.health_check_action: QAction | None = None
         self.launch_notepad_action: QAction | None = None
         self.open_google_action: QAction | None = None
         self.list_downloads_action: QAction | None = None
@@ -210,6 +214,7 @@ class JarvisMainWindow(QMainWindow):
         self.agent_enabled_value.setObjectName("voiceLoopValue")
         self.reminders_check_value.setObjectName("voiceLoopValue")
         self.notification_result_value.setObjectName("voiceLoopValue")
+        self.health_result_value.setObjectName("voiceLoopValue")
         self.app_launch_result_value.setObjectName("voiceLoopValue")
         self.website_result_value.setObjectName("voiceLoopValue")
         self.file_access_result_value.setObjectName("voiceLoopValue")
@@ -248,6 +253,7 @@ class JarvisMainWindow(QMainWindow):
         self.stop_voice_loop_button.setEnabled(False)
         self.check_reminders_button.setObjectName("secondaryButton")
         self.notification_test_button.setObjectName("secondaryButton")
+        self.health_check_button.setObjectName("secondaryButton")
         self.chat_test_button = QPushButton("Chat Test")
         self.chat_test_button.setObjectName("secondaryButton")
         self.weather_check_button = QPushButton("Weather Check")
@@ -343,10 +349,12 @@ class JarvisMainWindow(QMainWindow):
         diagnostics_layout.addWidget(self.weather_check_button, 0, 1)
         diagnostics_layout.addWidget(self.vision_check_button, 1, 0)
         diagnostics_layout.addWidget(self.test_confirmation_button, 1, 1)
-        diagnostics_layout.addWidget(self.agent_test_button, 2, 0)
+        diagnostics_layout.addWidget(self.health_check_button, 2, 0)
+        diagnostics_layout.addWidget(self.agent_test_button, 2, 1)
+        diagnostics_layout.addWidget(self.health_result_value, 3, 0, 1, 2)
         diagnostics_intro = QLabel("Diagnostics stay read-only and use existing safe routes.")
         diagnostics_intro.setObjectName("sectionNote")
-        diagnostics_layout.addWidget(diagnostics_intro, 3, 0, 1, 2)
+        diagnostics_layout.addWidget(diagnostics_intro, 4, 0, 1, 2)
 
         self.tabs.addTab(voice_tab, "Voice")
         self.tabs.addTab(tools_tab, "Tools")
@@ -566,6 +574,7 @@ class JarvisMainWindow(QMainWindow):
         self.stop_voice_loop_button.clicked.connect(self.stop_voice_loop)
         self.check_reminders_button.clicked.connect(self.check_reminders)
         self.notification_test_button.clicked.connect(self.test_notification)
+        self.health_check_button.clicked.connect(self.run_health_check)
         self.launch_notepad_button.clicked.connect(self.launch_notepad)
         self.weather_check_button.clicked.connect(self.weather_check)
         self.open_google_button.clicked.connect(self.open_google)
@@ -595,6 +604,8 @@ class JarvisMainWindow(QMainWindow):
         check_reminders_action.triggered.connect(self.check_reminders)
         self.notification_test_action = QAction("Test Notification", self)
         self.notification_test_action.triggered.connect(self.test_notification)
+        self.health_check_action = QAction("Run Health Check", self)
+        self.health_check_action.triggered.connect(self.run_health_check)
         self.launch_notepad_action = QAction("Launch Notepad", self)
         self.launch_notepad_action.triggered.connect(self.launch_notepad)
         self.open_google_action = QAction("Open Google", self)
@@ -616,6 +627,7 @@ class JarvisMainWindow(QMainWindow):
         menu.addAction(self.stop_voice_loop_action)
         menu.addAction(check_reminders_action)
         menu.addAction(self.notification_test_action)
+        menu.addAction(self.health_check_action)
         menu.addAction(self.launch_notepad_action)
         menu.addAction(self.open_google_action)
         menu.addAction(self.list_downloads_action)
@@ -768,6 +780,28 @@ class JarvisMainWindow(QMainWindow):
         except Exception as exc:  # pragma: no cover - defensive GUI boundary
             self._append_message("Jarvis", f"Notification test failed: {exc}")
             self.notification_result_value.setText("Error")
+            self.set_status(AssistantStatus.ERROR)
+            self._set_mode("Error")
+            return
+
+        QTimer.singleShot(1200, lambda: self.set_status(AssistantStatus.SLEEPING))
+        QTimer.singleShot(1200, lambda: self._set_mode("Idle"))
+
+    def run_health_check(self) -> None:
+        self._set_mode("Diagnostics")
+        self._append_message("Jarvis", "Running health check...")
+        self.health_result_value.setText("Checking")
+        self.set_status(AssistantStatus.THINKING)
+        QApplication.processEvents()
+
+        try:
+            report = HealthService(self.settings).run_check()
+            self._append_message("Jarvis", format_health_check_report(report))
+            self.health_result_value.setText("Completed")
+            self.set_status(AssistantStatus.SLEEPING)
+        except Exception as exc:  # pragma: no cover - defensive GUI boundary
+            self._append_message("Jarvis", f"Health check failed: {exc}")
+            self.health_result_value.setText("Error")
             self.set_status(AssistantStatus.ERROR)
             self._set_mode("Error")
             return

@@ -48,6 +48,7 @@ def test_voice_loop_gui_state_updates_controls_and_status_fields() -> None:
     assert window.weather_check_button.text() == "Weather Check"
     assert window.vision_check_button.text() == "Vision Check"
     assert window.agent_test_button.text() == "Agent Test"
+    assert window.health_check_button.text() == "Run Health Check"
 
     window._set_voice_loop_running(True)
 
@@ -82,12 +83,14 @@ def test_voice_loop_gui_state_updates_controls_and_status_fields() -> None:
     window._handle_voice_loop_status("Last Jarvis response: handled status report")
     window._handle_voice_loop_status(RETURNING_TO_SLEEP_MESSAGE)
     window.check_reminders()
+    window.run_health_check()
 
     assert window.voice_loop_status_value.text() == RETURNING_TO_SLEEP_MESSAGE
     assert window.voice_loop_last_command_value.text() == "status report"
     assert window.voice_loop_last_response_value.text() == "handled status report"
     assert window.reminders_check_value.text() == "Due reminders:"
     assert window.notification_result_value.text() == "Delivered"
+    assert window.health_result_value.text() == "Completed"
     assert window.app_launch_result_value.text() == "Launched"
     assert window.reminder_watch_status_value.text() == "Idle"
 
