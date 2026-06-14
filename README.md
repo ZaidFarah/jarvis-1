@@ -388,7 +388,23 @@ logs/health.log
 py main.py --runtime-check
 ```
 
-The runtime check reports whether Jarvis is running in source mode or packaged mode and shows the resolved paths for `.env`, `logs/`, `data/`, `credentials/`, and `assets/`. It does not print any secrets or tokens. The packaging scaffold also includes `build_exe.bat` and notes for a future PyInstaller build, but Phase 36 does not build the EXE yet.
+The runtime check reports whether Jarvis is running in source mode or packaged mode and shows the resolved paths for `.env`, `logs/`, `data/`, `credentials/`, and `assets/`. It does not print any secrets or tokens. Phase 37 adds the first Windows PyInstaller build script, and the packaged EXE should support `--runtime-check` and `--health-check`.
+
+## Packaging
+
+Build the Windows EXE with:
+
+```powershell
+cmd /c build_exe.bat
+```
+
+The output lands in:
+
+```text
+dist/Jarvis/Jarvis.exe
+```
+
+The build stays console-enabled so the EXE can still print diagnostics for `--runtime-check` and `--health-check`. No secrets, tokens, logs, or local databases are packaged. Mutable runtime files such as `.env`, `logs/`, `data/`, and `credentials/` resolve beside `Jarvis.exe`; bundled assets resolve to PyInstaller's internal assets directory.
 
 ## Chat Test
 

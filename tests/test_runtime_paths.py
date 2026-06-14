@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 from config.settings import AppSettings
 from diagnostics.health import HealthService
-from packaging.runtime_paths import format_runtime_check_report, resolve_runtime_paths
+from jarvis_runtime.runtime_paths import format_runtime_check_report, resolve_runtime_paths
 
 
 def test_source_runtime_path_resolution() -> None:
@@ -29,6 +30,22 @@ def test_packaged_mode_simulation(tmp_path: Path) -> None:
     assert report.runtime_root == tmp_path
     assert report.executable_path.name == "Jarvis.exe"
     assert "packaged" in text.lower()
+
+
+def test_packaged_assets_use_pyinstaller_bundle_dir(tmp_path: Path, monkeypatch) -> None:
+    bundle_root = tmp_path / "_internal"
+    bundled_assets = bundle_root / "assets"
+    bundled_assets.mkdir(parents=True)
+    settings = AppSettings(_env_file=None)
+
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "_MEIPASS", str(bundle_root), raising=False)
+
+    report = resolve_runtime_paths(settings, executable_path=tmp_path / "Jarvis.exe")
+
+    assert report.runtime_mode == "packaged"
+    assert report.runtime_root == tmp_path
+    assert report.assets_path == bundled_assets
 
 
 def test_runtime_check_does_not_print_secrets() -> None:

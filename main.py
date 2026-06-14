@@ -9,7 +9,7 @@ from agent.runtime import AgentRuntime
 from assistant.core import AssistantCore, AssistantResponse
 from diagnostics.health import HealthService, format_health_check_report
 from config.settings import load_settings
-from packaging.runtime_paths import format_runtime_check_report, resolve_runtime_paths
+from jarvis_runtime.runtime_paths import format_runtime_check_report, resolve_runtime_paths
 from integrations.calendar_service import CalendarService, format_calendar_auth_report, format_calendar_check_report
 from integrations.gmail_service import (
     GmailService,

@@ -49,7 +49,7 @@ def resolve_runtime_paths(
         logs_path=runtime_root / "logs",
         data_path=runtime_root / "data",
         credentials_path=runtime_root / "credentials",
-        assets_path=runtime_root / "assets",
+        assets_path=_resolve_assets_path(runtime_root),
     )
 
 
@@ -81,3 +81,12 @@ def _detect_runtime_mode(settings: AppSettings, override_mode: str | None = None
     if cleaned in {"source", "packaged"}:
         return cleaned
     return "source"
+
+
+def _resolve_assets_path(runtime_root: Path) -> Path:
+    if getattr(sys, "frozen", False):
+        bundle_root = Path(getattr(sys, "_MEIPASS", runtime_root)).resolve()
+        bundled_assets = bundle_root / "assets"
+        if bundled_assets.exists():
+            return bundled_assets
+    return runtime_root / "assets"
