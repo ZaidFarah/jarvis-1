@@ -27,6 +27,7 @@ from diagnostics.release_check import (
     format_release_check_report,
     run_release_check,
 )
+from diagnostics.wake_provider import WakeProviderCheckReport, format_wake_provider_check_report, run_wake_provider_check
 
 __all__ = [
     "HealthCheckReport",
@@ -41,6 +42,7 @@ __all__ = [
     "FinalReport",
     "FinalReportSection",
     "ReleaseNotesReport",
+    "WakeProviderCheckReport",
     "create_backup",
     "format_backup_create_report",
     "format_backup_list_report",
@@ -54,6 +56,7 @@ __all__ = [
     "format_final_report",
     "format_final_report_summary",
     "format_release_notes_report",
+    "format_wake_provider_check_report",
     "run_installer_check",
     "SettingsCheckReport",
     "ReleaseCheckItem",
@@ -63,6 +66,7 @@ __all__ = [
     "run_signing_check",
     "run_final_report",
     "run_release_notes",
+    "run_wake_provider_check",
     "format_release_check_report",
     "run_settings_check",
     "run_release_check",

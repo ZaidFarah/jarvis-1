@@ -41,6 +41,7 @@ The GUI now uses a tabbed dark interface with quick actions for voice, tools, re
 - Wake phrase configuration.
 - Wake phrase aliases.
 - Fuzzy wake phrase matching with `difflib.SequenceMatcher`.
+- OpenWakeWord as the primary wake provider when enabled, with Whisper fuzzy fallback.
 - Wake detection utility class.
 - One-shot `py main.py --wake-test` diagnostic command.
 - Wake diagnostic logging to `logs/wake_diagnostics.log`.
@@ -282,6 +283,12 @@ WAKE_PHRASE=hey jarvis
 WAKE_ALIASES=hey jarvis,hi jarvis,wake up jarvis,jarvis wake up,okay jarvis,yo jarvis
 WAKE_MATCH_THRESHOLD=0.72
 WAKE_LISTEN_SECONDS=5
+WAKE_PROVIDER=openwakeword
+OPENWAKEWORD_ENABLED=false
+OPENWAKEWORD_MODEL=
+OPENWAKEWORD_THRESHOLD=0.5
+OPENWAKEWORD_LISTEN_CHUNK_MS=80
+OPENWAKEWORD_FALLBACK_TO_WHISPER=true
 ```
 
 Detailed wake diagnostics are saved to:
@@ -289,6 +296,14 @@ Detailed wake diagnostics are saved to:
 ```text
 logs/wake_diagnostics.log
 ```
+
+## Wake Provider Check
+
+```powershell
+py main.py --wake-provider-check
+```
+
+This check reports the selected wake provider, whether OpenWakeWord is enabled and installed, whether a model is configured, whether Whisper fallback is enabled, and the effective provider that Jarvis will use.
 
 ## Voice Command Test
 
@@ -346,16 +361,17 @@ py main.py --voice-loop
 The voice loop keeps Jarvis running until stopped:
 
 1. Sleeps while waiting for the wake phrase.
-2. Records one wake phrase clip.
-3. Transcribes and checks the wake phrase.
-4. Prompts with `Yes sir?`, optionally beeps, and waits briefly before recording the command.
-5. Records one command clip.
-6. Cleans the command text.
-7. Stops cleanly if the command is `stop listening`, `go to sleep`, `sleep jarvis`, `jarvis sleep`, `exit jarvis`, `shutdown jarvis`, `that is all`, or `thank you jarvis`.
-8. Sends valid commands to `AssistantCore`.
-9. Speaks accepted responses using the configured TTS provider.
-10. Speaks `Standing by.` when returning to sleep.
-11. Prints a summary on exit with wake attempts, successful wakes, commands handled, empty commands, and errors.
+2. Uses the selected wake provider.
+3. When OpenWakeWord is active, listens in short chunks before any wake transcription.
+4. Falls back to Whisper fuzzy wake detection when OpenWakeWord is unavailable.
+5. Prompts with `Yes sir?`, optionally beeps, and waits briefly before recording the command.
+6. Records one command clip.
+7. Cleans the command text.
+8. Stops cleanly if the command is `stop listening`, `go to sleep`, `sleep jarvis`, `jarvis sleep`, `exit jarvis`, `shutdown jarvis`, `that is all`, or `thank you jarvis`.
+9. Sends valid commands to `AssistantCore`.
+10. Speaks accepted responses using the configured TTS provider.
+11. Speaks `Standing by.` when returning to sleep.
+12. Prints a summary on exit with wake attempts, successful wakes, commands handled, empty commands, and errors.
 
 Press Ctrl+C to stop the CLI loop. Detailed voice loop logs are saved to:
 

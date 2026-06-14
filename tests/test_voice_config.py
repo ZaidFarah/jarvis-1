@@ -27,6 +27,12 @@ def test_voice_settings_defaults_are_lightweight() -> None:
     ]
     assert settings.wake_match_threshold == 0.72
     assert settings.wake_listen_seconds == 5.0
+    assert settings.wake_provider == "openwakeword"
+    assert settings.openwakeword_enabled is False
+    assert settings.openwakeword_model == ""
+    assert settings.openwakeword_threshold == 0.5
+    assert settings.openwakeword_listen_chunk_ms == 80
+    assert settings.openwakeword_fallback_to_whisper is True
     assert settings.voice_command_start_delay_seconds == 1.0
     assert settings.voice_command_record_seconds == 7.0
     assert settings.voice_loop_enabled is False
@@ -116,6 +122,12 @@ def test_wake_settings_read_environment(monkeypatch) -> None:
     monkeypatch.setenv("WAKE_ALIASES", "hello jarvis,jarvis hello")
     monkeypatch.setenv("WAKE_MATCH_THRESHOLD", "0.8")
     monkeypatch.setenv("WAKE_LISTEN_SECONDS", "4")
+    monkeypatch.setenv("WAKE_PROVIDER", "whisper_fuzzy")
+    monkeypatch.setenv("OPENWAKEWORD_ENABLED", "true")
+    monkeypatch.setenv("OPENWAKEWORD_MODEL", "hey.jarvis")
+    monkeypatch.setenv("OPENWAKEWORD_THRESHOLD", "0.7")
+    monkeypatch.setenv("OPENWAKEWORD_LISTEN_CHUNK_MS", "120")
+    monkeypatch.setenv("OPENWAKEWORD_FALLBACK_TO_WHISPER", "false")
     monkeypatch.setenv("VOICE_COMMAND_START_DELAY_SECONDS", "1.25")
     monkeypatch.setenv("VOICE_COMMAND_RECORD_SECONDS", "8")
     monkeypatch.setenv("VOICE_LOOP_ENABLED", "true")
@@ -129,6 +141,12 @@ def test_wake_settings_read_environment(monkeypatch) -> None:
     assert settings.wake_alias_list == ["hello jarvis", "jarvis hello"]
     assert settings.wake_match_threshold == 0.8
     assert settings.wake_listen_seconds == 4.0
+    assert settings.wake_provider == "whisper_fuzzy"
+    assert settings.openwakeword_enabled is True
+    assert settings.openwakeword_model == "hey.jarvis"
+    assert settings.openwakeword_threshold == 0.7
+    assert settings.openwakeword_listen_chunk_ms == 120
+    assert settings.openwakeword_fallback_to_whisper is False
     assert settings.voice_command_start_delay_seconds == 1.25
     assert settings.voice_command_record_seconds == 8.0
     assert settings.voice_loop_enabled is True

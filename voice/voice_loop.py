@@ -15,6 +15,7 @@ from voice.stt import create_speech_to_text_provider
 from voice.tts import TextToSpeechResult, speak_text
 from voice.voice_command_test import COMMAND_PROMPT, LISTENING_FOR_COMMAND_PROMPT, NO_COMMAND_DETECTED_MESSAGE
 from voice.wake import WakeDetectionResult, WakeDetector, remove_wake_phrase_prefix
+from voice.wake_provider import OpenWakeWordWakeProvider, WakeProviderResolution, create_openwakeword_provider, resolve_wake_provider
 
 
 _VOICE_LOOP_LOG_SINK_ID: int | None = None
@@ -66,6 +67,9 @@ class VoiceLoopSummary:
 class VoiceLoopCycleReport:
     provider_name: str
     provider_available: bool
+    wake_provider_name: str
+    wake_provider_available: bool
+    wake_provider_resolution: WakeProviderResolution
     wake_transcription: str
     wake_detection: WakeDetectionResult
     raw_command_transcription: str
@@ -95,6 +99,8 @@ class VoiceLoopRunner:
         sleeper: Sleeper | None = None,
         beeper: Beeper | None = None,
         status_callback: StatusCallback | None = None,
+        wake_provider: OpenWakeWordWakeProvider | None = None,
+        wake_provider_resolution: WakeProviderResolution | None = None,
     ) -> None:
         self.settings = settings
         self.assistant = assistant or AssistantCore(settings=settings)
@@ -106,6 +112,8 @@ class VoiceLoopRunner:
         self.status_callback = status_callback
         self.log_file = self.settings.log_dir / "voice_loop.log"
         self.voice_loop_logger = logger.bind(voice_loop=True)
+        self.wake_provider_resolution = wake_provider_resolution or resolve_wake_provider(settings)
+        self.wake_provider = wake_provider or self._create_wake_provider()
         self._stop_requested = False
         self.summary = VoiceLoopSummary()
         self._consecutive_empty_commands = 0
@@ -113,6 +121,11 @@ class VoiceLoopRunner:
 
     def request_stop(self) -> None:
         self._stop_requested = True
+
+    def _create_wake_provider(self) -> OpenWakeWordWakeProvider | None:
+        if self.wake_provider_resolution.effective_provider != "openwakeword":
+            return None
+        return create_openwakeword_provider(self.settings)
 
     def run(self, max_cycles: int | None = None) -> list[VoiceLoopCycleReport]:
         self.summary = VoiceLoopSummary()
@@ -174,18 +187,36 @@ class VoiceLoopRunner:
 
         self.summary.wake_attempts += 1
         self._status("Sleeping", statuses)
+        wake_samples: list[float] = []
 
         try:
             self._status("Listening for wake phrase", statuses)
-            wake_samples = self.recorder(self.settings.wake_listen_seconds)
-            wake_transcription = self.provider.transcribe(wake_samples, self.settings.voice_sample_rate).text.strip()
-            wake_detection = detector.detect(wake_transcription)
-            self.voice_loop_logger.info(
-                "Wake transcription={} detected={} score={}",
-                wake_transcription or "<empty>",
-                wake_detection.detected,
-                f"{wake_detection.score:.3f}",
-            )
+            if self.wake_provider_resolution.effective_provider == "openwakeword" and self.wake_provider is not None:
+                wake_samples, wake_detection = self._detect_wake_with_openwakeword()
+                self.voice_loop_logger.info(
+                    "OpenWakeWord wake detection={} score={}",
+                    wake_detection.detected,
+                    f"{wake_detection.score:.3f}",
+                )
+                if not wake_detection.detected and self.wake_provider_resolution.fallback_enabled:
+                    wake_transcription = self.provider.transcribe(wake_samples, self.settings.voice_sample_rate).text.strip()
+                    wake_detection = detector.detect(wake_transcription)
+                    self.voice_loop_logger.info(
+                        "Wake fallback transcription={} detected={} score={}",
+                        wake_transcription or "<empty>",
+                        wake_detection.detected,
+                        f"{wake_detection.score:.3f}",
+                    )
+            else:
+                wake_samples = self.recorder(self.settings.wake_listen_seconds)
+                wake_transcription = self.provider.transcribe(wake_samples, self.settings.voice_sample_rate).text.strip()
+                wake_detection = detector.detect(wake_transcription)
+                self.voice_loop_logger.info(
+                    "Wake transcription={} detected={} score={}",
+                    wake_transcription or "<empty>",
+                    wake_detection.detected,
+                    f"{wake_detection.score:.3f}",
+                )
         except Exception as exc:
             message = f"Wake phrase stage failed: {type(exc).__name__}: {exc}"
             self.voice_loop_logger.exception(message)
@@ -397,9 +428,16 @@ class VoiceLoopRunner:
         errors: list[str],
         stop_requested: bool = False,
     ) -> VoiceLoopCycleReport:
+        wake_provider_name = self.wake_provider_resolution.effective_provider
+        wake_provider_available = self.wake_provider_resolution.openwakeword_available
+        if wake_provider_name != "openwakeword":
+            wake_provider_available = True
         return VoiceLoopCycleReport(
             provider_name=self.provider.name,
             provider_available=bool(self.provider.available),
+            wake_provider_name=wake_provider_name,
+            wake_provider_available=wake_provider_available,
+            wake_provider_resolution=self.wake_provider_resolution,
             wake_transcription=wake_transcription,
             wake_detection=wake_detection,
             raw_command_transcription=raw_command_transcription,
@@ -411,6 +449,32 @@ class VoiceLoopRunner:
             errors=errors,
             stop_requested=stop_requested,
         )
+
+    def _detect_wake_with_openwakeword(self) -> tuple[list[float], WakeDetectionResult]:
+        if self.wake_provider is None:
+            raise RuntimeError("OpenWakeWord wake provider is not available.")
+
+        listen_chunk_seconds = max(self.settings.openwakeword_listen_chunk_ms / 1000.0, 0.02)
+        deadline = time.monotonic() + self.settings.wake_listen_seconds
+        buffered_samples: list[float] = []
+        wake_detection = WakeDetectionResult(
+            detected=False,
+            transcript="",
+            matched_phrase=None,
+            score=0.0,
+            threshold=self.settings.openwakeword_threshold,
+            match_type="none",
+        )
+
+        while time.monotonic() < deadline and not self._stop_requested:
+            chunk = self.recorder(listen_chunk_seconds)
+            if chunk:
+                buffered_samples.extend(chunk)
+            wake_detection = self.wake_provider.detect(buffered_samples, self.settings.voice_sample_rate)
+            if wake_detection.detected:
+                break
+
+        return buffered_samples, wake_detection
 
     def _record_microphone(self, duration_seconds: float) -> list[float]:
         sd = self._require_sounddevice()

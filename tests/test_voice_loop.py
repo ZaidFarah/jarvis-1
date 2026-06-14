@@ -6,6 +6,8 @@ from services.openai_service import OpenAIChatResult
 from voice.interfaces import TranscriptionResult
 from voice.voice_command_test import COMMAND_PROMPT, LISTENING_FOR_COMMAND_PROMPT, NO_COMMAND_DETECTED_MESSAGE
 from voice.voice_loop import RETURNING_TO_SLEEP_MESSAGE, STOP_COMMAND_DETECTED_MESSAGE, VoiceLoopRunner, is_stop_command
+from voice.wake import WakeDetectionResult
+from voice.wake_provider import WakeProviderResolution
 
 
 class FakeProvider:
@@ -42,6 +44,21 @@ class FakeTtsProvider:
 
     def speak(self, text: str) -> None:
         self.spoken.append(text)
+
+
+class FakeWakeProvider:
+    name = "openwakeword"
+    available = True
+
+    def __init__(self, detections: list[WakeDetectionResult]) -> None:
+        self.detections = detections
+        self.calls = 0
+
+    def detect(self, samples, sample_rate: int) -> WakeDetectionResult:
+        del samples, sample_rate
+        result = self.detections[min(self.calls, len(self.detections) - 1)]
+        self.calls += 1
+        return result
 
 
 class SpyOpenAIService:
@@ -102,6 +119,68 @@ def test_voice_loop_one_cycle_state_transitions_calls_assistant_and_tts() -> Non
     ]
 
 
+def test_voice_loop_openwakeword_path_does_not_transcribe_wake_clip_first() -> None:
+    settings = AppSettings(
+        _env_file=None,
+        wake_provider="openwakeword",
+        openwakeword_enabled=True,
+        openwakeword_model="hey.jarvis",
+    )
+    settings.voice_loop_speak_status = False
+    assistant = SpyAssistant()
+    tts_provider = FakeTtsProvider()
+    provider = FakeProvider(["status report"])
+    wake_provider = FakeWakeProvider(
+        [
+            WakeDetectionResult(
+                detected=True,
+                transcript="",
+                matched_phrase="hey.jarvis",
+                score=0.91,
+                threshold=0.5,
+                match_type="openwakeword",
+            )
+        ]
+    )
+    wake_resolution = WakeProviderResolution(
+        selected_provider="openwakeword",
+        openwakeword_enabled=True,
+        openwakeword_installed=True,
+        model_configured=True,
+        fallback_enabled=True,
+        effective_provider="openwakeword",
+        openwakeword_available=True,
+    )
+    durations: list[float] = []
+
+    def recording_recorder(duration: float) -> list[float]:
+        durations.append(duration)
+        return [0.1, -0.1, 0.0]
+
+    report = VoiceLoopRunner(
+        settings=settings,
+        assistant=assistant,
+        provider=provider,
+        tts_provider=tts_provider,
+        wake_provider=wake_provider,
+        wake_provider_resolution=wake_resolution,
+        recorder=recording_recorder,
+        sleeper=no_sleep,
+        beeper=no_beep,
+    ).run_once()
+
+    assert report.wake_provider_name == "openwakeword"
+    assert report.wake_provider_available is True
+    assert report.wake_transcription == ""
+    assert report.wake_detected is True
+    assert wake_provider.calls == 1
+    assert provider.calls == 1
+    assert assistant.commands == ["status report"]
+    assert report.cleaned_command == "status report"
+    assert durations[0] == settings.openwakeword_listen_chunk_ms / 1000.0
+    assert durations[-1] == settings.voice_command_record_seconds
+
+
 def test_voice_loop_stop_command_detection() -> None:
     assert is_stop_command("stop listening") is True
     assert is_stop_command("Jarvis Sleep") is True
@@ -109,6 +188,33 @@ def test_voice_loop_stop_command_detection() -> None:
     assert is_stop_command("that is all") is True
     assert is_stop_command("thank you jarvis") is True
     assert is_stop_command("status report") is False
+
+
+def test_voice_loop_falls_back_to_whisper_when_openwakeword_is_unavailable() -> None:
+    settings = AppSettings(
+        _env_file=None,
+        wake_provider="openwakeword",
+        openwakeword_enabled=True,
+        openwakeword_model="hey.jarvis",
+    )
+    settings.voice_loop_speak_status = False
+    assistant = SpyAssistant()
+    provider = FakeProvider(["hey jarvis", "status report"])
+
+    report = VoiceLoopRunner(
+        settings=settings,
+        assistant=assistant,
+        provider=provider,
+        recorder=fake_recorder,
+        sleeper=no_sleep,
+        beeper=no_beep,
+    ).run_once()
+
+    assert report.wake_provider_name == "whisper_fuzzy"
+    assert report.wake_provider_available is True
+    assert report.wake_transcription == "hey jarvis"
+    assert report.wake_detected is True
+    assert provider.calls == 2
 
 
 def test_voice_loop_stop_command_does_not_call_assistant() -> None:

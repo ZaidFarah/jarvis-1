@@ -156,6 +156,40 @@ class AppSettings(BaseSettings):
         le=10.0,
         validation_alias=AliasChoices("WAKE_LISTEN_SECONDS", "JARVIS_WAKE_LISTEN_SECONDS"),
     )
+    wake_provider: str = Field(
+        default="openwakeword",
+        validation_alias=AliasChoices("WAKE_PROVIDER", "JARVIS_WAKE_PROVIDER"),
+    )
+    openwakeword_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("OPENWAKEWORD_ENABLED", "JARVIS_OPENWAKEWORD_ENABLED"),
+    )
+    openwakeword_model: str = Field(
+        default="",
+        validation_alias=AliasChoices("OPENWAKEWORD_MODEL", "JARVIS_OPENWAKEWORD_MODEL"),
+    )
+    openwakeword_threshold: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        validation_alias=AliasChoices("OPENWAKEWORD_THRESHOLD", "JARVIS_OPENWAKEWORD_THRESHOLD"),
+    )
+    openwakeword_listen_chunk_ms: int = Field(
+        default=80,
+        ge=20,
+        le=1000,
+        validation_alias=AliasChoices(
+            "OPENWAKEWORD_LISTEN_CHUNK_MS",
+            "JARVIS_OPENWAKEWORD_LISTEN_CHUNK_MS",
+        ),
+    )
+    openwakeword_fallback_to_whisper: bool = Field(
+        default=True,
+        validation_alias=AliasChoices(
+            "OPENWAKEWORD_FALLBACK_TO_WHISPER",
+            "JARVIS_OPENWAKEWORD_FALLBACK_TO_WHISPER",
+        ),
+    )
     voice_command_start_delay_seconds: float = Field(
         default=1.0,
         ge=0.0,
@@ -575,6 +609,15 @@ class AppSettings(BaseSettings):
             raise ValueError(f"Unsupported runtime mode: {value}")
         return cleaned
 
+    @field_validator("wake_provider")
+    @classmethod
+    def normalize_wake_provider(cls, value: str) -> str:
+        cleaned = value.strip().lower().replace("-", "_")
+        allowed = {"openwakeword", "whisper_fuzzy"}
+        if cleaned not in allowed:
+            raise ValueError(f"Unsupported wake provider: {value}")
+        return cleaned
+
     @field_validator("log_dir")
     @classmethod
     def expand_log_dir(cls, value: Path) -> Path:
@@ -704,6 +747,11 @@ class AppSettings(BaseSettings):
         if not cleaned:
             raise ValueError("Wake phrase cannot be empty.")
         return cleaned
+
+    @field_validator("openwakeword_model")
+    @classmethod
+    def normalize_openwakeword_model(cls, value: str) -> str:
+        return value.strip()
 
     @field_validator("wake_aliases", mode="before")
     @classmethod
