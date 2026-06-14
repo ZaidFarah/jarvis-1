@@ -622,6 +622,32 @@ py main.py --final-report
 
 The report is written to `reports\Jarvis-0.1.0-validation-report.md` and includes build, release ZIP, runtime, health, release, installer, signing, feature, and security summaries. It never prints secret values.
 
+## Release Notes
+
+Print the v0.1.0 release notes with:
+
+```powershell
+py main.py --release-notes
+```
+
+The source notes live at `releases\RELEASE_NOTES_0.1.0.md`. The changelog lives at `CHANGELOG.md`.
+
+Tag the checkpoint manually when you are ready:
+
+```powershell
+git tag -a v0.1.0 -m "Jarvis v0.1.0"
+git push origin v0.1.0
+```
+
+Before calling the checkpoint done, run:
+
+```powershell
+git status
+py -m pytest
+py main.py --release-check
+py main.py --final-report
+```
+
 Release checklist:
 
 1. Run `py -m pytest`.
