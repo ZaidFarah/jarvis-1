@@ -497,6 +497,24 @@ Saving writes only those safe keys to the external `.env` file and leaves unrela
 py main.py --settings-check
 ```
 
+## Log Viewer
+
+Open the safe log viewer from the GUI `Log Viewer` button or the tray `Log Viewer` action.
+
+The viewer only reads files inside the configured logs directory, shows the available log files, and tails the last lines of a selected file. It never deletes logs and redacts obvious secret patterns such as API keys, bearer tokens, OAuth tokens, and client secrets.
+
+List available logs from the CLI with:
+
+```powershell
+py main.py --logs-list
+```
+
+Tail a specific log with:
+
+```powershell
+py main.py --logs-tail jarvis.log --lines 100
+```
+
 ## Packaged Smoke Test
 
 After building and initializing config, run:

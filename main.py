@@ -8,6 +8,7 @@ from app.application import JarvisApplication
 from agent.runtime import AgentRuntime
 from assistant.core import AssistantCore, AssistantResponse
 from diagnostics.health import HealthService, format_health_check_report
+from diagnostics.logs import format_log_tail_report, format_logs_list_report, list_log_files, tail_log
 from diagnostics.settings_check import format_settings_check_report, run_settings_check
 from diagnostics.release_check import format_release_check_report, run_release_check
 from config.settings import load_settings
@@ -117,6 +118,25 @@ def main(argv: list[str] | None = None) -> int:
         report = run_settings_check(settings)
         print(format_settings_check_report(report))
         return 0
+
+    if "--logs-list" in args:
+        settings = load_settings()
+        configure_logging(settings, console=False)
+        report = list_log_files(settings)
+        print(format_logs_list_report(report))
+        return 0
+
+    if "--logs-tail" in args:
+        settings = load_settings()
+        configure_logging(settings, console=False)
+        log_name = _message_after_flag(args, "--logs-tail")
+        if not log_name:
+            print("Jarvis log tail requires a log name.")
+            return 1
+        line_count = _integer_after_flag(args, "--lines", default=100)
+        report = tail_log(settings, log_name, lines=line_count)
+        print(format_log_tail_report(report))
+        return 0 if report.is_successful else 1
 
     if "--release-package-check" in args:
         settings = load_settings()
@@ -498,6 +518,16 @@ def _message_after_flag(args: list[str], flag: str) -> str:
             break
         values.append(value)
     return " ".join(values).strip()
+
+
+def _integer_after_flag(args: list[str], flag: str, default: int) -> int:
+    value = _message_after_flag(args, flag)
+    if not value:
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        return default
 
 
 def _has_flag(args: list[str], flag: str) -> bool:
