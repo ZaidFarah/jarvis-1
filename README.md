@@ -446,6 +446,29 @@ It installs the packaged EXE plus the PyInstaller internal runtime files, create
 
 Windows SmartScreen may warn on unsigned installers and unsigned EXEs. Code signing is not enabled yet, so that warning is expected until signing is added later.
 
+## Signing
+
+Jarvis now includes code-signing preparation, but it does not sign the app yet. Run the readiness check with:
+
+```powershell
+py main.py --signing-check
+```
+
+The check reports whether `signtool.exe` is available, whether a certificate path is configured, whether a timestamp server is configured, and whether the packaged EXE and installer exist. It never prints certificate secrets.
+
+Use `sign_exe.bat` and `sign_installer.bat` later when you have a real code-signing certificate. A code-signing certificate is a trusted certificate authority certificate that lets Windows verify who published the file. It helps reduce SmartScreen warnings, but it is optional for this phase.
+
+Signing settings:
+
+```dotenv
+SIGNING_ENABLED=false
+SIGNING_CERT_PATH=
+SIGNING_TIMESTAMP_URL=http://timestamp.digicert.com
+SIGNING_DESCRIPTION=Jarvis Desktop AI Assistant
+```
+
+This phase does not create certificates, does not store certificate passwords, and does not sign the EXE or installer yet.
+
 ## Packaged Config
 
 Initialize the external packaged config location with:
@@ -1055,7 +1078,7 @@ py -m pytest
 
 ## Not Implemented Yet
 
-Jarvis still does not include ElevenLabs, Windows services, Task Scheduler startup, `HKLM` startup registration, browser automation, desktop automation, an updater, code signing, or autonomous behavior.
+Jarvis still does not include ElevenLabs, Windows services, Task Scheduler startup, `HKLM` startup registration, browser automation, desktop automation, an updater, or autonomous behavior. Code-signing preparation exists, but the app and installer are not signed yet.
 
 ## Project Layout
 

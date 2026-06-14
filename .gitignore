@@ -20,3 +20,5 @@ installer/output/
 *.spec
 credentials/token_*.json
 credentials/google_client_secret.json
+*.pfx
+*.p12

@@ -19,6 +19,7 @@ from diagnostics.backup import (
 from diagnostics.installer import format_installer_check_report, run_installer_check
 from diagnostics.logs import format_log_tail_report, format_logs_list_report, list_log_files, tail_log
 from diagnostics.settings_check import format_settings_check_report, run_settings_check
+from diagnostics.signing import format_signing_check_report, run_signing_check
 from diagnostics.release_check import format_release_check_report, run_release_check
 from config.settings import load_settings
 from jarvis_runtime.config_bootstrap import format_config_init_error, format_config_init_report, initialize_config
@@ -158,6 +159,13 @@ def main(argv: list[str] | None = None) -> int:
         configure_logging(settings, console=False)
         report = run_installer_check(settings)
         print(format_installer_check_report(report))
+        return 0 if report.is_successful else 1
+
+    if "--signing-check" in args:
+        settings = load_settings()
+        configure_logging(settings, console=False)
+        report = run_signing_check(settings)
+        print(format_signing_check_report(report))
         return 0 if report.is_successful else 1
 
     if "--logs-list" in args:

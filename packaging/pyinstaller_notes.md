@@ -46,7 +46,7 @@ The package check verifies the expected ZIP path, release inputs, and exclusions
 Known limitations:
 
 - No installer yet.
-- No code signing yet.
+- Code-signing preparation exists, but the app and installer are not signed yet.
 - No updater yet.
 - Startup registration is optional current-user Run-key registration only; there is no Windows service or Task Scheduler integration.
 - No secrets, tokens, logs, or database files are packaged.
@@ -65,7 +65,7 @@ Windows SmartScreen:
 
 - The EXE is not code signed yet.
 - Windows may show a SmartScreen warning for locally built unsigned executables.
-- Use only builds produced from this working tree. Installer creation and signing are future phases.
+- Use only builds produced from this working tree. Installer creation and signing are still optional future steps.
 
 How to test the EXE:
 

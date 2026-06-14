@@ -60,6 +60,22 @@ class AppSettings(BaseSettings):
         default=False,
         validation_alias=AliasChoices("BACKUP_INCLUDE_CLIENT_SECRET", "JARVIS_BACKUP_INCLUDE_CLIENT_SECRET"),
     )
+    signing_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("SIGNING_ENABLED", "JARVIS_SIGNING_ENABLED"),
+    )
+    signing_cert_path: str = Field(
+        default="",
+        validation_alias=AliasChoices("SIGNING_CERT_PATH", "JARVIS_SIGNING_CERT_PATH"),
+    )
+    signing_timestamp_url: str = Field(
+        default="http://timestamp.digicert.com",
+        validation_alias=AliasChoices("SIGNING_TIMESTAMP_URL", "JARVIS_SIGNING_TIMESTAMP_URL"),
+    )
+    signing_description: str = Field(
+        default="Jarvis Desktop AI Assistant",
+        validation_alias=AliasChoices("SIGNING_DESCRIPTION", "JARVIS_SIGNING_DESCRIPTION"),
+    )
     startup_app_name: str = Field(
         default="Jarvis",
         validation_alias=AliasChoices("STARTUP_APP_NAME", "JARVIS_STARTUP_APP_NAME"),
@@ -539,6 +555,11 @@ class AppSettings(BaseSettings):
         if not cleaned:
             raise ValueError("Startup app name cannot be empty.")
         return cleaned
+
+    @field_validator("signing_cert_path", "signing_timestamp_url", "signing_description")
+    @classmethod
+    def normalize_signing_text(cls, value: str) -> str:
+        return value.strip()
 
     @field_validator("app_version")
     @classmethod

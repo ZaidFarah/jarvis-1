@@ -12,6 +12,10 @@ def test_settings_defaults_are_safe() -> None:
     assert settings.app_version == "0.1.0"
     assert settings.startup_enabled is False
     assert settings.startup_app_name == "Jarvis"
+    assert settings.signing_enabled is False
+    assert settings.signing_cert_path == ""
+    assert settings.signing_timestamp_url == "http://timestamp.digicert.com"
+    assert settings.signing_description == "Jarvis Desktop AI Assistant"
     assert settings.backup_enabled is True
     assert settings.backup_include_env is False
     assert settings.backup_include_tokens is False
@@ -66,6 +70,20 @@ def test_startup_settings_read_environment(monkeypatch: pytest.MonkeyPatch) -> N
 
     assert settings.startup_enabled is True
     assert settings.startup_app_name == "Jarvis Dev"
+
+
+def test_signing_settings_read_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SIGNING_ENABLED", "true")
+    monkeypatch.setenv("SIGNING_CERT_PATH", "  C:\\certs\\jarvis.pfx  ")
+    monkeypatch.setenv("SIGNING_TIMESTAMP_URL", "  http://timestamp.example.com  ")
+    monkeypatch.setenv("SIGNING_DESCRIPTION", "  Jarvis Signed Build  ")
+
+    settings = AppSettings(_env_file=None)
+
+    assert settings.signing_enabled is True
+    assert settings.signing_cert_path == "C:\\certs\\jarvis.pfx"
+    assert settings.signing_timestamp_url == "http://timestamp.example.com"
+    assert settings.signing_description == "Jarvis Signed Build"
 
 
 def test_invalid_log_level_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
