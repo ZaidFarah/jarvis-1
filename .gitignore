@@ -15,6 +15,7 @@ logs/comtypes_gen/
 data/*.db
 build/
 dist/
+releases/*.zip
 *.spec
 credentials/token_*.json
 credentials/google_client_secret.json

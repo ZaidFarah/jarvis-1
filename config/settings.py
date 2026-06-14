@@ -9,6 +9,7 @@ from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from jarvis_runtime.config_bootstrap import detect_runtime_mode, get_runtime_config_paths
+from jarvis_runtime.version import APP_VERSION, normalize_version
 
 
 def _resolve_project_root() -> Path:
@@ -34,6 +35,10 @@ class AppSettings(BaseSettings):
     app_name: str = Field(
         default="Jarvis",
         validation_alias=AliasChoices("APP_NAME", "JARVIS_APP_NAME"),
+    )
+    app_version: str = Field(
+        default=APP_VERSION,
+        validation_alias=AliasChoices("APP_VERSION", "JARVIS_APP_VERSION"),
     )
     startup_enabled: bool = Field(
         default=False,
@@ -518,6 +523,11 @@ class AppSettings(BaseSettings):
         if not cleaned:
             raise ValueError("Startup app name cannot be empty.")
         return cleaned
+
+    @field_validator("app_version")
+    @classmethod
+    def normalize_app_version(cls, value: str) -> str:
+        return normalize_version(value)
 
     @field_validator("runtime_mode")
     @classmethod

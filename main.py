@@ -11,7 +11,9 @@ from diagnostics.health import HealthService, format_health_check_report
 from diagnostics.release_check import format_release_check_report, run_release_check
 from config.settings import load_settings
 from jarvis_runtime.config_bootstrap import format_config_init_error, format_config_init_report, initialize_config
+from jarvis_runtime.release_package import format_release_package_check_report, run_release_package_check
 from jarvis_runtime.runtime_paths import format_runtime_check_report, resolve_runtime_paths
+from jarvis_runtime.version import format_version
 from integrations.calendar_service import CalendarService, format_calendar_auth_report, format_calendar_check_report
 from integrations.gmail_service import (
     GmailService,
@@ -62,6 +64,11 @@ from voice.wake_diagnostics import WakeDiagnostics, format_wake_report
 
 def main(argv: list[str] | None = None) -> int:
     args = list(argv if argv is not None else sys.argv[1:])
+    if "--version" in args:
+        settings = load_settings()
+        print(format_version(settings.app_name, settings.app_version))
+        return 0
+
     if "--packaged-smoke-plan" in args:
         print(_format_packaged_smoke_plan())
         return 0
@@ -101,6 +108,12 @@ def main(argv: list[str] | None = None) -> int:
         configure_logging(settings, console=False)
         report = run_release_check(settings)
         print(format_release_check_report(report))
+        return 0 if report.is_successful else 1
+
+    if "--release-package-check" in args:
+        settings = load_settings()
+        report = run_release_package_check(settings)
+        print(format_release_package_check_report(report))
         return 0 if report.is_successful else 1
 
     if "--startup-check" in args:

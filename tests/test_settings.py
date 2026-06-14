@@ -9,6 +9,7 @@ def test_settings_defaults_are_safe() -> None:
     settings = AppSettings(_env_file=None)
 
     assert settings.app_name == "Jarvis"
+    assert settings.app_version == "0.1.0"
     assert settings.startup_enabled is False
     assert settings.startup_app_name == "Jarvis"
     assert settings.runtime_mode == "source"
@@ -36,6 +37,21 @@ def test_runtime_mode_read_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     settings = AppSettings(_env_file=None)
 
     assert settings.runtime_mode == "packaged"
+
+
+def test_app_version_read_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("APP_VERSION", "1.2.3")
+
+    settings = AppSettings(_env_file=None)
+
+    assert settings.app_version == "1.2.3"
+
+
+def test_invalid_app_version_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("APP_VERSION", "v1")
+
+    with pytest.raises(ValueError):
+        AppSettings(_env_file=None)
 
 
 def test_startup_settings_read_environment(monkeypatch: pytest.MonkeyPatch) -> None:

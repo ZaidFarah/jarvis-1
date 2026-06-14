@@ -1,6 +1,6 @@
 # PyInstaller Notes
 
-Phase 41 keeps the first Windows build, external config initialization, launcher scripts, packaged smoke tests, and adds the release readiness check.
+Phase 42 keeps the first Windows build, external config initialization, launcher scripts, packaged smoke tests, release readiness checks, and adds versioned manual ZIP creation.
 
 Build command:
 
@@ -14,8 +14,17 @@ Build output:
 dist/Jarvis/Jarvis.exe
 ```
 
-The build script runs a clean onedir build from `main.py`, includes `.env.example`, includes only `assets/` when present, and keeps the executable in console mode so CLI diagnostics such as `--runtime-check`, `--health-check`, `--openai-check`, `--init-config`, and `--packaged-smoke-plan` still work.
+The build script runs a clean onedir build from `main.py`, includes `.env.example`, includes only `assets/` when present, and keeps the executable in console mode so CLI diagnostics such as `--version`, `--runtime-check`, `--health-check`, `--openai-check`, `--init-config`, and `--packaged-smoke-plan` still work.
 In PyInstaller 6 onedir builds, bundled data is stored under the internal content directory, so packaged runtime checks report `assets/` under `dist/Jarvis/_internal/` when bundled assets exist. Mutable packaged config paths resolve to `%APPDATA%\Jarvis` and the packaged env file resolves to `%APPDATA%\Jarvis.env`.
+
+Version:
+
+```powershell
+py main.py --version
+dist\Jarvis\Jarvis.exe --version
+```
+
+The version comes from `jarvis_runtime/version.py` and defaults to `APP_VERSION=0.1.0`.
 
 Release readiness:
 
@@ -25,6 +34,14 @@ py main.py --release-check
 
 The release check verifies the build script, optional built EXE, source runtime and health diagnostics, packaged smoke scripts, startup CLI commands, README sections, and tracked-file safety for `.env`, credentials, tokens, logs, and `data/*.db`.
 Missing `dist/Jarvis/Jarvis.exe` is a warning so the check can be run before a build. Tracked secrets or generated local state are failures.
+
+Release package check:
+
+```powershell
+py main.py --release-package-check
+```
+
+The package check verifies the expected ZIP path, release inputs, and exclusions without creating the archive.
 
 Known limitations:
 
@@ -53,12 +70,14 @@ Windows SmartScreen:
 How to test the EXE:
 
 ```powershell
+dist\Jarvis\Jarvis.exe --version
 dist\Jarvis\Jarvis.exe --runtime-check
 dist\Jarvis\Jarvis.exe --health-check
 dist\Jarvis\Jarvis.exe --openai-check
 dist\Jarvis\Jarvis.exe --init-config
 test_packaged_app.bat
 py main.py --release-check
+py main.py --release-package-check
 ```
 
 Launcher scripts:
@@ -72,8 +91,24 @@ test_packaged_app.bat
 Manual ZIP release:
 
 ```powershell
-New-Item -ItemType Directory -Force release
-Compress-Archive -Path dist\Jarvis\* -DestinationPath release\Jarvis-windows.zip -Force
+create_release_zip.bat
 ```
 
-Do not add `.env`, `%APPDATA%\Jarvis.env`, credentials, tokens, logs, local databases, `build/`, installer files, updater files, or signing artifacts to the ZIP.
+Output:
+
+```text
+releases\Jarvis-0.1.0-windows.zip
+```
+
+The ZIP includes:
+
+```text
+dist\Jarvis\Jarvis.exe
+dist\Jarvis\_internal\
+README.md
+run_jarvis.bat
+run_jarvis_console.bat
+test_packaged_app.bat
+```
+
+Do not add `.env`, `%APPDATA%\Jarvis.env`, credentials, tokens, logs, local databases, `.git`, `build/`, installer files, updater files, or signing artifacts to the ZIP.

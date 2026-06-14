@@ -206,6 +206,22 @@ Type a command in the input box and press Enter or Send. Jarvis will echo a safe
 
 Use the `Mic Test` button or tray menu action to run a short local microphone test.
 
+## Version
+
+Jarvis uses semantic application versioning from `jarvis_runtime/version.py` and the `APP_VERSION` setting. The current version is `0.1.0`.
+
+Check the source version with:
+
+```powershell
+py main.py --version
+```
+
+Packaged builds support the same command:
+
+```powershell
+dist\Jarvis\Jarvis.exe --version
+```
+
 ## Audio Check
 
 ```powershell
@@ -491,10 +507,12 @@ Release checklist:
 
 1. Run `py -m pytest`.
 2. Run `cmd /c build_exe.bat`.
-3. Run `dist\Jarvis\Jarvis.exe --init-config`.
-4. Run `test_packaged_app.bat`.
-5. Run `py main.py --release-check`.
-6. Confirm the final readiness status is `PASS` or only has expected build warnings.
+3. Run `dist\Jarvis\Jarvis.exe --version`.
+4. Run `dist\Jarvis\Jarvis.exe --init-config`.
+5. Run `test_packaged_app.bat`.
+6. Run `py main.py --release-check`.
+7. Run `py main.py --release-package-check`.
+8. Confirm the readiness statuses are `PASS`.
 
 Do not commit or include these in a release ZIP:
 
@@ -509,14 +527,25 @@ dist/
 *.spec
 ```
 
-Prepare a ZIP release manually after the build and smoke tests pass:
+Check the release package plan:
 
 ```powershell
-New-Item -ItemType Directory -Force release
-Compress-Archive -Path dist\Jarvis\* -DestinationPath release\Jarvis-windows.zip -Force
+py main.py --release-package-check
 ```
 
-The ZIP should contain the built `Jarvis.exe` and PyInstaller runtime files only. Do not add `%APPDATA%\Jarvis.env`, `%APPDATA%\Jarvis\credentials`, logs, local databases, OAuth tokens, API keys, installers, updaters, or signing artifacts.
+Create the versioned ZIP after the build and smoke tests pass:
+
+```powershell
+create_release_zip.bat
+```
+
+The output is:
+
+```text
+releases\Jarvis-0.1.0-windows.zip
+```
+
+The ZIP contains `dist\Jarvis\Jarvis.exe`, PyInstaller `_internal` runtime files under `dist\Jarvis`, `README.md`, `run_jarvis.bat`, `run_jarvis_console.bat`, and `test_packaged_app.bat`. Do not add `%APPDATA%\Jarvis.env`, `%APPDATA%\Jarvis\credentials`, logs, local databases, OAuth tokens, API keys, `.git`, installers, updaters, or signing artifacts.
 
 ## Windows Startup
 
@@ -884,6 +913,15 @@ Jarvis can open only sites listed in `WEBSITE_ALLOWED_SITES`. If a site is missi
 - GUI diagnostics include startup check, enable, and disable controls.
 - Startup logs are saved to `logs/startup.log`; confirmation logs are saved to `logs/confirmations.log`.
 - Jarvis does not use `HKLM`, Task Scheduler, Windows services, admin permissions, or elevation.
+
+## Phase 42 Scope
+
+- Application versioning through `jarvis_runtime/version.py` and `APP_VERSION=0.1.0`.
+- CLI commands: `py main.py --version` and `py main.py --release-package-check`.
+- Manual ZIP release creation with `create_release_zip.bat`.
+- Release ZIP output: `releases\Jarvis-0.1.0-windows.zip`.
+- The ZIP includes the packaged EXE under `dist\Jarvis`, PyInstaller internal runtime files, README, launcher scripts, and packaged smoke test script only.
+- The ZIP excludes `.env`, credentials, tokens, logs, local DB files, `.git`, installers, updaters, and signing artifacts.
 
 ## Text To Speech Test
 
