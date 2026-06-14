@@ -40,6 +40,16 @@ def test_permission_medium_risk_openai_requires_confirmation(tmp_path: Path) -> 
     assert decision.risk_level == "medium"
 
 
+def test_permission_medium_risk_startup_requires_confirmation(tmp_path: Path) -> None:
+    broker = PermissionBroker(AppSettings(_env_file=None, log_dir=tmp_path))
+
+    decision = broker.check("register startup", description="Register startup.")
+
+    assert decision.allowed is True
+    assert decision.requires_confirmation is True
+    assert decision.risk_level == "medium"
+
+
 def test_permission_high_risk_requires_confirmation(tmp_path: Path) -> None:
     broker = PermissionBroker(AppSettings(_env_file=None, log_dir=tmp_path))
 

@@ -31,6 +31,7 @@ from diagnostics.health import HealthService, format_health_check_report
 from security.confirmation import confirm_action_gui, format_confirmation_result
 from reminders.scheduler import ReminderWatcher
 from services.notification_service import NotificationService, format_notification_check_report
+from services.startup_service import StartupService, format_startup_action_report, format_startup_check_report
 from voice.audio_diagnostics import AudioDiagnostics, format_microphone_test_summary
 from voice.voice_command_test import COMMAND_PROMPT, LISTENING_FOR_COMMAND_PROMPT, VoiceCommandTestRunner, format_voice_command_report
 from voice.voice_loop import (
@@ -144,6 +145,9 @@ class JarvisMainWindow(QMainWindow):
         self.check_reminders_button = QPushButton("Check Reminders")
         self.notification_test_button = QPushButton("Test Notification")
         self.health_check_button = QPushButton("Run Health Check")
+        self.startup_check_button = QPushButton("Startup Check")
+        self.startup_enable_button = QPushButton("Enable Startup")
+        self.startup_disable_button = QPushButton("Disable Startup")
         self.launch_notepad_button = QPushButton("Launch Notepad")
         self.open_google_button = QPushButton("Open Google")
         self.list_downloads_button = QPushButton("List Downloads")
@@ -159,6 +163,7 @@ class JarvisMainWindow(QMainWindow):
         self.reminders_check_value = QLabel("Idle")
         self.notification_result_value = QLabel("Idle")
         self.health_result_value = QLabel("Idle")
+        self.startup_result_value = QLabel("Idle")
         self.app_launch_result_value = QLabel("Idle")
         self.website_result_value = QLabel("Idle")
         self.file_access_result_value = QLabel("Idle")
@@ -215,6 +220,7 @@ class JarvisMainWindow(QMainWindow):
         self.reminders_check_value.setObjectName("voiceLoopValue")
         self.notification_result_value.setObjectName("voiceLoopValue")
         self.health_result_value.setObjectName("voiceLoopValue")
+        self.startup_result_value.setObjectName("voiceLoopValue")
         self.app_launch_result_value.setObjectName("voiceLoopValue")
         self.website_result_value.setObjectName("voiceLoopValue")
         self.file_access_result_value.setObjectName("voiceLoopValue")
@@ -254,6 +260,9 @@ class JarvisMainWindow(QMainWindow):
         self.check_reminders_button.setObjectName("secondaryButton")
         self.notification_test_button.setObjectName("secondaryButton")
         self.health_check_button.setObjectName("secondaryButton")
+        self.startup_check_button.setObjectName("secondaryButton")
+        self.startup_enable_button.setObjectName("secondaryButton")
+        self.startup_disable_button.setObjectName("secondaryButton")
         self.chat_test_button = QPushButton("Chat Test")
         self.chat_test_button.setObjectName("secondaryButton")
         self.weather_check_button = QPushButton("Weather Check")
@@ -351,10 +360,14 @@ class JarvisMainWindow(QMainWindow):
         diagnostics_layout.addWidget(self.test_confirmation_button, 1, 1)
         diagnostics_layout.addWidget(self.health_check_button, 2, 0)
         diagnostics_layout.addWidget(self.agent_test_button, 2, 1)
-        diagnostics_layout.addWidget(self.health_result_value, 3, 0, 1, 2)
+        diagnostics_layout.addWidget(self.startup_check_button, 3, 0)
+        diagnostics_layout.addWidget(self.startup_enable_button, 3, 1)
+        diagnostics_layout.addWidget(self.startup_disable_button, 4, 0)
+        diagnostics_layout.addWidget(self.startup_result_value, 4, 1)
+        diagnostics_layout.addWidget(self.health_result_value, 5, 0, 1, 2)
         diagnostics_intro = QLabel("Diagnostics stay read-only and use existing safe routes.")
         diagnostics_intro.setObjectName("sectionNote")
-        diagnostics_layout.addWidget(diagnostics_intro, 4, 0, 1, 2)
+        diagnostics_layout.addWidget(diagnostics_intro, 6, 0, 1, 2)
 
         self.tabs.addTab(voice_tab, "Voice")
         self.tabs.addTab(tools_tab, "Tools")
@@ -575,6 +588,9 @@ class JarvisMainWindow(QMainWindow):
         self.check_reminders_button.clicked.connect(self.check_reminders)
         self.notification_test_button.clicked.connect(self.test_notification)
         self.health_check_button.clicked.connect(self.run_health_check)
+        self.startup_check_button.clicked.connect(self.startup_check)
+        self.startup_enable_button.clicked.connect(self.startup_enable)
+        self.startup_disable_button.clicked.connect(self.startup_disable)
         self.launch_notepad_button.clicked.connect(self.launch_notepad)
         self.weather_check_button.clicked.connect(self.weather_check)
         self.open_google_button.clicked.connect(self.open_google)
@@ -809,6 +825,63 @@ class JarvisMainWindow(QMainWindow):
         QTimer.singleShot(1200, lambda: self.set_status(AssistantStatus.SLEEPING))
         QTimer.singleShot(1200, lambda: self._set_mode("Idle"))
 
+    def startup_check(self) -> None:
+        self._set_mode("Diagnostics")
+        self._append_message("Jarvis", "Checking Windows startup registration...")
+        self.startup_result_value.setText("Checking")
+        self.set_status(AssistantStatus.THINKING)
+        QApplication.processEvents()
+
+        try:
+            report = StartupService(self.settings).run_check()
+            self._append_message("Jarvis", format_startup_check_report(report))
+            self.startup_result_value.setText("Registered" if report.registered else "Not registered")
+            self.set_status(AssistantStatus.SLEEPING if report.is_successful else AssistantStatus.ERROR)
+        except Exception as exc:  # pragma: no cover - defensive GUI boundary
+            self._append_message("Jarvis", f"Startup check failed: {exc}")
+            self.startup_result_value.setText("Error")
+            self.set_status(AssistantStatus.ERROR)
+            self._set_mode("Error")
+            return
+
+        QTimer.singleShot(1200, lambda: self.set_status(AssistantStatus.SLEEPING))
+        QTimer.singleShot(1200, lambda: self._set_mode("Idle"))
+
+    def startup_enable(self) -> None:
+        self._run_startup_action("enable")
+
+    def startup_disable(self) -> None:
+        self._run_startup_action("disable")
+
+    def _run_startup_action(self, action: str) -> None:
+        self._set_mode("Diagnostics")
+        self._append_message("Jarvis", f"{action.title()} Windows startup requested...")
+        self.startup_result_value.setText("Checking")
+        self.set_status(AssistantStatus.THINKING)
+        QApplication.processEvents()
+
+        def _confirm(action_name: str, risk_level: str, description: str):
+            return confirm_action_gui(action_name, risk_level, description, parent=self, settings=self.settings)
+
+        try:
+            service = StartupService(self.settings)
+            if action == "enable":
+                result = service.enable_startup(_confirm)
+            else:
+                result = service.disable_startup(_confirm)
+            self._append_message("Jarvis", format_startup_action_report(result))
+            self.startup_result_value.setText("Enabled" if result.check.registered else "Disabled")
+            self.set_status(AssistantStatus.SLEEPING if result.success else AssistantStatus.ERROR)
+        except Exception as exc:  # pragma: no cover - defensive GUI boundary
+            self._append_message("Jarvis", f"Startup {action} failed: {exc}")
+            self.startup_result_value.setText("Error")
+            self.set_status(AssistantStatus.ERROR)
+            self._set_mode("Error")
+            return
+
+        QTimer.singleShot(1200, lambda: self.set_status(AssistantStatus.SLEEPING))
+        QTimer.singleShot(1200, lambda: self._set_mode("Idle"))
+
     def weather_check(self) -> None:
         self._set_mode("Weather")
         self._append_message("Jarvis", "Checking weather...")
@@ -946,6 +1019,7 @@ class JarvisMainWindow(QMainWindow):
                 risk_level="medium",
                 description="Read file contents from a local file.",
                 parent=self,
+                settings=self.settings,
             )
             self._append_message("Jarvis", format_confirmation_result(result))
             self.confirmation_result_value.setText("Approved" if result.approved else "Denied")

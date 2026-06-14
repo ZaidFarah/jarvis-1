@@ -25,6 +25,7 @@ from integrations.weather_service import WeatherService, format_weather_check_re
 from services.notification_service import NotificationService, format_notification_check_report
 from services.logging_service import configure_logging
 from services.openai_service import OpenAIService, format_openai_check_report
+from services.startup_service import StartupService, format_startup_action_report, format_startup_check_report
 from security.permissions import PermissionBroker, format_permission_check_report, format_permission_decision
 from security.confirmation import ConfirmationResult, confirm_action_cli, format_confirmation_result
 from tools.app_launcher import AppLauncher, format_app_launch_report, format_app_launcher_check_report, format_app_resolution_report
@@ -93,6 +94,27 @@ def main(argv: list[str] | None = None) -> int:
         report = resolve_runtime_paths(settings)
         print(format_runtime_check_report(report))
         return 0
+
+    if "--startup-check" in args:
+        settings = load_settings()
+        configure_logging(settings, console=False)
+        report = StartupService(settings).run_check()
+        print(format_startup_check_report(report))
+        return 0
+
+    if "--startup-enable" in args:
+        settings = load_settings()
+        configure_logging(settings, console=False)
+        result = StartupService(settings).enable_startup(_cli_confirmation_handler(settings))
+        print(format_startup_action_report(result))
+        return 0 if result.is_successful else 1
+
+    if "--startup-disable" in args:
+        settings = load_settings()
+        configure_logging(settings, console=False)
+        result = StartupService(settings).disable_startup(_cli_confirmation_handler(settings))
+        print(format_startup_action_report(result))
+        return 0 if result.is_successful else 1
 
     if "--transcribe-test" in args:
         settings = load_settings()

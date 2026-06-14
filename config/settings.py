@@ -35,6 +35,14 @@ class AppSettings(BaseSettings):
         default="Jarvis",
         validation_alias=AliasChoices("APP_NAME", "JARVIS_APP_NAME"),
     )
+    startup_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("STARTUP_ENABLED", "JARVIS_STARTUP_ENABLED"),
+    )
+    startup_app_name: str = Field(
+        default="Jarvis",
+        validation_alias=AliasChoices("STARTUP_APP_NAME", "JARVIS_STARTUP_APP_NAME"),
+    )
     runtime_mode: str = Field(
         default="source",
         validation_alias=AliasChoices("RUNTIME_MODE", "JARVIS_RUNTIME_MODE"),
@@ -502,6 +510,14 @@ class AppSettings(BaseSettings):
         if normalized not in allowed:
             raise ValueError(f"Unsupported log level: {value}")
         return normalized
+
+    @field_validator("startup_app_name")
+    @classmethod
+    def normalize_startup_app_name(cls, value: str) -> str:
+        cleaned = " ".join(value.strip().split())
+        if not cleaned:
+            raise ValueError("Startup app name cannot be empty.")
+        return cleaned
 
     @field_validator("runtime_mode")
     @classmethod

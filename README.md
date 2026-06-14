@@ -477,6 +477,46 @@ It does not run microphone tests by default. To explicitly include the controlle
 test_packaged_app.bat --voice-command-test
 ```
 
+## Windows Startup
+
+Jarvis can optionally register itself to start for the current Windows user. Startup uses only this registry key:
+
+```text
+HKCU\Software\Microsoft\Windows\CurrentVersion\Run
+```
+
+It does not use admin permissions, `HKLM`, Task Scheduler, Windows services, installers, or elevation. Enable and disable are medium-risk actions, so both require the permission broker and an explicit confirmation.
+
+Check startup status from source:
+
+```powershell
+py main.py --startup-check
+```
+
+Check startup status from a packaged build:
+
+```powershell
+dist\Jarvis\Jarvis.exe --startup-check
+```
+
+Enable or disable startup:
+
+```powershell
+py main.py --startup-enable
+py main.py --startup-disable
+```
+
+In source mode, startup targets `run_jarvis.bat` when that launcher exists in the project root. In packaged mode, startup targets the known `Jarvis.exe` path. The GUI Diagnostics tab also includes `Startup Check`, `Enable Startup`, and `Disable Startup` buttons.
+
+Startup settings:
+
+```dotenv
+STARTUP_ENABLED=false
+STARTUP_APP_NAME=Jarvis
+```
+
+Startup diagnostics are written to `logs/startup.log`. Confirmation decisions are written to `logs/confirmations.log`.
+
 ## Chat Test
 
 ```powershell
@@ -793,6 +833,17 @@ Jarvis can open only sites listed in `WEBSITE_ALLOWED_SITES`. If a site is missi
 - The voice loop uses the agent path automatically when the toggle is enabled.
 - The GUI shows whether the agent path is enabled and includes an `Agent Test` action.
 
+## Phase 40 Scope
+
+- Optional Windows startup registration through the current-user Run registry key only.
+- CLI commands: `py main.py --startup-check`, `py main.py --startup-enable`, and `py main.py --startup-disable`.
+- Startup settings: `STARTUP_ENABLED=false` and `STARTUP_APP_NAME=Jarvis`.
+- Enable and disable require permission broker approval plus explicit confirmation.
+- Source mode targets `run_jarvis.bat` when present; packaged mode targets the known `Jarvis.exe`.
+- GUI diagnostics include startup check, enable, and disable controls.
+- Startup logs are saved to `logs/startup.log`; confirmation logs are saved to `logs/confirmations.log`.
+- Jarvis does not use `HKLM`, Task Scheduler, Windows services, admin permissions, or elevation.
+
 ## Text To Speech Test
 
 ```powershell
@@ -839,7 +890,7 @@ py -m pytest
 
 ## Not Implemented Yet
 
-Jarvis still does not include ElevenLabs, startup background service, LangGraph, browser automation, desktop automation, or vision.
+Jarvis still does not include ElevenLabs, Windows services, Task Scheduler startup, `HKLM` startup registration, browser automation, desktop automation, an installer, an updater, code signing, or autonomous behavior.
 
 ## Project Layout
 

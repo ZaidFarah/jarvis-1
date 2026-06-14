@@ -150,16 +150,33 @@ def confirm_action_gui(
     risk_level: str,
     description: str,
     parent=None,
+    settings: AppSettings | None = None,
 ) -> ConfirmationResult:
+    log_file = _ensure_log_sink(settings) if settings is not None else None
+    confirmation_logger = logger.bind(confirmations=True)
+    if log_file is not None:
+        confirmation_logger.info(
+            "Prompting for GUI confirmation action={} risk_level={}",
+            action_name,
+            risk_level,
+        )
+
     dialog = ConfirmationDialog(action_name, risk_level, description, parent=parent)
     dialog.exec()
-    return ConfirmationResult(
+    result = ConfirmationResult(
         approved=dialog.approved,
         denied=dialog.denied,
         timed_out=dialog.timed_out,
         reason=dialog.reason,
+        log_file=log_file,
         errors=[] if dialog.approved else [dialog.reason],
     )
+    if log_file is not None:
+        if result.approved:
+            confirmation_logger.info("GUI confirmation approved action={}", action_name)
+        else:
+            confirmation_logger.info("GUI confirmation denied action={} reason={}", action_name, result.reason)
+    return result
 
 
 def format_confirmation_result(result: ConfirmationResult) -> str:
