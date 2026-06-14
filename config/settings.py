@@ -44,6 +44,22 @@ class AppSettings(BaseSettings):
         default=False,
         validation_alias=AliasChoices("STARTUP_ENABLED", "JARVIS_STARTUP_ENABLED"),
     )
+    backup_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("BACKUP_ENABLED", "JARVIS_BACKUP_ENABLED"),
+    )
+    backup_include_env: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("BACKUP_INCLUDE_ENV", "JARVIS_BACKUP_INCLUDE_ENV"),
+    )
+    backup_include_tokens: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("BACKUP_INCLUDE_TOKENS", "JARVIS_BACKUP_INCLUDE_TOKENS"),
+    )
+    backup_include_client_secret: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("BACKUP_INCLUDE_CLIENT_SECRET", "JARVIS_BACKUP_INCLUDE_CLIENT_SECRET"),
+    )
     startup_app_name: str = Field(
         default="Jarvis",
         validation_alias=AliasChoices("STARTUP_APP_NAME", "JARVIS_STARTUP_APP_NAME"),

@@ -12,6 +12,10 @@ def test_settings_defaults_are_safe() -> None:
     assert settings.app_version == "0.1.0"
     assert settings.startup_enabled is False
     assert settings.startup_app_name == "Jarvis"
+    assert settings.backup_enabled is True
+    assert settings.backup_include_env is False
+    assert settings.backup_include_tokens is False
+    assert settings.backup_include_client_secret is False
     assert settings.runtime_mode == "source"
     assert settings.environment == "development"
     assert settings.log_level == "INFO"

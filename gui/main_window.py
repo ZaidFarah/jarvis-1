@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
 
 from assistant.core import AssistantCore
 from config.settings import AppSettings
+from diagnostics.backup import create_backup, format_backup_create_report, format_backup_list_report, list_backups
 from diagnostics.health import HealthService, format_health_check_report
 from security.confirmation import confirm_action_gui, format_confirmation_result
 from reminders.scheduler import ReminderWatcher
@@ -150,6 +151,8 @@ class JarvisMainWindow(QMainWindow):
         self.health_check_button = QPushButton("Run Health Check")
         self.settings_button = QPushButton("Settings")
         self.log_viewer_button = QPushButton("Log Viewer")
+        self.backup_create_button = QPushButton("Create Backup")
+        self.backup_list_button = QPushButton("List Backups")
         self.startup_check_button = QPushButton("Startup Check")
         self.startup_enable_button = QPushButton("Enable Startup")
         self.startup_disable_button = QPushButton("Disable Startup")
@@ -171,6 +174,7 @@ class JarvisMainWindow(QMainWindow):
         self.settings_window: SettingsWindow | None = None
         self.log_viewer_window: LogViewerWindow | None = None
         self.startup_result_value = QLabel("Idle")
+        self.backup_result_value = QLabel("Idle")
         self.app_launch_result_value = QLabel("Idle")
         self.website_result_value = QLabel("Idle")
         self.file_access_result_value = QLabel("Idle")
@@ -194,6 +198,8 @@ class JarvisMainWindow(QMainWindow):
         self.health_check_action: QAction | None = None
         self.settings_action: QAction | None = None
         self.log_viewer_action: QAction | None = None
+        self.backup_create_action: QAction | None = None
+        self.backup_list_action: QAction | None = None
         self.launch_notepad_action: QAction | None = None
         self.open_google_action: QAction | None = None
         self.list_downloads_action: QAction | None = None
@@ -271,6 +277,8 @@ class JarvisMainWindow(QMainWindow):
         self.health_check_button.setObjectName("secondaryButton")
         self.settings_button.setObjectName("secondaryButton")
         self.log_viewer_button.setObjectName("secondaryButton")
+        self.backup_create_button.setObjectName("secondaryButton")
+        self.backup_list_button.setObjectName("secondaryButton")
         self.startup_check_button.setObjectName("secondaryButton")
         self.startup_enable_button.setObjectName("secondaryButton")
         self.startup_disable_button.setObjectName("secondaryButton")
@@ -377,10 +385,12 @@ class JarvisMainWindow(QMainWindow):
         diagnostics_layout.addWidget(self.startup_result_value, 4, 1)
         diagnostics_layout.addWidget(self.settings_button, 5, 0)
         diagnostics_layout.addWidget(self.log_viewer_button, 5, 1)
-        diagnostics_layout.addWidget(self.health_result_value, 6, 0, 1, 2)
+        diagnostics_layout.addWidget(self.backup_create_button, 6, 0)
+        diagnostics_layout.addWidget(self.backup_list_button, 6, 1)
+        diagnostics_layout.addWidget(self.backup_result_value, 7, 0, 1, 2)
         diagnostics_intro = QLabel("Diagnostics stay read-only and use existing safe routes.")
         diagnostics_intro.setObjectName("sectionNote")
-        diagnostics_layout.addWidget(diagnostics_intro, 7, 0, 1, 2)
+        diagnostics_layout.addWidget(diagnostics_intro, 8, 0, 1, 2)
 
         self.tabs.addTab(voice_tab, "Voice")
         self.tabs.addTab(tools_tab, "Tools")
@@ -603,6 +613,8 @@ class JarvisMainWindow(QMainWindow):
         self.health_check_button.clicked.connect(self.run_health_check)
         self.settings_button.clicked.connect(self.open_settings)
         self.log_viewer_button.clicked.connect(self.open_log_viewer)
+        self.backup_create_button.clicked.connect(self.create_backup)
+        self.backup_list_button.clicked.connect(self.list_backups)
         self.startup_check_button.clicked.connect(self.startup_check)
         self.startup_enable_button.clicked.connect(self.startup_enable)
         self.startup_disable_button.clicked.connect(self.startup_disable)
@@ -641,6 +653,10 @@ class JarvisMainWindow(QMainWindow):
         self.settings_action.triggered.connect(self.open_settings)
         self.log_viewer_action = QAction("Log Viewer", self)
         self.log_viewer_action.triggered.connect(self.open_log_viewer)
+        self.backup_create_action = QAction("Create Backup", self)
+        self.backup_create_action.triggered.connect(self.create_backup)
+        self.backup_list_action = QAction("List Backups", self)
+        self.backup_list_action.triggered.connect(self.list_backups)
         self.launch_notepad_action = QAction("Launch Notepad", self)
         self.launch_notepad_action.triggered.connect(self.launch_notepad)
         self.open_google_action = QAction("Open Google", self)
@@ -665,6 +681,8 @@ class JarvisMainWindow(QMainWindow):
         menu.addAction(self.health_check_action)
         menu.addAction(self.settings_action)
         menu.addAction(self.log_viewer_action)
+        menu.addAction(self.backup_create_action)
+        menu.addAction(self.backup_list_action)
         menu.addAction(self.launch_notepad_action)
         menu.addAction(self.open_google_action)
         menu.addAction(self.list_downloads_action)
@@ -896,6 +914,49 @@ class JarvisMainWindow(QMainWindow):
         self.log_viewer_window = None
         self._set_mode("Idle")
 
+    def create_backup(self) -> None:
+        self._set_mode("Diagnostics")
+        self._append_message("Jarvis", "Creating backup...")
+        self.backup_result_value.setText("Checking")
+        self.set_status(AssistantStatus.THINKING)
+        QApplication.processEvents()
+
+        try:
+            result = create_backup(self.settings, self._gui_confirmation_handler())
+            self._append_message("Jarvis", format_backup_create_report(result))
+            self.backup_result_value.setText("Created" if result.created else "Failed")
+            self.set_status(AssistantStatus.SLEEPING if result.is_successful else AssistantStatus.ERROR)
+        except Exception as exc:  # pragma: no cover - defensive GUI boundary
+            self._append_message("Jarvis", f"Backup create failed: {exc}")
+            self.backup_result_value.setText("Error")
+            self.set_status(AssistantStatus.ERROR)
+            self._set_mode("Error")
+            return
+
+        QTimer.singleShot(1200, lambda: self.set_status(AssistantStatus.SLEEPING))
+        QTimer.singleShot(1200, lambda: self._set_mode("Idle"))
+
+    def list_backups(self) -> None:
+        self._set_mode("Diagnostics")
+        self._append_message("Jarvis", "Listing backups...")
+        self.backup_result_value.setText("Checking")
+        self.set_status(AssistantStatus.THINKING)
+        QApplication.processEvents()
+
+        try:
+            report = list_backups(self.settings)
+            self._append_message("Jarvis", format_backup_list_report(report))
+            self.backup_result_value.setText(f"{len(report.items)} backups")
+            self.set_status(AssistantStatus.SLEEPING)
+        except Exception as exc:  # pragma: no cover - defensive GUI boundary
+            self._append_message("Jarvis", f"Backup list failed: {exc}")
+            self.backup_result_value.setText("Error")
+            self.set_status(AssistantStatus.ERROR)
+            self._set_mode("Error")
+            return
+
+        QTimer.singleShot(1200, lambda: self._set_mode("Idle"))
+
     def _run_startup_action(self, action: str) -> None:
         self._set_mode("Diagnostics")
         self._append_message("Jarvis", f"{action.title()} Windows startup requested...")
@@ -924,6 +985,12 @@ class JarvisMainWindow(QMainWindow):
 
         QTimer.singleShot(1200, lambda: self.set_status(AssistantStatus.SLEEPING))
         QTimer.singleShot(1200, lambda: self._set_mode("Idle"))
+
+    def _gui_confirmation_handler(self):
+        def _handler(action_name: str, risk_level: str, description: str):
+            return confirm_action_gui(action_name, risk_level, description, parent=self, settings=self.settings)
+
+        return _handler
 
     def weather_check(self) -> None:
         self._set_mode("Weather")

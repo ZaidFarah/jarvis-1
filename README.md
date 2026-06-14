@@ -515,6 +515,30 @@ Tail a specific log with:
 py main.py --logs-tail jarvis.log --lines 100
 ```
 
+## Backups
+
+Create a local backup from the GUI `Create Backup` button or the tray `Create Backup` action. Use `List Backups` to see existing local archives. Restore is available only from the CLI for now because it is high risk and must print the restore plan before confirmation.
+
+Create a backup with:
+
+```powershell
+py main.py --backup-create
+```
+
+List local backups with:
+
+```powershell
+py main.py --backup-list
+```
+
+Restore a backup with:
+
+```powershell
+py main.py --backup-restore backups\Jarvis-0.1.0-YYYYMMDD_HHMMSS.zip
+```
+
+Backups live under `backups/` and include the current `.env` file, `data/*.db`, and a backup metadata README. Tokens and the Google client secret stay out of backups unless the corresponding `BACKUP_INCLUDE_*` flag is turned on. Logs, build output, release output, and the Git tree are never included.
+
 ## Packaged Smoke Test
 
 After building and initializing config, run:

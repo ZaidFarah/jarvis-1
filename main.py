@@ -8,6 +8,14 @@ from app.application import JarvisApplication
 from agent.runtime import AgentRuntime
 from assistant.core import AssistantCore, AssistantResponse
 from diagnostics.health import HealthService, format_health_check_report
+from diagnostics.backup import (
+    create_backup,
+    format_backup_create_report,
+    format_backup_list_report,
+    format_backup_restore_report,
+    list_backups,
+    restore_backup,
+)
 from diagnostics.logs import format_log_tail_report, format_logs_list_report, list_log_files, tail_log
 from diagnostics.settings_check import format_settings_check_report, run_settings_check
 from diagnostics.release_check import format_release_check_report, run_release_check
@@ -118,6 +126,31 @@ def main(argv: list[str] | None = None) -> int:
         report = run_settings_check(settings)
         print(format_settings_check_report(report))
         return 0
+
+    if "--backup-create" in args:
+        settings = load_settings()
+        configure_logging(settings, console=False)
+        result = create_backup(settings, _cli_confirmation_handler(settings))
+        print(format_backup_create_report(result))
+        return 0 if result.is_successful else 1
+
+    if "--backup-list" in args:
+        settings = load_settings()
+        configure_logging(settings, console=False)
+        report = list_backups(settings)
+        print(format_backup_list_report(report))
+        return 0
+
+    if "--backup-restore" in args:
+        settings = load_settings()
+        configure_logging(settings, console=False)
+        backup_zip = _message_after_flag(args, "--backup-restore")
+        if not backup_zip:
+            print("Jarvis backup restore requires a backup zip path.")
+            return 1
+        result = restore_backup(settings, Path(backup_zip), _cli_confirmation_handler(settings))
+        print(format_backup_restore_report(result))
+        return 0 if result.is_successful else 1
 
     if "--logs-list" in args:
         settings = load_settings()

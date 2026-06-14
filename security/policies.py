@@ -30,6 +30,8 @@ def default_policies() -> list[PolicyRule]:
         PolicyRule("show notification", "medium", "Display a local notification.", True, True, "Requires confirmation."),
         PolicyRule("register startup", "medium", "Register Jarvis for current-user Windows startup.", True, True, "Requires confirmation."),
         PolicyRule("unregister startup", "medium", "Remove Jarvis from current-user Windows startup.", True, True, "Requires confirmation."),
+        PolicyRule("create backup", "medium", "Create a local backup archive.", True, True, "Requires confirmation."),
+        PolicyRule("restore backup", "high", "Restore files from a local backup archive.", True, True, "Requires confirmation."),
         PolicyRule("send image to openai", "high", "Send an image to OpenAI for analysis.", True, True, "Requires confirmation."),
         PolicyRule("take screenshot", "high", "Capture a screenshot of the current screen.", True, True, "Requires confirmation."),
         PolicyRule("read screen text", "high", "Run OCR on a screenshot or image.", True, True, "Requires confirmation."),

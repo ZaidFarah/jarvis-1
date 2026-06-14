@@ -53,6 +53,8 @@ def test_voice_loop_gui_state_updates_controls_and_status_fields() -> None:
     assert window.startup_check_button.text() == "Startup Check"
     assert window.startup_enable_button.text() == "Enable Startup"
     assert window.startup_disable_button.text() == "Disable Startup"
+    assert window.backup_create_button.text() == "Create Backup"
+    assert window.backup_list_button.text() == "List Backups"
 
     window._set_voice_loop_running(True)
 
@@ -106,7 +108,13 @@ def test_voice_loop_gui_state_updates_controls_and_status_fields() -> None:
     assert "Test Notification" in tray_actions
     assert "Exit Jarvis" in tray_actions
     assert "Settings" in tray_actions
+    assert "Log Viewer" in tray_actions
+    assert "Create Backup" in tray_actions
+    assert "List Backups" in tray_actions
     assert window.settings_action is not None
+    assert window.log_viewer_action is not None
+    assert window.backup_create_action is not None
+    assert window.backup_list_action is not None
 
     window.close()
     app.processEvents()
