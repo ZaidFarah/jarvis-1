@@ -388,7 +388,7 @@ logs/health.log
 py main.py --runtime-check
 ```
 
-The runtime check reports whether Jarvis is running in source mode or packaged mode and shows the resolved paths for `.env`, `logs/`, `data/`, `credentials/`, and `assets/`. It does not print any secrets or tokens. Phase 37 adds the first Windows PyInstaller build script, and the packaged EXE should support `--runtime-check` and `--health-check`.
+The runtime check reports whether Jarvis is running in source mode or packaged mode and shows the resolved paths for the config root, env file, `logs/`, `data/`, `credentials/`, and `assets/`. It does not print any secrets or tokens.
 
 ## Packaging
 
@@ -404,7 +404,34 @@ The output lands in:
 dist/Jarvis/Jarvis.exe
 ```
 
-The build stays console-enabled so the EXE can still print diagnostics for `--runtime-check` and `--health-check`. No secrets, tokens, logs, or local databases are packaged. Mutable runtime files such as `.env`, `logs/`, `data/`, and `credentials/` resolve beside `Jarvis.exe`; bundled assets resolve to PyInstaller's internal assets directory.
+The build stays console-enabled so the EXE can still print diagnostics for `--runtime-check`, `--health-check`, and `--init-config`. No secrets, tokens, logs, local databases, or credential files are packaged. Bundled assets resolve to PyInstaller's internal assets directory.
+
+## Packaged Config
+
+Initialize the external packaged config location with:
+
+```powershell
+dist\Jarvis\Jarvis.exe --init-config
+```
+
+The same bootstrap can be run from source for testing:
+
+```powershell
+py main.py --init-config
+```
+
+`--init-config` creates the external config folders and copies `.env.example` to the packaged env file only when that env file is missing. It never overwrites an existing env file and never creates API keys, OAuth tokens, client secrets, or credential JSON files.
+
+Packaged Jarvis uses:
+
+```text
+%APPDATA%\Jarvis.env
+%APPDATA%\Jarvis\logs
+%APPDATA%\Jarvis\data
+%APPDATA%\Jarvis\credentials
+```
+
+Put API keys in `%APPDATA%\Jarvis.env`. Put Google client secret JSON files in `%APPDATA%\Jarvis\credentials` only when enabling Gmail or Calendar features. Logs and local databases live under `%APPDATA%\Jarvis\logs` and `%APPDATA%\Jarvis\data`.
 
 ## Chat Test
 

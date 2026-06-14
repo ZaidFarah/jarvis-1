@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import sys
+import os
 from pathlib import Path
 from typing import Any
 
 from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from jarvis_runtime.config_bootstrap import detect_runtime_mode, get_runtime_config_paths
 
 
 def _resolve_project_root() -> Path:
@@ -15,13 +18,14 @@ def _resolve_project_root() -> Path:
 
 
 PROJECT_ROOT = _resolve_project_root()
+DEFAULT_CONFIG_PATHS = get_runtime_config_paths(detect_runtime_mode(), PROJECT_ROOT)
 
 
 class AppSettings(BaseSettings):
     """Runtime settings for the Jarvis desktop shell."""
 
     model_config = SettingsConfigDict(
-        env_file=PROJECT_ROOT / ".env",
+        env_file=DEFAULT_CONFIG_PATHS.env_path,
         env_prefix="JARVIS_",
         extra="ignore",
         populate_by_name=True,
@@ -37,7 +41,7 @@ class AppSettings(BaseSettings):
     )
     environment: str = "development"
     log_level: str = "INFO"
-    log_dir: Path = Field(default=PROJECT_ROOT / "logs")
+    log_dir: Path = Field(default=DEFAULT_CONFIG_PATHS.logs_path)
     window_width: int = Field(default=460, ge=360, le=1200)
     window_height: int = Field(default=620, ge=420, le=1400)
     always_on_top: bool = True
@@ -174,7 +178,7 @@ class AppSettings(BaseSettings):
         validation_alias=AliasChoices("MEMORY_ENABLED", "JARVIS_MEMORY_ENABLED"),
     )
     memory_database_path: Path = Field(
-        default=PROJECT_ROOT / "data" / "jarvis_memory.db",
+        default=DEFAULT_CONFIG_PATHS.data_path / "jarvis_memory.db",
         validation_alias=AliasChoices("MEMORY_DATABASE_PATH", "JARVIS_MEMORY_DATABASE_PATH"),
     )
     reminders_enabled: bool = Field(
@@ -298,11 +302,11 @@ class AppSettings(BaseSettings):
         validation_alias=AliasChoices("GMAIL_ENABLED", "JARVIS_GMAIL_ENABLED"),
     )
     gmail_client_secret_path: Path = Field(
-        default=PROJECT_ROOT / "credentials" / "google_client_secret.json",
+        default=DEFAULT_CONFIG_PATHS.credentials_path / "google_client_secret.json",
         validation_alias=AliasChoices("GMAIL_CLIENT_SECRET_PATH", "JARVIS_GMAIL_CLIENT_SECRET_PATH"),
     )
     gmail_token_path: Path = Field(
-        default=PROJECT_ROOT / "credentials" / "token_gmail.json",
+        default=DEFAULT_CONFIG_PATHS.credentials_path / "token_gmail.json",
         validation_alias=AliasChoices("GMAIL_TOKEN_PATH", "JARVIS_GMAIL_TOKEN_PATH"),
     )
     gmail_scopes: str = Field(
@@ -332,7 +336,7 @@ class AppSettings(BaseSettings):
         validation_alias=AliasChoices("GMAIL_MAX_RESULTS", "JARVIS_GMAIL_MAX_RESULTS"),
     )
     reminders_database_path: Path = Field(
-        default=PROJECT_ROOT / "data" / "jarvis_reminders.db",
+        default=DEFAULT_CONFIG_PATHS.data_path / "jarvis_reminders.db",
         validation_alias=AliasChoices("REMINDERS_DATABASE_PATH", "JARVIS_REMINDERS_DATABASE_PATH"),
     )
     calendar_enabled: bool = Field(
@@ -340,11 +344,11 @@ class AppSettings(BaseSettings):
         validation_alias=AliasChoices("CALENDAR_ENABLED", "JARVIS_CALENDAR_ENABLED"),
     )
     calendar_client_secret_path: Path = Field(
-        default=PROJECT_ROOT / "credentials" / "google_client_secret.json",
+        default=DEFAULT_CONFIG_PATHS.credentials_path / "google_client_secret.json",
         validation_alias=AliasChoices("CALENDAR_CLIENT_SECRET_PATH", "JARVIS_CALENDAR_CLIENT_SECRET_PATH"),
     )
     calendar_token_path: Path = Field(
-        default=PROJECT_ROOT / "credentials" / "token_calendar.json",
+        default=DEFAULT_CONFIG_PATHS.credentials_path / "token_calendar.json",
         validation_alias=AliasChoices("CALENDAR_TOKEN_PATH", "JARVIS_CALENDAR_TOKEN_PATH"),
     )
     calendar_scopes: str = Field(
@@ -393,7 +397,7 @@ class AppSettings(BaseSettings):
         validation_alias=AliasChoices("OCR_ENABLED", "JARVIS_OCR_ENABLED"),
     )
     screenshot_save_dir: Path = Field(
-        default=PROJECT_ROOT / "logs" / "screenshots",
+        default=DEFAULT_CONFIG_PATHS.logs_path / "screenshots",
         validation_alias=AliasChoices("SCREENSHOT_SAVE_DIR", "JARVIS_SCREENSHOT_SAVE_DIR"),
     )
     ocr_provider: str = Field(
@@ -511,22 +515,22 @@ class AppSettings(BaseSettings):
     @field_validator("log_dir")
     @classmethod
     def expand_log_dir(cls, value: Path) -> Path:
-        return value.expanduser().resolve()
+        return _resolve_config_path(value)
 
     @field_validator("memory_database_path")
     @classmethod
     def expand_memory_database_path(cls, value: Path) -> Path:
-        return value.expanduser().resolve()
+        return _resolve_config_path(value)
 
     @field_validator("reminders_database_path")
     @classmethod
     def expand_reminders_database_path(cls, value: Path) -> Path:
-        return value.expanduser().resolve()
+        return _resolve_config_path(value)
 
     @field_validator("calendar_client_secret_path", "calendar_token_path", "gmail_client_secret_path", "gmail_token_path")
     @classmethod
     def expand_calendar_paths(cls, value: Path) -> Path:
-        return value.expanduser().resolve()
+        return _resolve_config_path(value)
 
     @field_validator("speech_to_text_provider", "tts_provider", "whisper_device", "whisper_compute_type")
     @classmethod
@@ -885,3 +889,10 @@ class AppSettings(BaseSettings):
 
 def load_settings() -> AppSettings:
     return AppSettings()
+
+
+def _resolve_config_path(value: Path) -> Path:
+    expanded = Path(os.path.expandvars(str(value))).expanduser()
+    if not expanded.is_absolute():
+        expanded = DEFAULT_CONFIG_PATHS.config_root / expanded
+    return expanded.resolve()

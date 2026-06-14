@@ -23,14 +23,14 @@ set "BASE_ARGS=--noconfirm --clean --onedir --console --name Jarvis --distpath d
 
 if exist "%ROOT%assets\jarvis.ico" (
     if exist "%ROOT%assets" (
-        python -m PyInstaller !BASE_ARGS! --icon "%ROOT%assets\jarvis.ico" --add-data "%ROOT%assets;assets" main.py
+        python -m PyInstaller !BASE_ARGS! --add-data "%ROOT%.env.example;." --icon "%ROOT%assets\jarvis.ico" --add-data "%ROOT%assets;assets" main.py
     ) else (
-        python -m PyInstaller !BASE_ARGS! --icon "%ROOT%assets\jarvis.ico" main.py
+        python -m PyInstaller !BASE_ARGS! --add-data "%ROOT%.env.example;." --icon "%ROOT%assets\jarvis.ico" main.py
     )
 ) else if exist "%ROOT%assets" (
-    python -m PyInstaller !BASE_ARGS! --add-data "%ROOT%assets;assets" main.py
+    python -m PyInstaller !BASE_ARGS! --add-data "%ROOT%.env.example;." --add-data "%ROOT%assets;assets" main.py
 ) else (
-    python -m PyInstaller !BASE_ARGS! main.py
+    python -m PyInstaller !BASE_ARGS! --add-data "%ROOT%.env.example;." main.py
 )
 set "EXIT_CODE=%ERRORLEVEL%"
 

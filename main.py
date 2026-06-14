@@ -9,6 +9,7 @@ from agent.runtime import AgentRuntime
 from assistant.core import AssistantCore, AssistantResponse
 from diagnostics.health import HealthService, format_health_check_report
 from config.settings import load_settings
+from jarvis_runtime.config_bootstrap import format_config_init_error, format_config_init_report, initialize_config
 from jarvis_runtime.runtime_paths import format_runtime_check_report, resolve_runtime_paths
 from integrations.calendar_service import CalendarService, format_calendar_auth_report, format_calendar_check_report
 from integrations.gmail_service import (
@@ -59,6 +60,15 @@ from voice.wake_diagnostics import WakeDiagnostics, format_wake_report
 
 def main(argv: list[str] | None = None) -> int:
     args = list(argv if argv is not None else sys.argv[1:])
+    if "--init-config" in args:
+        try:
+            result = initialize_config()
+        except FileNotFoundError as error:
+            print(format_config_init_error(error))
+            return 1
+        print(format_config_init_report(result))
+        return 0
+
     if "--audio-check" in args:
         settings = load_settings()
         configure_logging(settings, console=False)

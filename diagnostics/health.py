@@ -8,6 +8,7 @@ from pathlib import Path
 from loguru import logger
 
 from config.settings import AppSettings, PROJECT_ROOT
+from jarvis_runtime.runtime_paths import RuntimePaths, resolve_runtime_paths
 
 
 _HEALTH_LOG_SINK_ID: int | None = None
@@ -16,9 +17,15 @@ _HEALTH_LOG_FILE: Path | None = None
 
 @dataclass(frozen=True)
 class HealthCheckReport:
+    runtime_mode: str
     python_version: str
     os_platform: str
     project_path: Path
+    config_root: Path
+    env_path: Path
+    logs_path: Path
+    data_path: Path
+    credentials_path: Path
     openai_enabled: bool
     openai_key_detected: bool
     openai_model: str
@@ -76,10 +83,17 @@ class HealthService:
         self._ensure_log_sink()
 
     def run_check(self) -> HealthCheckReport:
+        runtime_paths = resolve_runtime_paths(self.settings)
         report = HealthCheckReport(
+            runtime_mode=runtime_paths.runtime_mode,
             python_version=platform.python_version(),
             os_platform=platform.platform(),
             project_path=PROJECT_ROOT,
+            config_root=runtime_paths.config_root,
+            env_path=runtime_paths.env_path,
+            logs_path=runtime_paths.logs_path,
+            data_path=runtime_paths.data_path,
+            credentials_path=runtime_paths.credentials_path,
             openai_enabled=self.settings.openai_enabled,
             openai_key_detected=self.settings.has_openai_api_key,
             openai_model=self.settings.openai_model,
@@ -122,7 +136,7 @@ class HealthService:
             agent_enabled=self.settings.agent_enabled,
             agent_experimental=self.settings.agent_experimental,
             log_file=self.log_file,
-            sections=self._build_sections(),
+            sections=self._build_sections(runtime_paths),
         )
         self.health_logger.info(
             "Health check completed openai={} tts={} stt={} weather={} calendar={} gmail={} vision={} agent={}",
@@ -137,15 +151,21 @@ class HealthService:
         )
         return report
 
-    def _build_sections(self) -> list[tuple[str, list[tuple[str, str]]]]:
+    def _build_sections(self, runtime_paths: RuntimePaths) -> list[tuple[str, list[tuple[str, str]]]]:
         settings = self.settings
         return [
             (
                 "System",
                 [
+                    ("Runtime mode", runtime_paths.runtime_mode),
                     ("Python version", platform.python_version()),
                     ("OS/platform", platform.platform()),
                     ("Project path", str(PROJECT_ROOT)),
+                    ("Config root", str(runtime_paths.config_root)),
+                    (".env path", str(runtime_paths.env_path)),
+                    ("logs path", str(runtime_paths.logs_path)),
+                    ("data path", str(runtime_paths.data_path)),
+                    ("credentials path", str(runtime_paths.credentials_path)),
                 ],
             ),
             (
