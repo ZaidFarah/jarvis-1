@@ -406,6 +406,12 @@ dist/Jarvis/Jarvis.exe
 
 The build stays console-enabled so the EXE can still print diagnostics for `--runtime-check`, `--health-check`, and `--init-config`. No secrets, tokens, logs, local databases, or credential files are packaged. Bundled assets resolve to PyInstaller's internal assets directory.
 
+Print the packaged smoke test plan from source with:
+
+```powershell
+py main.py --packaged-smoke-plan
+```
+
 ## Packaged Config
 
 Initialize the external packaged config location with:
@@ -432,6 +438,44 @@ Packaged Jarvis uses:
 ```
 
 Put API keys in `%APPDATA%\Jarvis.env`. Put Google client secret JSON files in `%APPDATA%\Jarvis\credentials` only when enabling Gmail or Calendar features. Logs and local databases live under `%APPDATA%\Jarvis\logs` and `%APPDATA%\Jarvis\data`.
+
+## Packaged Run
+
+Run the packaged app normally with:
+
+```powershell
+run_jarvis.bat
+```
+
+Run it in the current console for debugging with:
+
+```powershell
+run_jarvis_console.bat
+```
+
+Both scripts expect the build output at `dist\Jarvis\Jarvis.exe`.
+
+## Packaged Smoke Test
+
+After building and initializing config, run:
+
+```powershell
+test_packaged_app.bat
+```
+
+The smoke test runs:
+
+```text
+dist\Jarvis\Jarvis.exe --runtime-check
+dist\Jarvis\Jarvis.exe --health-check
+dist\Jarvis\Jarvis.exe --openai-check
+```
+
+It does not run microphone tests by default. To explicitly include the controlled voice command test, run:
+
+```powershell
+test_packaged_app.bat --voice-command-test
+```
 
 ## Chat Test
 

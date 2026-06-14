@@ -60,6 +60,10 @@ from voice.wake_diagnostics import WakeDiagnostics, format_wake_report
 
 def main(argv: list[str] | None = None) -> int:
     args = list(argv if argv is not None else sys.argv[1:])
+    if "--packaged-smoke-plan" in args:
+        print(_format_packaged_smoke_plan())
+        return 0
+
     if "--init-config" in args:
         try:
             result = initialize_config()
@@ -408,6 +412,31 @@ def _chat_test_message(args: list[str]) -> str:
     if inline_message:
         return inline_message
     return input("You: ").strip()
+
+
+def _format_packaged_smoke_plan() -> str:
+    return "\n".join(
+        [
+            "Jarvis Packaged Smoke Plan",
+            "===========================",
+            "After building the EXE, run these checks:",
+            "",
+            "1. cmd /c build_exe.bat",
+            "2. dist\\Jarvis\\Jarvis.exe --init-config",
+            "3. dist\\Jarvis\\Jarvis.exe --runtime-check",
+            "4. dist\\Jarvis\\Jarvis.exe --health-check",
+            "5. dist\\Jarvis\\Jarvis.exe --openai-check",
+            "6. cmd /c test_packaged_app.bat",
+            "7. run_jarvis_console.bat",
+            "8. run_jarvis.bat",
+            "",
+            "Optional microphone check:",
+            "  cmd /c test_packaged_app.bat --voice-command-test",
+            "",
+            "Do not run microphone checks by default.",
+            "Packaged config lives under %APPDATA%\\Jarvis and %APPDATA%\\Jarvis.env.",
+        ]
+    )
 
 
 def _message_after_flag(args: list[str], flag: str) -> str:
