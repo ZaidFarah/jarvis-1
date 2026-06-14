@@ -16,6 +16,7 @@ from diagnostics.backup import (
     plan_restore_backup,
     restore_backup,
 )
+from diagnostics.installer import InstallerCheckReport, format_installer_check_report, run_installer_check
 from diagnostics.settings_check import SettingsCheckReport, format_settings_check_report, run_settings_check
 from diagnostics.release_check import (
     ReleaseCheckItem,
@@ -32,6 +33,7 @@ __all__ = [
     "BackupListReport",
     "BackupRestorePlan",
     "BackupRestoreReport",
+    "InstallerCheckReport",
     "create_backup",
     "format_backup_create_report",
     "format_backup_list_report",
@@ -40,6 +42,8 @@ __all__ = [
     "list_backups",
     "plan_restore_backup",
     "restore_backup",
+    "format_installer_check_report",
+    "run_installer_check",
     "SettingsCheckReport",
     "ReleaseCheckItem",
     "ReleaseCheckReport",

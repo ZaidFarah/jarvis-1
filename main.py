@@ -16,6 +16,7 @@ from diagnostics.backup import (
     list_backups,
     restore_backup,
 )
+from diagnostics.installer import format_installer_check_report, run_installer_check
 from diagnostics.logs import format_log_tail_report, format_logs_list_report, list_log_files, tail_log
 from diagnostics.settings_check import format_settings_check_report, run_settings_check
 from diagnostics.release_check import format_release_check_report, run_release_check
@@ -151,6 +152,13 @@ def main(argv: list[str] | None = None) -> int:
         result = restore_backup(settings, Path(backup_zip), _cli_confirmation_handler(settings))
         print(format_backup_restore_report(result))
         return 0 if result.is_successful else 1
+
+    if "--installer-check" in args:
+        settings = load_settings()
+        configure_logging(settings, console=False)
+        report = run_installer_check(settings)
+        print(format_installer_check_report(report))
+        return 0 if report.is_successful else 1
 
     if "--logs-list" in args:
         settings = load_settings()

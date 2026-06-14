@@ -428,6 +428,24 @@ Print the packaged smoke test plan from source with:
 py main.py --packaged-smoke-plan
 ```
 
+## Installer
+
+Jarvis includes an Inno Setup installer script under `installer/JarvisInstaller.iss`. Install Inno Setup 6 first, then build the installer with:
+
+```powershell
+cmd /c build_installer.bat
+```
+
+The installer output goes to:
+
+```text
+installer\output
+```
+
+It installs the packaged EXE plus the PyInstaller internal runtime files, creates a Start Menu shortcut, and offers an optional desktop shortcut. It does not bundle `.env`, credentials, tokens, logs, data databases, or any other secret files.
+
+Windows SmartScreen may warn on unsigned installers and unsigned EXEs. Code signing is not enabled yet, so that warning is expected until signing is added later.
+
 ## Packaged Config
 
 Initialize the external packaged config location with:
@@ -1037,7 +1055,7 @@ py -m pytest
 
 ## Not Implemented Yet
 
-Jarvis still does not include ElevenLabs, Windows services, Task Scheduler startup, `HKLM` startup registration, browser automation, desktop automation, an installer, an updater, code signing, or autonomous behavior.
+Jarvis still does not include ElevenLabs, Windows services, Task Scheduler startup, `HKLM` startup registration, browser automation, desktop automation, an updater, code signing, or autonomous behavior.
 
 ## Project Layout
 
