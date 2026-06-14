@@ -17,6 +17,7 @@ build/
 dist/
 releases/*.zip
 installer/output/
+reports/
 *.spec
 credentials/token_*.json
 credentials/google_client_secret.json

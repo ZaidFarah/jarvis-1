@@ -17,6 +17,7 @@ from diagnostics.backup import (
     restore_backup,
 )
 from diagnostics.installer import format_installer_check_report, run_installer_check
+from diagnostics.final_report import run_final_report
 from diagnostics.logs import format_log_tail_report, format_logs_list_report, list_log_files, tail_log
 from diagnostics.settings_check import format_settings_check_report, run_settings_check
 from diagnostics.signing import format_signing_check_report, run_signing_check
@@ -167,6 +168,14 @@ def main(argv: list[str] | None = None) -> int:
         report = run_signing_check(settings)
         print(format_signing_check_report(report))
         return 0 if report.is_successful else 1
+
+    if "--final-report" in args:
+        settings = load_settings()
+        configure_logging(settings, console=False)
+        report = run_final_report(settings)
+        print(f"Report written to: {report.report_path}")
+        print(f"Summary: {report.summary}")
+        return 0 if report.overall_status != "FAIL" else 1
 
     if "--logs-list" in args:
         settings = load_settings()

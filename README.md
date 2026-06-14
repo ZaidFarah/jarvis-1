@@ -612,6 +612,16 @@ py main.py --release-check
 
 The check prints `PASS`, `WARN`, or `FAIL` for release-critical items and ends with a final readiness status. A missing `dist\Jarvis\Jarvis.exe` is a warning so the check can run before a build; tracked secrets or generated local files are failures.
 
+## Final Report
+
+Generate the final local validation report for Jarvis v0.1.0 with:
+
+```powershell
+py main.py --final-report
+```
+
+The report is written to `reports\Jarvis-0.1.0-validation-report.md` and includes build, release ZIP, runtime, health, release, installer, signing, feature, and security summaries. It never prints secret values.
+
 Release checklist:
 
 1. Run `py -m pytest`.
