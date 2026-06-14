@@ -471,6 +471,32 @@ run_jarvis_console.bat
 
 Both scripts expect the build output at `dist\Jarvis\Jarvis.exe`.
 
+## Settings
+
+Open the safe settings editor from the GUI `Settings` button or the tray `Settings` action.
+
+The editor only shows common non-secret options:
+
+- wake phrase
+- wake match threshold
+- voice loop enabled
+- TTS provider
+- OpenAI TTS voice
+- default weather city
+- reminders enabled
+- notifications enabled
+- app launcher enabled
+- website launcher enabled
+- file access enabled
+- agent enabled
+- vision enabled
+
+Saving writes only those safe keys to the external `.env` file and leaves unrelated keys alone. Secrets stay hidden. Review the current safe settings and redacted secret settings with:
+
+```powershell
+py main.py --settings-check
+```
+
 ## Packaged Smoke Test
 
 After building and initializing config, run:

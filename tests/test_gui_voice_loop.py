@@ -49,6 +49,7 @@ def test_voice_loop_gui_state_updates_controls_and_status_fields() -> None:
     assert window.vision_check_button.text() == "Vision Check"
     assert window.agent_test_button.text() == "Agent Test"
     assert window.health_check_button.text() == "Run Health Check"
+    assert window.settings_button.text() == "Settings"
     assert window.startup_check_button.text() == "Startup Check"
     assert window.startup_enable_button.text() == "Enable Startup"
     assert window.startup_disable_button.text() == "Disable Startup"
@@ -104,6 +105,8 @@ def test_voice_loop_gui_state_updates_controls_and_status_fields() -> None:
     assert "Check Reminders" in tray_actions
     assert "Test Notification" in tray_actions
     assert "Exit Jarvis" in tray_actions
+    assert "Settings" in tray_actions
+    assert window.settings_action is not None
 
     window.close()
     app.processEvents()

@@ -8,6 +8,7 @@ from app.application import JarvisApplication
 from agent.runtime import AgentRuntime
 from assistant.core import AssistantCore, AssistantResponse
 from diagnostics.health import HealthService, format_health_check_report
+from diagnostics.settings_check import format_settings_check_report, run_settings_check
 from diagnostics.release_check import format_release_check_report, run_release_check
 from config.settings import load_settings
 from jarvis_runtime.config_bootstrap import format_config_init_error, format_config_init_report, initialize_config
@@ -109,6 +110,13 @@ def main(argv: list[str] | None = None) -> int:
         report = run_release_check(settings)
         print(format_release_check_report(report))
         return 0 if report.is_successful else 1
+
+    if "--settings-check" in args:
+        settings = load_settings()
+        configure_logging(settings, console=False)
+        report = run_settings_check(settings)
+        print(format_settings_check_report(report))
+        return 0
 
     if "--release-package-check" in args:
         settings = load_settings()

@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMainWindow,
     QMenu,
+    QDialog,
     QPushButton,
     QSizePolicy,
     QSystemTrayIcon,
@@ -32,6 +33,7 @@ from security.confirmation import confirm_action_gui, format_confirmation_result
 from reminders.scheduler import ReminderWatcher
 from services.notification_service import NotificationService, format_notification_check_report
 from services.startup_service import StartupService, format_startup_action_report, format_startup_check_report
+from gui.settings_window import SettingsWindow
 from voice.audio_diagnostics import AudioDiagnostics, format_microphone_test_summary
 from voice.voice_command_test import COMMAND_PROMPT, LISTENING_FOR_COMMAND_PROMPT, VoiceCommandTestRunner, format_voice_command_report
 from voice.voice_loop import (
@@ -145,6 +147,7 @@ class JarvisMainWindow(QMainWindow):
         self.check_reminders_button = QPushButton("Check Reminders")
         self.notification_test_button = QPushButton("Test Notification")
         self.health_check_button = QPushButton("Run Health Check")
+        self.settings_button = QPushButton("Settings")
         self.startup_check_button = QPushButton("Startup Check")
         self.startup_enable_button = QPushButton("Enable Startup")
         self.startup_disable_button = QPushButton("Disable Startup")
@@ -163,6 +166,7 @@ class JarvisMainWindow(QMainWindow):
         self.reminders_check_value = QLabel("Idle")
         self.notification_result_value = QLabel("Idle")
         self.health_result_value = QLabel("Idle")
+        self.settings_window: SettingsWindow | None = None
         self.startup_result_value = QLabel("Idle")
         self.app_launch_result_value = QLabel("Idle")
         self.website_result_value = QLabel("Idle")
@@ -185,6 +189,7 @@ class JarvisMainWindow(QMainWindow):
         self.stop_reminder_watch_action: QAction | None = None
         self.notification_test_action: QAction | None = None
         self.health_check_action: QAction | None = None
+        self.settings_action: QAction | None = None
         self.launch_notepad_action: QAction | None = None
         self.open_google_action: QAction | None = None
         self.list_downloads_action: QAction | None = None
@@ -260,6 +265,7 @@ class JarvisMainWindow(QMainWindow):
         self.check_reminders_button.setObjectName("secondaryButton")
         self.notification_test_button.setObjectName("secondaryButton")
         self.health_check_button.setObjectName("secondaryButton")
+        self.settings_button.setObjectName("secondaryButton")
         self.startup_check_button.setObjectName("secondaryButton")
         self.startup_enable_button.setObjectName("secondaryButton")
         self.startup_disable_button.setObjectName("secondaryButton")
@@ -364,7 +370,8 @@ class JarvisMainWindow(QMainWindow):
         diagnostics_layout.addWidget(self.startup_enable_button, 3, 1)
         diagnostics_layout.addWidget(self.startup_disable_button, 4, 0)
         diagnostics_layout.addWidget(self.startup_result_value, 4, 1)
-        diagnostics_layout.addWidget(self.health_result_value, 5, 0, 1, 2)
+        diagnostics_layout.addWidget(self.settings_button, 5, 0)
+        diagnostics_layout.addWidget(self.health_result_value, 5, 1)
         diagnostics_intro = QLabel("Diagnostics stay read-only and use existing safe routes.")
         diagnostics_intro.setObjectName("sectionNote")
         diagnostics_layout.addWidget(diagnostics_intro, 6, 0, 1, 2)
@@ -588,6 +595,7 @@ class JarvisMainWindow(QMainWindow):
         self.check_reminders_button.clicked.connect(self.check_reminders)
         self.notification_test_button.clicked.connect(self.test_notification)
         self.health_check_button.clicked.connect(self.run_health_check)
+        self.settings_button.clicked.connect(self.open_settings)
         self.startup_check_button.clicked.connect(self.startup_check)
         self.startup_enable_button.clicked.connect(self.startup_enable)
         self.startup_disable_button.clicked.connect(self.startup_disable)
@@ -622,6 +630,8 @@ class JarvisMainWindow(QMainWindow):
         self.notification_test_action.triggered.connect(self.test_notification)
         self.health_check_action = QAction("Run Health Check", self)
         self.health_check_action.triggered.connect(self.run_health_check)
+        self.settings_action = QAction("Settings", self)
+        self.settings_action.triggered.connect(self.open_settings)
         self.launch_notepad_action = QAction("Launch Notepad", self)
         self.launch_notepad_action.triggered.connect(self.launch_notepad)
         self.open_google_action = QAction("Open Google", self)
@@ -644,6 +654,7 @@ class JarvisMainWindow(QMainWindow):
         menu.addAction(check_reminders_action)
         menu.addAction(self.notification_test_action)
         menu.addAction(self.health_check_action)
+        menu.addAction(self.settings_action)
         menu.addAction(self.launch_notepad_action)
         menu.addAction(self.open_google_action)
         menu.addAction(self.list_downloads_action)
@@ -852,6 +863,20 @@ class JarvisMainWindow(QMainWindow):
 
     def startup_disable(self) -> None:
         self._run_startup_action("disable")
+
+    def open_settings(self) -> None:
+        self._set_mode("Settings")
+        self._append_message("Jarvis", "Opening settings...")
+        self.settings_window = SettingsWindow(self.settings, parent=self)
+        result = self.settings_window.exec()
+        self.settings_window = None
+
+        if result == QDialog.DialogCode.Accepted:
+            self._append_message("Jarvis", "Settings saved.")
+            self.agent_enabled_value.setText("Enabled" if self.settings.agent_enabled else "Disabled")
+        else:
+            self._append_message("Jarvis", "Settings closed without changes.")
+        self._set_mode("Idle")
 
     def _run_startup_action(self, action: str) -> None:
         self._set_mode("Diagnostics")
