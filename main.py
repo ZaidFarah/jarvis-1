@@ -8,6 +8,7 @@ from app.application import JarvisApplication
 from agent.runtime import AgentRuntime
 from assistant.core import AssistantCore, AssistantResponse
 from diagnostics.health import HealthService, format_health_check_report
+from diagnostics.release_check import format_release_check_report, run_release_check
 from config.settings import load_settings
 from jarvis_runtime.config_bootstrap import format_config_init_error, format_config_init_report, initialize_config
 from jarvis_runtime.runtime_paths import format_runtime_check_report, resolve_runtime_paths
@@ -94,6 +95,13 @@ def main(argv: list[str] | None = None) -> int:
         report = resolve_runtime_paths(settings)
         print(format_runtime_check_report(report))
         return 0
+
+    if "--release-check" in args:
+        settings = load_settings()
+        configure_logging(settings, console=False)
+        report = run_release_check(settings)
+        print(format_release_check_report(report))
+        return 0 if report.is_successful else 1
 
     if "--startup-check" in args:
         settings = load_settings()

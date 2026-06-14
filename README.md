@@ -477,6 +477,47 @@ It does not run microphone tests by default. To explicitly include the controlle
 test_packaged_app.bat --voice-command-test
 ```
 
+## Release Check
+
+Run the release readiness check before preparing a manual ZIP:
+
+```powershell
+py main.py --release-check
+```
+
+The check prints `PASS`, `WARN`, or `FAIL` for release-critical items and ends with a final readiness status. A missing `dist\Jarvis\Jarvis.exe` is a warning so the check can run before a build; tracked secrets or generated local files are failures.
+
+Release checklist:
+
+1. Run `py -m pytest`.
+2. Run `cmd /c build_exe.bat`.
+3. Run `dist\Jarvis\Jarvis.exe --init-config`.
+4. Run `test_packaged_app.bat`.
+5. Run `py main.py --release-check`.
+6. Confirm the final readiness status is `PASS` or only has expected build warnings.
+
+Do not commit or include these in a release ZIP:
+
+```text
+.env
+credentials/
+tokens
+logs/
+data/*.db
+build/
+dist/
+*.spec
+```
+
+Prepare a ZIP release manually after the build and smoke tests pass:
+
+```powershell
+New-Item -ItemType Directory -Force release
+Compress-Archive -Path dist\Jarvis\* -DestinationPath release\Jarvis-windows.zip -Force
+```
+
+The ZIP should contain the built `Jarvis.exe` and PyInstaller runtime files only. Do not add `%APPDATA%\Jarvis.env`, `%APPDATA%\Jarvis\credentials`, logs, local databases, OAuth tokens, API keys, installers, updaters, or signing artifacts.
+
 ## Windows Startup
 
 Jarvis can optionally register itself to start for the current Windows user. Startup uses only this registry key:
