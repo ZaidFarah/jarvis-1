@@ -4,7 +4,7 @@ import importlib
 import importlib.util
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol, Sequence
+from typing import Any, Protocol, Sequence
 
 from config.settings import AppSettings
 from voice.wake import WakeDetectionResult, WakeDetector
@@ -30,119 +30,33 @@ class WakeProviderResolution:
     fallback_reason: str | None = None
 
 
-class WhisperFuzzyWakeProvider:
-    name = "whisper_fuzzy"
-    available = True
+def available_openwakeword_models() -> list[str]:
+    if not is_openwakeword_installed():
+        return []
 
-    def __init__(self, wake_phrase: str, aliases: list[str], threshold: float) -> None:
-        self.detector = WakeDetector(wake_phrase=wake_phrase, aliases=aliases, threshold=threshold)
+    try:
+        import openwakeword
+    except Exception:
+        return []
 
-    def detect(self, samples: Sequence[float], sample_rate: int) -> WakeDetectionResult:
-        del samples, sample_rate
-        raise NotImplementedError("Whisper fuzzy wake detection requires a transcript.")
-
-    def detect_from_transcript(self, transcript: str) -> WakeDetectionResult:
-        return self.detector.detect(transcript)
+    return sorted(str(name) for name in getattr(openwakeword, "MODELS", {}).keys())
 
 
-class OpenWakeWordWakeProvider:
-    name = "openwakeword"
-
-    def __init__(self, settings: AppSettings) -> None:
-        self.settings = settings
-        self._model_instance: object | None = None
-        self._import_error: Exception | None = None
-
-    @property
-    def available(self) -> bool:
-        return bool(
-            self.settings.openwakeword_enabled
-            and self.settings.openwakeword_model.strip()
-            and is_openwakeword_installed()
-        )
-
-    def detect(self, samples: Sequence[float], sample_rate: int) -> WakeDetectionResult:
-        if not self.available:
-            return WakeDetectionResult(
-                detected=False,
-                transcript="",
-                matched_phrase=None,
-                score=0.0,
-                threshold=self.settings.openwakeword_threshold,
-                match_type="none",
-            )
-
-        model = self._load_model()
-        score = self._predict_score(model, samples, sample_rate)
-        detected = score >= self.settings.openwakeword_threshold
-        matched_phrase = self.settings.openwakeword_model.strip() or "openwakeword"
-        return WakeDetectionResult(
-            detected=detected,
-            transcript="",
-            matched_phrase=matched_phrase if detected else None,
-            score=score,
-            threshold=self.settings.openwakeword_threshold,
-            match_type="openwakeword" if detected else "none",
-        )
-
-    def _load_model(self) -> object:
-        if self._model_instance is not None:
-            return self._model_instance
-        if self._import_error is not None:
-            raise RuntimeError(f"OpenWakeWord could not be imported: {self._import_error}") from self._import_error
-
-        model_name = self.settings.openwakeword_model.strip()
-        if not model_name:
-            raise RuntimeError("OpenWakeWord model is not configured.")
-
-        try:
-            model_class = _import_openwakeword_model_class()
-            model_kwargs = _build_model_kwargs(model_name)
-            self._model_instance = model_class(**model_kwargs)
-            return self._model_instance
-        except Exception as exc:
-            self._import_error = exc
-            raise RuntimeError(f"OpenWakeWord model could not be loaded: {exc}") from exc
-
-    def _predict_score(self, model: object, samples: Sequence[float], sample_rate: int) -> float:
-        audio = _to_float_list(samples)
-        if not audio:
-            return 0.0
-
-        methods = [
-            ("predict_clip", (audio,)),
-            ("predict", (audio,)),
-            ("predict", (audio, sample_rate)),
-            ("__call__", (audio,)),
-        ]
-
-        last_error: Exception | None = None
-        for method_name, args in methods:
-            try:
-                method = getattr(model, method_name) if method_name != "__call__" else model
-                result = method(*args)
-                score = _extract_score(result, self.settings.openwakeword_model.strip())
-                if score is not None:
-                    return score
-            except TypeError as exc:
-                last_error = exc
-                continue
-            except Exception as exc:
-                last_error = exc
-                continue
-
-        if last_error is not None:
-            raise RuntimeError(f"OpenWakeWord prediction failed: {last_error}") from last_error
-        return 0.0
+def is_openwakeword_installed() -> bool:
+    try:
+        return importlib.util.find_spec("openwakeword") is not None
+    except Exception:
+        return False
 
 
 def resolve_wake_provider(settings: AppSettings) -> WakeProviderResolution:
     selected_provider = _normalize_provider_name(settings.wake_provider)
     openwakeword_installed = is_openwakeword_installed()
     model_configured = bool(settings.openwakeword_model.strip())
+    model_available = _is_model_available(settings.openwakeword_model.strip())
     openwakeword_enabled = bool(settings.openwakeword_enabled)
     fallback_enabled = bool(settings.openwakeword_fallback_to_whisper)
-    openwakeword_available = openwakeword_enabled and openwakeword_installed and model_configured
+    openwakeword_available = openwakeword_enabled and openwakeword_installed and model_configured and model_available
 
     if selected_provider == "openwakeword" and openwakeword_available:
         return WakeProviderResolution(
@@ -163,17 +77,20 @@ def resolve_wake_provider(settings: AppSettings) -> WakeProviderResolution:
             fallback_reason = "OpenWakeWord is not installed."
         elif not model_configured:
             fallback_reason = "OpenWakeWord model is not configured."
+        elif not model_available:
+            fallback_reason = (
+                f"OpenWakeWord model '{settings.openwakeword_model.strip()}' is not available."
+            )
         else:
             fallback_reason = "OpenWakeWord is unavailable."
 
-    effective_provider = "whisper_fuzzy"
     return WakeProviderResolution(
         selected_provider=selected_provider,
         openwakeword_enabled=openwakeword_enabled,
         openwakeword_installed=openwakeword_installed,
         model_configured=model_configured,
         fallback_enabled=fallback_enabled,
-        effective_provider=effective_provider,
+        effective_provider="whisper_fuzzy",
         openwakeword_available=openwakeword_available,
         fallback_reason=fallback_reason,
     )
@@ -191,11 +108,198 @@ def create_openwakeword_provider(settings: AppSettings) -> OpenWakeWordWakeProvi
     return OpenWakeWordWakeProvider(settings)
 
 
-def is_openwakeword_installed() -> bool:
-    try:
-        return importlib.util.find_spec("openwakeword") is not None
-    except Exception:
+class WhisperFuzzyWakeProvider:
+    name = "whisper_fuzzy"
+    available = True
+
+    def __init__(self, wake_phrase: str, aliases: list[str], threshold: float) -> None:
+        self.detector = WakeDetector(wake_phrase=wake_phrase, aliases=aliases, threshold=threshold)
+
+    def detect(self, samples: Sequence[float], sample_rate: int) -> WakeDetectionResult:
+        del samples, sample_rate
+        raise NotImplementedError("Whisper fuzzy wake detection requires a transcript.")
+
+    def detect_from_transcript(self, transcript: str) -> WakeDetectionResult:
+        return self.detector.detect(transcript)
+
+
+class OpenWakeWordWakeProvider:
+    name = "openwakeword"
+
+    def __init__(self, settings: AppSettings) -> None:
+        self.settings = settings
+        self.model_name = self._resolve_model_name(settings.openwakeword_model)
+        self._model: Any | None = None
+        self._model_path: Path | None = None
+        self._last_error: Exception | None = None
+
+    @property
+    def available(self) -> bool:
+        return bool(
+            self.settings.openwakeword_enabled
+            and is_openwakeword_installed()
+            and self.model_name
+            and _is_model_available(self.model_name)
+        )
+
+    def detect(self, samples: Sequence[float], sample_rate: int) -> WakeDetectionResult:
+        if not self.available:
+            return WakeDetectionResult(
+                detected=False,
+                transcript="",
+                matched_phrase=None,
+                score=0.0,
+                threshold=self.settings.openwakeword_threshold,
+                match_type="none",
+            )
+
+        if sample_rate != 16000:
+            raise ValueError("OpenWakeWord detection expects VOICE_SAMPLE_RATE=16000.")
+
+        model = self._load_model()
+        scores = self._predict_scores(model, samples)
+        score = self._score_for_current_model(scores)
+        detected = score >= self.settings.openwakeword_threshold
+        return WakeDetectionResult(
+            detected=detected,
+            transcript="",
+            matched_phrase=self.model_name if detected else None,
+            score=score,
+            threshold=self.settings.openwakeword_threshold,
+            match_type="openwakeword" if detected else "none",
+        )
+
+    def available_model_names(self) -> list[str]:
+        return available_openwakeword_models()
+
+    def resolve_model_path(self) -> Path | None:
+        if not self.available:
+            return None
+        if self._model_path is not None:
+            return self._model_path
+
+        candidate = Path(self.model_name)
+        if candidate.exists():
+            self._model_path = candidate.resolve()
+            return self._model_path
+
+        if self.model_name not in available_openwakeword_models():
+            return None
+
+        try:
+            import openwakeword
+            from openwakeword.utils import download_models
+        except Exception as exc:  # pragma: no cover - import varies by install
+            self._last_error = exc
+            raise RuntimeError(f"OpenWakeWord model downloader is unavailable: {exc}") from exc
+
+        package_models_dir = (
+            Path(openwakeword.__file__).resolve().parent / "resources" / "models"
+        ).resolve()
+        package_models_dir.mkdir(parents=True, exist_ok=True)
+        download_models([self.model_name], target_directory=str(package_models_dir))
+        matches = sorted(package_models_dir.glob(f"*{self.model_name}*.onnx"))
+        if not matches:
+            matches = sorted(package_models_dir.glob(f"*{self.model_name}*.tflite"))
+        if not matches:
+            raise RuntimeError(
+                f"OpenWakeWord model '{self.model_name}' could not be located after download."
+            )
+
+        self._model_path = matches[0].resolve()
+        return self._model_path
+
+    def _load_model(self) -> Any:
+        if self._model is not None:
+            return self._model
+
+        model_path = self.resolve_model_path()
+        if model_path is None:
+            available = ", ".join(self.available_model_names()) or "none"
+            raise RuntimeError(
+                f"OpenWakeWord model '{self.model_name}' is not available. Available models: {available}"
+            )
+
+        try:
+            from openwakeword.model import Model
+        except Exception as exc:  # pragma: no cover - import varies by install
+            self._last_error = exc
+            raise RuntimeError(f"OpenWakeWord model class could not be imported: {exc}") from exc
+
+        try:
+            self._model = Model(wakeword_models=[str(model_path)], inference_framework="onnx")
+        except Exception as exc:
+            self._last_error = exc
+            raise RuntimeError(f"OpenWakeWord model could not be loaded: {exc}") from exc
+
+        return self._model
+
+    def _predict_scores(self, model: Any, samples: Sequence[float]) -> dict[str, float]:
+        audio = self._to_int16_array(samples)
+        if audio.size == 0:
+            return {}
+
+        try:
+            import numpy as np
+        except Exception as exc:  # pragma: no cover - numpy is already present locally
+            raise RuntimeError(f"numpy is required for OpenWakeWord detection: {exc}") from exc
+
+        if not isinstance(audio, np.ndarray):
+            audio = np.asarray(audio, dtype=np.int16)
+
+        predictions = model.predict(audio)
+        if not isinstance(predictions, dict):
+            return {}
+
+        numeric_scores: dict[str, float] = {}
+        for key, value in predictions.items():
+            try:
+                numeric_scores[str(key)] = float(value)
+            except (TypeError, ValueError):
+                continue
+        return numeric_scores
+
+    def _score_for_current_model(self, scores: dict[str, float]) -> float:
+        if not scores:
+            return 0.0
+
+        if self.model_name in scores:
+            return float(scores[self.model_name])
+
+        for key, value in scores.items():
+            if self.model_name in key:
+                return float(value)
+
+        return max(float(value) for value in scores.values())
+
+    @staticmethod
+    def _resolve_model_name(value: str) -> str:
+        cleaned = value.strip()
+        if cleaned:
+            return cleaned
+        return "hey_jarvis"
+
+    @staticmethod
+    def _to_int16_array(samples: Sequence[float]):
+        try:
+            import numpy as np
+        except Exception as exc:  # pragma: no cover - numpy is already present locally
+            raise RuntimeError(f"numpy is required for OpenWakeWord detection: {exc}") from exc
+
+        audio = np.asarray(list(samples), dtype=np.float32)
+        if audio.size == 0:
+            return np.asarray([], dtype=np.int16)
+        clipped = np.clip(audio, -1.0, 1.0)
+        return (clipped * 32767).astype(np.int16)
+
+
+def _is_model_available(model_name: str) -> bool:
+    cleaned = model_name.strip()
+    if not cleaned:
         return False
+    if Path(cleaned).exists():
+        return True
+    return cleaned in available_openwakeword_models()
 
 
 def _normalize_provider_name(value: str) -> str:
@@ -203,61 +307,3 @@ def _normalize_provider_name(value: str) -> str:
     if cleaned in {"openwakeword", "whisper_fuzzy"}:
         return cleaned
     return "whisper_fuzzy"
-
-
-def _import_openwakeword_model_class() -> type:
-    candidates = [
-        ("openwakeword.model", "Model"),
-        ("openwakeword", "Model"),
-    ]
-    errors: list[str] = []
-    for module_name, attr_name in candidates:
-        try:
-            module = importlib.import_module(module_name)
-            model_class = getattr(module, attr_name)
-        except Exception as exc:
-            errors.append(f"{module_name}.{attr_name}: {exc}")
-            continue
-        if callable(model_class):
-            return model_class
-        errors.append(f"{module_name}.{attr_name}: not callable")
-    raise RuntimeError("Unable to locate an OpenWakeWord Model class. " + "; ".join(errors))
-
-
-def _build_model_kwargs(model_name: str) -> dict[str, object]:
-    candidate_path = Path(model_name)
-    if candidate_path.exists():
-        return {"wakeword_model_paths": [str(candidate_path)]}
-    return {"wakeword_models": [model_name]}
-
-
-def _to_float_list(samples: Sequence[float]) -> list[float]:
-    return [float(sample) for sample in samples]
-
-
-def _extract_score(result: object, model_name: str) -> float | None:
-    if result is None:
-        return None
-
-    if isinstance(result, dict):
-        if model_name in result:
-            return _coerce_score(result[model_name])
-        numeric_values = [_coerce_score(value) for value in result.values()]
-        numeric_values = [value for value in numeric_values if value is not None]
-        return max(numeric_values) if numeric_values else None
-
-    if isinstance(result, (list, tuple, set)):
-        numeric_values = [_coerce_score(value) for value in result]
-        numeric_values = [value for value in numeric_values if value is not None]
-        return max(numeric_values) if numeric_values else None
-
-    return _coerce_score(result)
-
-
-def _coerce_score(value: object) -> float | None:
-    try:
-        if value is None:
-            return None
-        return float(value)
-    except (TypeError, ValueError):
-        return None

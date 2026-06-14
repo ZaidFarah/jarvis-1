@@ -470,7 +470,7 @@ class VoiceLoopRunner:
             chunk = self.recorder(listen_chunk_seconds)
             if chunk:
                 buffered_samples.extend(chunk)
-            wake_detection = self.wake_provider.detect(buffered_samples, self.settings.voice_sample_rate)
+                wake_detection = self.wake_provider.detect(chunk, self.settings.voice_sample_rate)
             if wake_detection.detected:
                 break
 

@@ -35,6 +35,9 @@ The GUI now uses a tabbed dark interface with quick actions for voice, tools, re
 - Short microphone recording using configured voice settings.
 - STT diagnostic logging to `logs/stt_diagnostics.log`.
 - Graceful error output if Faster Whisper or the model cannot load.
+- OpenWakeWord dependency support for controlled wake diagnostics.
+- `py main.py --openwakeword-test` diagnostic command.
+- OpenWakeWord diagnostic logging to `logs/openwakeword.log`.
 
 ## Phase 4 Scope
 
@@ -285,9 +288,10 @@ WAKE_MATCH_THRESHOLD=0.72
 WAKE_LISTEN_SECONDS=5
 WAKE_PROVIDER=openwakeword
 OPENWAKEWORD_ENABLED=false
-OPENWAKEWORD_MODEL=
+OPENWAKEWORD_MODEL=hey_jarvis
 OPENWAKEWORD_THRESHOLD=0.5
 OPENWAKEWORD_LISTEN_CHUNK_MS=80
+OPENWAKEWORD_TEST_SECONDS=10
 OPENWAKEWORD_FALLBACK_TO_WHISPER=true
 ```
 
@@ -296,6 +300,25 @@ Detailed wake diagnostics are saved to:
 ```text
 logs/wake_diagnostics.log
 ```
+
+## OpenWakeWord Test
+
+```powershell
+py main.py --openwakeword-test
+```
+
+This controlled diagnostic checks the installed `openwakeword` package, lists the built-in models, opens the microphone, listens for a short period, and reports the maximum detection score.
+
+If `hey_jarvis` is unavailable in a given environment, choose one of the built-in model names reported by the diagnostic:
+
+- `alexa`
+- `hey_jarvis`
+- `hey_mycroft`
+- `hey_rhasspy`
+- `timer`
+- `weather`
+
+The diagnostic reports the resolved model path when available. On this local install, the model resolved inside the OpenWakeWord package resource tree. To use a custom wake model, point `OPENWAKEWORD_MODEL` at a local `.onnx` or `.tflite` file path.
 
 ## Wake Provider Check
 

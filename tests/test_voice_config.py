@@ -29,9 +29,10 @@ def test_voice_settings_defaults_are_lightweight() -> None:
     assert settings.wake_listen_seconds == 5.0
     assert settings.wake_provider == "openwakeword"
     assert settings.openwakeword_enabled is False
-    assert settings.openwakeword_model == ""
+    assert settings.openwakeword_model == "hey_jarvis"
     assert settings.openwakeword_threshold == 0.5
     assert settings.openwakeword_listen_chunk_ms == 80
+    assert settings.openwakeword_test_seconds == 10.0
     assert settings.openwakeword_fallback_to_whisper is True
     assert settings.voice_command_start_delay_seconds == 1.0
     assert settings.voice_command_record_seconds == 7.0
@@ -127,6 +128,7 @@ def test_wake_settings_read_environment(monkeypatch) -> None:
     monkeypatch.setenv("OPENWAKEWORD_MODEL", "hey.jarvis")
     monkeypatch.setenv("OPENWAKEWORD_THRESHOLD", "0.7")
     monkeypatch.setenv("OPENWAKEWORD_LISTEN_CHUNK_MS", "120")
+    monkeypatch.setenv("OPENWAKEWORD_TEST_SECONDS", "12")
     monkeypatch.setenv("OPENWAKEWORD_FALLBACK_TO_WHISPER", "false")
     monkeypatch.setenv("VOICE_COMMAND_START_DELAY_SECONDS", "1.25")
     monkeypatch.setenv("VOICE_COMMAND_RECORD_SECONDS", "8")
@@ -146,6 +148,7 @@ def test_wake_settings_read_environment(monkeypatch) -> None:
     assert settings.openwakeword_model == "hey.jarvis"
     assert settings.openwakeword_threshold == 0.7
     assert settings.openwakeword_listen_chunk_ms == 120
+    assert settings.openwakeword_test_seconds == 12.0
     assert settings.openwakeword_fallback_to_whisper is False
     assert settings.voice_command_start_delay_seconds == 1.25
     assert settings.voice_command_record_seconds == 8.0

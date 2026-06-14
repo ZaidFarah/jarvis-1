@@ -165,7 +165,7 @@ class AppSettings(BaseSettings):
         validation_alias=AliasChoices("OPENWAKEWORD_ENABLED", "JARVIS_OPENWAKEWORD_ENABLED"),
     )
     openwakeword_model: str = Field(
-        default="",
+        default="hey_jarvis",
         validation_alias=AliasChoices("OPENWAKEWORD_MODEL", "JARVIS_OPENWAKEWORD_MODEL"),
     )
     openwakeword_threshold: float = Field(
@@ -182,6 +182,12 @@ class AppSettings(BaseSettings):
             "OPENWAKEWORD_LISTEN_CHUNK_MS",
             "JARVIS_OPENWAKEWORD_LISTEN_CHUNK_MS",
         ),
+    )
+    openwakeword_test_seconds: float = Field(
+        default=10.0,
+        ge=1.0,
+        le=60.0,
+        validation_alias=AliasChoices("OPENWAKEWORD_TEST_SECONDS", "JARVIS_OPENWAKEWORD_TEST_SECONDS"),
     )
     openwakeword_fallback_to_whisper: bool = Field(
         default=True,
