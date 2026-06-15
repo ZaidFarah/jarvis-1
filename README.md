@@ -135,6 +135,15 @@ The GUI now uses a tabbed dark interface with quick actions for voice, tools, re
 - The loop retries command capture once. If the retry is valid, the retry text is sent to `AssistantCore`; if it is invalid, Jarvis returns to sleep.
 - The GUI transcript and loop fields show rejected commands, retry state, accepted command, assistant response, and sleeping state.
 
+## v0.2.0 Phase 7 Scope
+
+- After a successful assistant response, Jarvis enters one short follow-up listening window before returning to sleep.
+- The GUI shows `Listening for follow-up...` during that window.
+- Valid follow-up commands are sent to `AssistantCore` and OpenAI without requiring the wake phrase again.
+- Invalid non-empty follow-up transcripts are rejected locally with `I didn’t catch that, please repeat.` and retried once.
+- If no follow-up is heard, or the retry is still invalid, Jarvis returns to sleep and only speaks `Standing by.` after follow-up mode is finished.
+- Whisper fuzzy wake remains the default live wake provider; OpenWakeWord remains optional and diagnostic-first.
+
 ## Phase 10 Scope
 
 - In-memory short-term conversation history for the current session only.
@@ -445,10 +454,13 @@ The voice loop keeps Jarvis running until stopped:
 9. Rejects bad short transcripts locally with `I didn’t catch that, please repeat.` and retries command capture once by default.
 10. Sends accepted commands to `AssistantCore`.
 11. Speaks accepted responses using the configured TTS provider.
-12. Speaks `Standing by.` when returning to sleep.
-13. Prints a summary on exit with wake attempts, successful wakes, commands handled, empty commands, and errors.
+12. Enters one `Listening for follow-up...` window for about 10 seconds after a successful response.
+13. Sends valid follow-up commands to `AssistantCore` without requiring the wake phrase again.
+14. Rejects invalid non-empty follow-ups locally, retries follow-up capture once, and returns to sleep if the retry is invalid or no follow-up is heard.
+15. Speaks `Standing by.` only after follow-up mode is finished and Jarvis is returning to sleep.
+16. Prints a summary on exit with wake attempts, successful wakes, commands handled, empty commands, and errors.
 
-For GUI visibility, the loop emits explicit events for rejected commands, retrying command capture, accepted commands, assistant responses, and return-to-sleep state.
+For GUI visibility, the loop emits explicit events for rejected commands, retrying command capture, follow-up listening, accepted commands and follow-ups, assistant responses, and return-to-sleep state.
 
 Press Ctrl+C to stop the CLI loop. Detailed voice loop logs are saved to:
 

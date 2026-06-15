@@ -11,9 +11,13 @@ from gui.main_window import JarvisMainWindow
 from voice.voice_command_test import NO_COMMAND_DETECTED_MESSAGE
 from voice.voice_loop import (
     ACCEPTED_COMMAND_PREFIX,
+    ACCEPTED_FOLLOW_UP_PREFIX,
+    LISTENING_FOR_FOLLOW_UP_PROMPT,
     REJECTED_COMMAND_PREFIX,
+    REJECTED_FOLLOW_UP_PREFIX,
     RETURNING_TO_SLEEP_MESSAGE,
     RETRYING_COMMAND_CAPTURE_MESSAGE,
+    RETRYING_FOLLOW_UP_CAPTURE_MESSAGE,
 )
 
 
@@ -149,6 +153,41 @@ def test_voice_loop_gui_displays_reject_retry_accept_response_and_sleep() -> Non
     assert RETRYING_COMMAND_CAPTURE_MESSAGE in transcript
     assert f"{ACCEPTED_COMMAND_PREFIX} status report" in transcript
     assert "Last Jarvis response: handled status report" in transcript
+
+    window.close()
+    app.processEvents()
+
+
+def test_voice_loop_gui_displays_follow_up_states() -> None:
+    app = _app()
+    settings = AppSettings(_env_file=None)
+    window = JarvisMainWindow(settings=settings, assistant=StubAssistant())
+
+    window._handle_voice_loop_status(LISTENING_FOR_FOLLOW_UP_PROMPT)
+    assert window.voice_loop_status_value.text() == LISTENING_FOR_FOLLOW_UP_PROMPT
+
+    window._handle_voice_loop_status(f"{REJECTED_FOLLOW_UP_PREFIX} you (rejected phrase: you)")
+    assert window.voice_loop_last_command_value.text() == "Rejected follow-up: you"
+    assert window.voice_loop_status_value.text() == "Rejected follow-up"
+
+    window._handle_voice_loop_status(NO_COMMAND_DETECTED_MESSAGE)
+    window._handle_voice_loop_status(RETRYING_FOLLOW_UP_CAPTURE_MESSAGE)
+    assert window.voice_loop_status_value.text() == "Retrying follow-up capture"
+
+    window._handle_voice_loop_status("Last recognized command: weather report")
+    window._handle_voice_loop_status(f"{ACCEPTED_FOLLOW_UP_PREFIX} weather report")
+    window._handle_voice_loop_status("Last Jarvis response: handled weather report")
+    window._handle_voice_loop_status(RETURNING_TO_SLEEP_MESSAGE)
+
+    assert window.voice_loop_last_command_value.text() == "weather report"
+    assert window.voice_loop_last_response_value.text() == "handled weather report"
+    assert window.voice_loop_status_value.text() == RETURNING_TO_SLEEP_MESSAGE
+    transcript = window.transcript.toPlainText()
+    assert LISTENING_FOR_FOLLOW_UP_PROMPT in transcript
+    assert f"{REJECTED_FOLLOW_UP_PREFIX} you (rejected phrase: you)" in transcript
+    assert RETRYING_FOLLOW_UP_CAPTURE_MESSAGE in transcript
+    assert f"{ACCEPTED_FOLLOW_UP_PREFIX} weather report" in transcript
+    assert "Last Jarvis response: handled weather report" in transcript
 
     window.close()
     app.processEvents()

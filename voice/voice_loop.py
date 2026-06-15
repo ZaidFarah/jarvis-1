@@ -46,6 +46,20 @@ RETURNING_TO_SLEEP_MESSAGE = "Standing by."
 REJECTED_COMMAND_PREFIX = "Rejected command:"
 ACCEPTED_COMMAND_PREFIX = "Accepted command:"
 RETRYING_COMMAND_CAPTURE_MESSAGE = "Retrying command capture..."
+LISTENING_FOR_FOLLOW_UP_PROMPT = "Listening for follow-up..."
+REJECTED_FOLLOW_UP_PREFIX = "Rejected follow-up:"
+ACCEPTED_FOLLOW_UP_PREFIX = "Accepted follow-up:"
+RETRYING_FOLLOW_UP_CAPTURE_MESSAGE = "Retrying follow-up capture..."
+FOLLOW_UP_RECORD_SECONDS = 10.0
+
+
+@dataclass(frozen=True)
+class CommandCaptureResult:
+    raw_transcription: str
+    cleaned_command: str
+    validation: CommandValidationResult
+    no_follow_up: bool = False
+    stop_requested: bool = False
 
 
 @dataclass
@@ -262,20 +276,78 @@ class VoiceLoopRunner:
             self.sleeper(self.settings.voice_command_start_delay_seconds)
         self.beeper()
 
-        max_retries = self.settings.voice_command_max_retries if self.settings.voice_command_retry_on_reject else 0
-        attempt = 0
+        try:
+            command_capture = self._capture_valid_command(
+                statuses,
+                errors,
+                listen_prompt=LISTENING_FOR_COMMAND_PROMPT,
+                record_seconds=self.settings.voice_command_record_seconds,
+                accepted_prefix=ACCEPTED_COMMAND_PREFIX,
+                rejected_prefix=REJECTED_COMMAND_PREFIX,
+                retry_message=RETRYING_COMMAND_CAPTURE_MESSAGE,
+                retry_start_delay_seconds=self.settings.voice_command_start_delay_seconds,
+                retry_beep=True,
+            )
+        except Exception as exc:
+            message = f"Command stage failed: {type(exc).__name__}: {exc}"
+            self.voice_loop_logger.exception(message)
+            self.summary.errors += 1
+            errors.append(message)
+            return self._return_to_sleep_report(
+                wake_transcription,
+                wake_detection,
+                raw_command_transcription,
+                cleaned_command,
+                assistant_response,
+                tts_result,
+                statuses,
+                errors,
+            )
+
+        raw_command_transcription = command_capture.raw_transcription
+        cleaned_command = command_capture.cleaned_command
+        if not command_capture.validation.accepted:
+            return self._return_to_sleep_report(
+                wake_transcription,
+                wake_detection,
+                raw_command_transcription,
+                cleaned_command,
+                assistant_response,
+                tts_result,
+                statuses,
+                errors,
+                stop_requested=command_capture.stop_requested,
+            )
+
+        follow_up_used = False
         while True:
+            self.summary.commands_handled += 1
+            self._consecutive_empty_commands = 0
+
+            if is_stop_command(cleaned_command):
+                self.voice_loop_logger.info("Stop command detected: {}", cleaned_command)
+                self._status(STOP_COMMAND_DETECTED_MESSAGE, statuses)
+                return self._report(
+                    wake_transcription,
+                    wake_detection,
+                    raw_command_transcription,
+                    cleaned_command,
+                    assistant_response,
+                    tts_result,
+                    statuses,
+                    errors,
+                    stop_requested=True,
+                )
+
+            self._status("Thinking", statuses)
             try:
-                raw_command_transcription, cleaned_command, command_validation = self._capture_command(statuses)
+                assistant_response = self.assistant.handle_command(cleaned_command)
             except Exception as exc:
-                message = f"Command stage failed: {type(exc).__name__}: {exc}"
+                message = f"Assistant command failed: {type(exc).__name__}: {exc}"
                 self.voice_loop_logger.exception(message)
                 self.summary.errors += 1
                 errors.append(message)
-                self._status(RETURNING_TO_SLEEP_MESSAGE, statuses)
-                if self.settings.voice_loop_speak_status:
-                    self._speak_message(RETURNING_TO_SLEEP_MESSAGE, errors)
-                return self._report(
+                return self._return_to_sleep_report(
                     wake_transcription,
                     wake_detection,
                     raw_command_transcription,
@@ -286,112 +358,57 @@ class VoiceLoopRunner:
                     errors,
                 )
 
-            self._emit(f"Last recognized command: {cleaned_command or '<empty>'}")
-            if command_validation.accepted:
-                self._emit(f"{ACCEPTED_COMMAND_PREFIX} {cleaned_command}")
+            self._emit(f"Last Jarvis response: {assistant_response.text}")
+            self.voice_loop_logger.info("Assistant response={}", assistant_response.text)
+
+            if assistant_response.accepted:
+                self._status("Speaking", statuses)
+                tts_result = speak_text(
+                    assistant_response.text,
+                    self.settings,
+                    speak_requested=True,
+                    provider=self.tts_provider,
+                )
+                if tts_result.error:
+                    errors.append(tts_result.error)
+                    self.summary.errors += 1
+                elif tts_result.spoken:
+                    self.sleeper(self.settings.voice_loop_wake_cooldown_seconds)
+            else:
                 break
 
-            rejection_reason = command_validation.rejection_reason or "invalid command"
-            self._emit(f"{REJECTED_COMMAND_PREFIX} {cleaned_command or '<empty>'} ({rejection_reason})")
-            self.voice_loop_logger.info(
-                "{} reason={}",
-                NO_COMMAND_DETECTED_MESSAGE,
-                rejection_reason,
-            )
-            self.summary.empty_commands += 1
-            self._consecutive_empty_commands += 1
-            self._status(NO_COMMAND_DETECTED_MESSAGE, statuses)
-            if self.settings.voice_loop_speak_status:
-                self._speak_message(NO_COMMAND_DETECTED_MESSAGE, errors)
-            if attempt < max_retries:
-                attempt += 1
-                self._status(RETRYING_COMMAND_CAPTURE_MESSAGE, statuses)
-                if self.settings.voice_command_start_delay_seconds > 0:
-                    self.sleeper(self.settings.voice_command_start_delay_seconds)
-                self.beeper()
-                continue
-            self._status(RETURNING_TO_SLEEP_MESSAGE, statuses)
-            if self.settings.voice_loop_speak_status:
-                self._speak_message(RETURNING_TO_SLEEP_MESSAGE, errors)
-            if self.settings.voice_loop_max_empty_commands >= 0 and self._consecutive_empty_commands >= self.settings.voice_loop_max_empty_commands:
-                stop_requested = True
-                self.voice_loop_logger.info(
-                    "Empty command limit reached after {} attempts",
-                    self._consecutive_empty_commands,
+            if follow_up_used:
+                break
+
+            try:
+                follow_up_capture = self._capture_valid_command(
+                    statuses,
+                    errors,
+                    listen_prompt=LISTENING_FOR_FOLLOW_UP_PROMPT,
+                    record_seconds=FOLLOW_UP_RECORD_SECONDS,
+                    accepted_prefix=ACCEPTED_FOLLOW_UP_PREFIX,
+                    rejected_prefix=REJECTED_FOLLOW_UP_PREFIX,
+                    retry_message=RETRYING_FOLLOW_UP_CAPTURE_MESSAGE,
+                    empty_transcript_is_no_follow_up=True,
+                    ignored_cleaned_commands={cleaned_command.casefold()},
                 )
-            return self._report(
-                wake_transcription,
-                wake_detection,
-                raw_command_transcription,
-                cleaned_command,
-                assistant_response,
-                tts_result,
-                statuses,
-                errors,
-                stop_requested=stop_requested,
-            )
-
-        self.summary.commands_handled += 1
-        self._consecutive_empty_commands = 0
-
-        if is_stop_command(cleaned_command):
-            self.voice_loop_logger.info("Stop command detected: {}", cleaned_command)
-            self._status(STOP_COMMAND_DETECTED_MESSAGE, statuses)
-            return self._report(
-                wake_transcription,
-                wake_detection,
-                raw_command_transcription,
-                cleaned_command,
-                assistant_response,
-                tts_result,
-                statuses,
-                errors,
-                stop_requested=True,
-            )
-
-        self._status("Thinking", statuses)
-        try:
-            assistant_response = self.assistant.handle_command(cleaned_command)
-        except Exception as exc:
-            message = f"Assistant command failed: {type(exc).__name__}: {exc}"
-            self.voice_loop_logger.exception(message)
-            self.summary.errors += 1
-            errors.append(message)
-            self._status(RETURNING_TO_SLEEP_MESSAGE, statuses)
-            if self.settings.voice_loop_speak_status:
-                self._speak_message(RETURNING_TO_SLEEP_MESSAGE, errors)
-            return self._report(
-                wake_transcription,
-                wake_detection,
-                raw_command_transcription,
-                cleaned_command,
-                assistant_response,
-                tts_result,
-                statuses,
-                errors,
-            )
-
-        self._emit(f"Last Jarvis response: {assistant_response.text}")
-        self.voice_loop_logger.info("Assistant response={}", assistant_response.text)
-
-        if assistant_response.accepted:
-            self._status("Speaking", statuses)
-            tts_result = speak_text(
-                assistant_response.text,
-                self.settings,
-                speak_requested=True,
-                provider=self.tts_provider,
-            )
-            if tts_result.error:
-                errors.append(tts_result.error)
+            except Exception as exc:
+                message = f"Follow-up command stage failed: {type(exc).__name__}: {exc}"
+                self.voice_loop_logger.exception(message)
                 self.summary.errors += 1
-            elif tts_result.spoken:
-                self.sleeper(self.settings.voice_loop_wake_cooldown_seconds)
+                errors.append(message)
+                break
 
-        self._status(RETURNING_TO_SLEEP_MESSAGE, statuses)
-        if self.settings.voice_loop_speak_status:
-            self._speak_message(RETURNING_TO_SLEEP_MESSAGE, errors)
-        return self._report(
+            if follow_up_capture.no_follow_up or not follow_up_capture.validation.accepted:
+                if follow_up_capture.stop_requested:
+                    stop_requested = True
+                break
+
+            raw_command_transcription = follow_up_capture.raw_transcription
+            cleaned_command = follow_up_capture.cleaned_command
+            follow_up_used = True
+
+        return self._return_to_sleep_report(
             wake_transcription,
             wake_detection,
             raw_command_transcription,
@@ -400,11 +417,18 @@ class VoiceLoopRunner:
             tts_result,
             statuses,
             errors,
+            stop_requested=stop_requested,
         )
 
-    def _capture_command(self, statuses: list[str]) -> tuple[str, str, CommandValidationResult]:
-        self._status(LISTENING_FOR_COMMAND_PROMPT, statuses)
-        command_samples = self.recorder(self.settings.voice_command_record_seconds)
+    def _capture_command(
+        self,
+        statuses: list[str],
+        *,
+        listen_prompt: str = LISTENING_FOR_COMMAND_PROMPT,
+        record_seconds: float | None = None,
+    ) -> tuple[str, str, CommandValidationResult]:
+        self._status(listen_prompt, statuses)
+        command_samples = self.recorder(record_seconds or self.settings.voice_command_record_seconds)
         raw_command_transcription = self.provider.transcribe(command_samples, self.settings.voice_sample_rate).text.strip()
         cleaned_command = remove_wake_phrase_prefix(
             raw_command_transcription,
@@ -424,6 +448,119 @@ class VoiceLoopRunner:
             command_validation.rejection_reason or "<none>",
         )
         return raw_command_transcription, cleaned_command, command_validation
+
+    def _capture_valid_command(
+        self,
+        statuses: list[str],
+        errors: list[str],
+        *,
+        listen_prompt: str,
+        record_seconds: float,
+        accepted_prefix: str,
+        rejected_prefix: str,
+        retry_message: str,
+        retry_start_delay_seconds: float = 0.0,
+        retry_beep: bool = False,
+        empty_transcript_is_no_follow_up: bool = False,
+        ignored_cleaned_commands: set[str] | None = None,
+    ) -> CommandCaptureResult:
+        max_retries = self.settings.voice_command_max_retries if self.settings.voice_command_retry_on_reject else 0
+        attempt = 0
+        while True:
+            raw_transcription, cleaned_command, validation = self._capture_command(
+                statuses,
+                listen_prompt=listen_prompt,
+                record_seconds=record_seconds,
+            )
+
+            if empty_transcript_is_no_follow_up and not raw_transcription and not cleaned_command:
+                self.voice_loop_logger.info("No follow-up command heard.")
+                return CommandCaptureResult(
+                    raw_transcription=raw_transcription,
+                    cleaned_command=cleaned_command,
+                    validation=validation,
+                    no_follow_up=True,
+                )
+
+            if validation.accepted and cleaned_command.casefold() in (ignored_cleaned_commands or set()):
+                self.voice_loop_logger.info("Ignoring duplicate follow-up command={}", cleaned_command)
+                return CommandCaptureResult(
+                    raw_transcription=raw_transcription,
+                    cleaned_command=cleaned_command,
+                    validation=validation,
+                    no_follow_up=True,
+                )
+
+            self._emit(f"Last recognized command: {cleaned_command or '<empty>'}")
+            if validation.accepted:
+                self._emit(f"{accepted_prefix} {cleaned_command}")
+                return CommandCaptureResult(
+                    raw_transcription=raw_transcription,
+                    cleaned_command=cleaned_command,
+                    validation=validation,
+                )
+
+            rejection_reason = validation.rejection_reason or "invalid command"
+            self._emit(f"{rejected_prefix} {cleaned_command or '<empty>'} ({rejection_reason})")
+            self.voice_loop_logger.info(
+                "{} reason={}",
+                NO_COMMAND_DETECTED_MESSAGE,
+                rejection_reason,
+            )
+            self.summary.empty_commands += 1
+            self._consecutive_empty_commands += 1
+            self._status(NO_COMMAND_DETECTED_MESSAGE, statuses)
+            if self.settings.voice_loop_speak_status:
+                self._speak_message(NO_COMMAND_DETECTED_MESSAGE, errors)
+            if attempt < max_retries:
+                attempt += 1
+                self._status(retry_message, statuses)
+                if retry_start_delay_seconds > 0:
+                    self.sleeper(retry_start_delay_seconds)
+                if retry_beep:
+                    self.beeper()
+                continue
+
+            stop_requested = False
+            if self.settings.voice_loop_max_empty_commands >= 0 and self._consecutive_empty_commands >= self.settings.voice_loop_max_empty_commands:
+                stop_requested = True
+                self.voice_loop_logger.info(
+                    "Empty command limit reached after {} attempts",
+                    self._consecutive_empty_commands,
+                )
+            return CommandCaptureResult(
+                raw_transcription=raw_transcription,
+                cleaned_command=cleaned_command,
+                validation=validation,
+                stop_requested=stop_requested,
+            )
+
+    def _return_to_sleep_report(
+        self,
+        wake_transcription: str,
+        wake_detection: WakeDetectionResult,
+        raw_command_transcription: str,
+        cleaned_command: str,
+        assistant_response: AssistantResponse | None,
+        tts_result: TextToSpeechResult | None,
+        statuses: list[str],
+        errors: list[str],
+        stop_requested: bool = False,
+    ) -> VoiceLoopCycleReport:
+        self._status(RETURNING_TO_SLEEP_MESSAGE, statuses)
+        if self.settings.voice_loop_speak_status:
+            self._speak_message(RETURNING_TO_SLEEP_MESSAGE, errors)
+        return self._report(
+            wake_transcription,
+            wake_detection,
+            raw_command_transcription,
+            cleaned_command,
+            assistant_response,
+            tts_result,
+            statuses,
+            errors,
+            stop_requested=stop_requested,
+        )
 
     def _status(self, status: str, statuses: list[str]) -> None:
         statuses.append(status)

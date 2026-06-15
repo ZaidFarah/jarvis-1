@@ -7,9 +7,14 @@ from voice.interfaces import TranscriptionResult
 from voice.voice_command_test import COMMAND_PROMPT, LISTENING_FOR_COMMAND_PROMPT, NO_COMMAND_DETECTED_MESSAGE
 from voice.voice_loop import (
     ACCEPTED_COMMAND_PREFIX,
+    ACCEPTED_FOLLOW_UP_PREFIX,
+    FOLLOW_UP_RECORD_SECONDS,
+    LISTENING_FOR_FOLLOW_UP_PROMPT,
     REJECTED_COMMAND_PREFIX,
+    REJECTED_FOLLOW_UP_PREFIX,
     RETURNING_TO_SLEEP_MESSAGE,
     RETRYING_COMMAND_CAPTURE_MESSAGE,
+    RETRYING_FOLLOW_UP_CAPTURE_MESSAGE,
     STOP_COMMAND_DETECTED_MESSAGE,
     VoiceLoopRunner,
     is_stop_command,
@@ -28,7 +33,7 @@ class FakeProvider:
 
     def transcribe(self, samples, sample_rate: int) -> TranscriptionResult:
         del samples, sample_rate
-        text = self.transcripts[self.calls]
+        text = self.transcripts[self.calls] if self.calls < len(self.transcripts) else ""
         self.calls += 1
         return TranscriptionResult(text=text)
 
@@ -123,6 +128,7 @@ def test_voice_loop_one_cycle_state_transitions_calls_assistant_and_tts() -> Non
         LISTENING_FOR_COMMAND_PROMPT,
         "Thinking",
         "Speaking",
+        LISTENING_FOR_FOLLOW_UP_PROMPT,
         RETURNING_TO_SLEEP_MESSAGE,
     ]
 
@@ -182,11 +188,12 @@ def test_voice_loop_openwakeword_path_does_not_transcribe_wake_clip_first() -> N
     assert report.wake_transcription == ""
     assert report.wake_detected is True
     assert wake_provider.calls == 1
-    assert provider.calls == 1
+    assert provider.calls == 2
     assert assistant.commands == ["status report"]
     assert report.cleaned_command == "status report"
     assert durations[0] == settings.openwakeword_listen_chunk_ms / 1000.0
-    assert durations[-1] == settings.voice_command_record_seconds
+    assert settings.voice_command_record_seconds in durations
+    assert durations[-1] == FOLLOW_UP_RECORD_SECONDS
 
 
 def test_voice_loop_stop_command_detection() -> None:
@@ -222,7 +229,7 @@ def test_voice_loop_falls_back_to_whisper_when_openwakeword_is_unavailable() -> 
     assert report.wake_provider_available is True
     assert report.wake_transcription == "hey jarvis"
     assert report.wake_detected is True
-    assert provider.calls == 2
+    assert provider.calls == 3
 
 
 def test_voice_loop_stop_command_does_not_call_assistant() -> None:
@@ -291,9 +298,10 @@ def test_voice_loop_retries_rejected_command_and_handles_valid_retry() -> None:
     assert report.cleaned_command == "status report"
     assert report.command_validation.accepted is True
     assert assistant.commands == ["status report"]
-    assert provider.calls == 3
+    assert provider.calls == 4
     assert NO_COMMAND_DETECTED_MESSAGE in report.statuses
     assert RETRYING_COMMAND_CAPTURE_MESSAGE in report.statuses
+    assert LISTENING_FOR_FOLLOW_UP_PROMPT in report.statuses
     assert report.statuses.count(LISTENING_FOR_COMMAND_PROMPT) == 2
     assert "Last recognized command: you" in events
     assert f"{REJECTED_COMMAND_PREFIX} you (rejected phrase: you)" in events
@@ -324,6 +332,113 @@ def test_voice_loop_rejects_bad_command_before_openai_then_valid_retry_is_sent()
     assert report.cleaned_command == "second question"
     assert report.command_validation.accepted is True
     assert openai_service.messages == ["second question"]
+
+
+def test_voice_loop_valid_follow_up_does_not_require_wake_phrase() -> None:
+    settings = AppSettings(_env_file=None)
+    settings.voice_loop_speak_status = False
+    assistant = SpyAssistant()
+    provider = FakeProvider(["hey jarvis", "status report", "weather report", ""])
+    events: list[str] = []
+
+    report = VoiceLoopRunner(
+        settings=settings,
+        assistant=assistant,
+        provider=provider,
+        recorder=fake_recorder,
+        sleeper=no_sleep,
+        beeper=no_beep,
+        status_callback=events.append,
+    ).run_once()
+
+    assert report.cleaned_command == "weather report"
+    assert assistant.commands == ["status report", "weather report"]
+    assert report.statuses.count("Listening for wake phrase") == 1
+    assert report.statuses.count(LISTENING_FOR_FOLLOW_UP_PROMPT) == 1
+    assert f"{ACCEPTED_COMMAND_PREFIX} status report" in events
+    assert f"{ACCEPTED_FOLLOW_UP_PREFIX} weather report" in events
+    assert "Last Jarvis response: handled weather report" in events
+
+
+def test_voice_loop_rejects_invalid_follow_up_before_openai_then_valid_retry_is_sent() -> None:
+    settings = AppSettings(_env_file=None, openai_enabled=True, openai_api_key="sk-test")
+    settings.voice_loop_speak_status = False
+    openai_service = SpyOpenAIService()
+    assistant = AssistantCore(settings=settings, openai_service=openai_service)
+    provider = FakeProvider(["hey jarvis", "first question", "you", "second question", ""])
+    events: list[str] = []
+
+    report = VoiceLoopRunner(
+        settings=settings,
+        assistant=assistant,
+        provider=provider,
+        tts_provider=FakeTtsProvider(),
+        recorder=fake_recorder,
+        sleeper=no_sleep,
+        beeper=no_beep,
+        status_callback=events.append,
+    ).run_once()
+
+    assert report.cleaned_command == "second question"
+    assert openai_service.messages == ["first question", "second question"]
+    assert f"{REJECTED_FOLLOW_UP_PREFIX} you (rejected phrase: you)" in events
+    assert RETRYING_FOLLOW_UP_CAPTURE_MESSAGE in events
+    assert f"{ACCEPTED_FOLLOW_UP_PREFIX} second question" in events
+
+
+def test_voice_loop_returns_to_sleep_when_follow_up_retry_is_invalid() -> None:
+    settings = AppSettings(_env_file=None)
+    settings.voice_loop_speak_status = False
+    assistant = SpyAssistant()
+    provider = FakeProvider(["hey jarvis", "status report", "you", "uh"])
+    events: list[str] = []
+
+    report = VoiceLoopRunner(
+        settings=settings,
+        assistant=assistant,
+        provider=provider,
+        recorder=fake_recorder,
+        sleeper=no_sleep,
+        beeper=no_beep,
+        status_callback=events.append,
+    ).run_once()
+
+    assert report.cleaned_command == "status report"
+    assert assistant.commands == ["status report"]
+    assert report.statuses.count(NO_COMMAND_DETECTED_MESSAGE) == 2
+    assert report.statuses.count(RETRYING_FOLLOW_UP_CAPTURE_MESSAGE) == 1
+    assert report.statuses[-1] == RETURNING_TO_SLEEP_MESSAGE
+    assert f"{REJECTED_FOLLOW_UP_PREFIX} you (rejected phrase: you)" in events
+    assert f"{REJECTED_FOLLOW_UP_PREFIX} uh (rejected phrase: uh)" in events
+
+
+def test_voice_loop_follow_up_timeout_returns_to_sleep_without_wake_retry() -> None:
+    settings = AppSettings(_env_file=None)
+    settings.voice_loop_speak_status = False
+    assistant = SpyAssistant()
+    provider = FakeProvider(["hey jarvis", "status report", ""])
+    durations: list[float] = []
+
+    def recording_recorder(duration: float) -> list[float]:
+        durations.append(duration)
+        return fake_recorder(duration)
+
+    report = VoiceLoopRunner(
+        settings=settings,
+        assistant=assistant,
+        provider=provider,
+        recorder=recording_recorder,
+        sleeper=no_sleep,
+        beeper=no_beep,
+    ).run_once()
+
+    assert report.cleaned_command == "status report"
+    assert assistant.commands == ["status report"]
+    assert report.statuses.count("Listening for wake phrase") == 1
+    assert report.statuses.count(LISTENING_FOR_FOLLOW_UP_PROMPT) == 1
+    assert NO_COMMAND_DETECTED_MESSAGE not in report.statuses
+    assert report.statuses[-1] == RETURNING_TO_SLEEP_MESSAGE
+    assert durations[-1] == FOLLOW_UP_RECORD_SECONDS
 
 
 def test_voice_loop_returns_to_sleep_after_retry_is_also_invalid() -> None:
@@ -386,7 +501,7 @@ def test_voice_loop_summary_counters_track_wakes_commands_empty_and_errors() -> 
     settings = AppSettings(_env_file=None)
     settings.voice_loop_speak_status = False
     assistant = SpyAssistant()
-    provider = FakeProvider(["hey jarvis", "status report", "hey jarvis", "sleep jarvis"])
+    provider = FakeProvider(["hey jarvis", "status report", "", "hey jarvis", "sleep jarvis"])
 
     runner = VoiceLoopRunner(
         settings=settings,
@@ -454,7 +569,7 @@ def test_voice_loop_uses_conversation_history_between_turns() -> None:
     settings.voice_loop_speak_status = False
     openai_service = SpyOpenAIService()
     assistant = AssistantCore(settings=settings, openai_service=openai_service)
-    provider = FakeProvider(["hey jarvis", "first question", "hey jarvis", "second question"])
+    provider = FakeProvider(["hey jarvis", "first question", "second question", ""])
 
     runner = VoiceLoopRunner(
         settings=settings,
@@ -466,9 +581,9 @@ def test_voice_loop_uses_conversation_history_between_turns() -> None:
         beeper=no_beep,
     )
 
-    reports = runner.run(max_cycles=2)
+    reports = runner.run(max_cycles=1)
 
-    assert len(reports) == 2
+    assert len(reports) == 1
     assert openai_service.messages == ["first question", "second question"]
     assert openai_service.histories[0] is None
     assert openai_service.histories[1] is not None
