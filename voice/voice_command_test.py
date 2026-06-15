@@ -11,6 +11,11 @@ from loguru import logger
 
 from assistant.core import AssistantCore, AssistantResponse
 from config.settings import AppSettings
+from voice.command_validation import (
+    COMMAND_REJECTED_MESSAGE,
+    CommandValidationResult,
+    validate_cleaned_command,
+)
 from voice.interfaces import TranscriptionResult
 from voice.stt import create_speech_to_text_provider
 from voice.tts import TextToSpeechResult, speak_text
@@ -28,7 +33,7 @@ Beeper = Callable[[], None]
 
 COMMAND_PROMPT = "Yes sir?"
 LISTENING_FOR_COMMAND_PROMPT = "Listening for command..."
-NO_COMMAND_DETECTED_MESSAGE = "I didn't catch that."
+NO_COMMAND_DETECTED_MESSAGE = COMMAND_REJECTED_MESSAGE
 
 
 @dataclass(frozen=True)
@@ -39,6 +44,7 @@ class VoiceCommandTestReport:
     wake_detection: WakeDetectionResult
     raw_command_transcription: str
     cleaned_command: str
+    command_validation: CommandValidationResult
     assistant_response: AssistantResponse | None
     tts_result: TextToSpeechResult | None
     statuses: list[str]
@@ -92,6 +98,11 @@ class VoiceCommandTestRunner:
         wake_transcription = ""
         raw_command_transcription = ""
         cleaned_command = ""
+        command_validation = validate_cleaned_command(
+            cleaned_command,
+            min_words=self.settings.voice_command_min_words,
+            reject_phrases=self.settings.voice_command_reject_phrase_list,
+        )
         assistant_response: AssistantResponse | None = None
         tts_result: TextToSpeechResult | None = None
         detector = WakeDetector(
@@ -113,6 +124,7 @@ class VoiceCommandTestRunner:
                 empty_detection,
                 raw_command_transcription,
                 cleaned_command,
+                command_validation,
                 assistant_response,
                 tts_result,
                 statuses,
@@ -140,6 +152,7 @@ class VoiceCommandTestRunner:
                 empty_detection,
                 raw_command_transcription,
                 cleaned_command,
+                command_validation,
                 assistant_response,
                 tts_result,
                 statuses,
@@ -153,6 +166,7 @@ class VoiceCommandTestRunner:
                 wake_detection,
                 raw_command_transcription,
                 cleaned_command,
+                command_validation,
                 assistant_response,
                 tts_result,
                 statuses,
@@ -174,10 +188,17 @@ class VoiceCommandTestRunner:
                 wake_phrase=self.settings.wake_phrase,
                 aliases=self.settings.wake_alias_list,
             )
+            command_validation = validate_cleaned_command(
+                cleaned_command,
+                min_words=self.settings.voice_command_min_words,
+                reject_phrases=self.settings.voice_command_reject_phrase_list,
+            )
             self.voice_logger.info(
-                "Command transcription={} cleaned={}",
+                "Command transcription={} cleaned={} accepted={} reason={}",
                 raw_command_transcription or "<empty>",
                 cleaned_command or "<empty>",
+                command_validation.accepted,
+                command_validation.rejection_reason or "<none>",
             )
         except Exception as exc:
             message = f"Command stage failed: {type(exc).__name__}: {exc}"
@@ -189,21 +210,28 @@ class VoiceCommandTestRunner:
                 wake_detection,
                 raw_command_transcription,
                 cleaned_command,
+                command_validation,
                 assistant_response,
                 tts_result,
                 statuses,
                 errors,
             )
 
-        if not cleaned_command:
-            self.voice_logger.warning(NO_COMMAND_DETECTED_MESSAGE)
+        if not command_validation.accepted:
+            self.voice_logger.warning(
+                "{} reason={}",
+                NO_COMMAND_DETECTED_MESSAGE,
+                command_validation.rejection_reason or "<none>",
+            )
             errors.append(NO_COMMAND_DETECTED_MESSAGE)
+            self._status(NO_COMMAND_DETECTED_MESSAGE, statuses)
             self._status("Sleeping", statuses)
             return self._report(
                 wake_transcription,
                 wake_detection,
                 raw_command_transcription,
                 cleaned_command,
+                command_validation,
                 assistant_response,
                 tts_result,
                 statuses,
@@ -229,6 +257,7 @@ class VoiceCommandTestRunner:
             wake_detection,
             raw_command_transcription,
             cleaned_command,
+            command_validation,
             assistant_response,
             tts_result,
             statuses,
@@ -246,6 +275,7 @@ class VoiceCommandTestRunner:
         wake_detection: WakeDetectionResult,
         raw_command_transcription: str,
         cleaned_command: str,
+        command_validation: CommandValidationResult,
         assistant_response: AssistantResponse | None,
         tts_result: TextToSpeechResult | None,
         statuses: list[str],
@@ -258,6 +288,7 @@ class VoiceCommandTestRunner:
             wake_detection=wake_detection,
             raw_command_transcription=raw_command_transcription,
             cleaned_command=cleaned_command,
+            command_validation=command_validation,
             assistant_response=assistant_response,
             tts_result=tts_result,
             statuses=statuses,
@@ -343,7 +374,10 @@ def format_voice_command_report(report: VoiceCommandTestReport) -> str:
         "Command:",
         f"  raw command transcription: {report.raw_command_transcription if report.raw_command_transcription else '<not recorded>'}",
         f"  cleaned command: {report.cleaned_command if report.cleaned_command else '<empty>'}",
+        f"  accepted: {_yes_no(report.command_validation.accepted)}",
     ]
+    if report.command_validation.rejection_reason:
+        lines.append(f"  rejection reason: {report.command_validation.rejection_reason}")
 
     if report.assistant_response is not None:
         lines.extend(["", "Jarvis response:", f"  {report.assistant_response.text}"])

@@ -66,11 +66,13 @@ from memory.store import SQLiteMemoryStore
 from reminders.service import ReminderService
 from reminders.scheduler import ReminderWatcher
 from voice.audio_diagnostics import AudioDiagnostics, format_audio_check_report
+from voice.command_capture import format_command_capture_report, run_command_capture_test
 from voice.tts import TextToSpeechResult, format_tts_result, speak_text
 from voice.transcription_diagnostics import TranscriptionDiagnostics, format_transcription_report
 from voice.voice_command_test import (
     COMMAND_PROMPT,
     LISTENING_FOR_COMMAND_PROMPT,
+    NO_COMMAND_DETECTED_MESSAGE,
     VoiceCommandTestRunner,
     format_voice_command_report,
 )
@@ -243,6 +245,13 @@ def main(argv: list[str] | None = None) -> int:
         configure_logging(settings, console=False)
         report = TranscriptionDiagnostics(settings).run_transcribe_test()
         print(format_transcription_report(report))
+        return 0 if report.is_successful else 1
+
+    if "--command-capture-test" in args:
+        settings = load_settings()
+        configure_logging(settings, console=False)
+        report = run_command_capture_test(settings)
+        print(format_command_capture_report(report))
         return 0 if report.is_successful else 1
 
     if "--wake-test" in args:
@@ -643,7 +652,7 @@ def _flag_value(args: list[str], flag: str) -> str | None:
 
 
 def _voice_command_status_callback(status: str) -> None:
-    if status in {COMMAND_PROMPT, LISTENING_FOR_COMMAND_PROMPT}:
+    if status in {COMMAND_PROMPT, LISTENING_FOR_COMMAND_PROMPT, NO_COMMAND_DETECTED_MESSAGE}:
         print(status, flush=True)
 
 
@@ -655,7 +664,7 @@ def _voice_loop_status_callback(status: str) -> None:
         "Wake detected",
         COMMAND_PROMPT,
         LISTENING_FOR_COMMAND_PROMPT,
-        "I didn't catch that.",
+        NO_COMMAND_DETECTED_MESSAGE,
         RETURNING_TO_SLEEP_MESSAGE,
         "Stop command detected. Exiting voice loop.",
         "Thinking",

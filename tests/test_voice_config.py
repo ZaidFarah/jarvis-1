@@ -27,7 +27,7 @@ def test_voice_settings_defaults_are_lightweight() -> None:
     ]
     assert settings.wake_match_threshold == 0.72
     assert settings.wake_listen_seconds == 5.0
-    assert settings.wake_provider == "openwakeword"
+    assert settings.wake_provider == "whisper_fuzzy"
     assert settings.openwakeword_enabled is False
     assert settings.openwakeword_model == "hey_jarvis"
     assert settings.openwakeword_threshold == 0.5
@@ -36,6 +36,10 @@ def test_voice_settings_defaults_are_lightweight() -> None:
     assert settings.openwakeword_fallback_to_whisper is True
     assert settings.voice_command_start_delay_seconds == 1.0
     assert settings.voice_command_record_seconds == 7.0
+    assert settings.voice_command_min_words == 2
+    assert settings.voice_command_reject_phrase_list == ["you", "uh", "um", "hmm", "yeah", "okay"]
+    assert settings.voice_command_retry_on_reject is True
+    assert settings.voice_command_max_retries == 1
     assert settings.voice_loop_enabled is False
     assert settings.voice_loop_max_empty_commands == 3
     assert settings.voice_loop_wake_cooldown_seconds == 1.5
@@ -132,6 +136,10 @@ def test_wake_settings_read_environment(monkeypatch) -> None:
     monkeypatch.setenv("OPENWAKEWORD_FALLBACK_TO_WHISPER", "false")
     monkeypatch.setenv("VOICE_COMMAND_START_DELAY_SECONDS", "1.25")
     monkeypatch.setenv("VOICE_COMMAND_RECORD_SECONDS", "8")
+    monkeypatch.setenv("VOICE_COMMAND_MIN_WORDS", "3")
+    monkeypatch.setenv("VOICE_COMMAND_REJECT_PHRASES", "you, nope")
+    monkeypatch.setenv("VOICE_COMMAND_RETRY_ON_REJECT", "false")
+    monkeypatch.setenv("VOICE_COMMAND_MAX_RETRIES", "2")
     monkeypatch.setenv("VOICE_LOOP_ENABLED", "true")
     monkeypatch.setenv("VOICE_LOOP_MAX_EMPTY_COMMANDS", "5")
     monkeypatch.setenv("VOICE_LOOP_WAKE_COOLDOWN_SECONDS", "2.5")
@@ -152,6 +160,10 @@ def test_wake_settings_read_environment(monkeypatch) -> None:
     assert settings.openwakeword_fallback_to_whisper is False
     assert settings.voice_command_start_delay_seconds == 1.25
     assert settings.voice_command_record_seconds == 8.0
+    assert settings.voice_command_min_words == 3
+    assert settings.voice_command_reject_phrase_list == ["you", "nope"]
+    assert settings.voice_command_retry_on_reject is False
+    assert settings.voice_command_max_retries == 2
     assert settings.voice_loop_enabled is True
     assert settings.voice_loop_max_empty_commands == 5
     assert settings.voice_loop_wake_cooldown_seconds == 2.5

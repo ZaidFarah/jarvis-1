@@ -27,12 +27,12 @@ def run_wake_provider_check(settings: AppSettings | None = None) -> WakeProvider
     if resolution.effective_provider == "openwakeword":
         status = "PASS"
         message = "OpenWakeWord is the effective wake provider."
+    elif resolution.selected_provider == "whisper_fuzzy":
+        status = "PASS"
+        message = "Whisper fuzzy wake detection is active."
     else:
         status = "WARN"
-        if resolution.selected_provider == "openwakeword":
-            message = "OpenWakeWord is not effective; Whisper fuzzy fallback is active."
-        else:
-            message = "Whisper fuzzy wake detection is active."
+        message = "OpenWakeWord is not effective; Whisper fuzzy fallback is active."
 
     return WakeProviderCheckReport(resolution=resolution, status=status, message=message)
 

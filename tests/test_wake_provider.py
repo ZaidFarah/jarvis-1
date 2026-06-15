@@ -12,6 +12,21 @@ def _settings(tmp_path: Path) -> AppSettings:
     return AppSettings(_env_file=None, log_dir=tmp_path / "logs")
 
 
+def test_default_wake_provider_is_whisper_fuzzy() -> None:
+    settings = AppSettings(_env_file=None)
+
+    assert settings.wake_provider == "whisper_fuzzy"
+    assert settings.openwakeword_enabled is False
+
+
+def test_wake_provider_check_passes_for_default_whisper_fuzzy(tmp_path: Path) -> None:
+    report = run_wake_provider_check(_settings(tmp_path))
+
+    assert report.status == "PASS"
+    assert report.resolution.effective_provider == "whisper_fuzzy"
+    assert report.message == "Whisper fuzzy wake detection is active."
+
+
 def test_wake_provider_resolution_falls_back_when_openwakeword_missing(tmp_path: Path, monkeypatch) -> None:
     settings = AppSettings(
         _env_file=None,

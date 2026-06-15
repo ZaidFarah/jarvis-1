@@ -45,7 +45,8 @@ The GUI now uses a tabbed dark interface with quick actions for voice, tools, re
 - Wake phrase configuration.
 - Wake phrase aliases.
 - Fuzzy wake phrase matching with `difflib.SequenceMatcher`.
-- OpenWakeWord as the primary wake provider when enabled, with Whisper fuzzy fallback.
+- Whisper fuzzy wake detection as the default live wake provider.
+- OpenWakeWord remains available as an optional diagnostic/configured provider, with Whisper fuzzy fallback.
 - Wake detection utility class.
 - One-shot `py main.py --wake-test` diagnostic command.
 - Wake diagnostic logging to `logs/wake_diagnostics.log`.
@@ -55,10 +56,13 @@ The GUI now uses a tabbed dark interface with quick actions for voice, tools, re
 - Controlled voice command test mode.
 - One wake phrase recording.
 - One command recording only after wake detection succeeds.
-- Command transcription routed to the existing `AssistantCore` stub.
+- Command validation rejects empty, punctuation-only, and short filler transcripts before `AssistantCore`.
+- Command transcription routed to the existing `AssistantCore` stub only when accepted.
 - CLI command: `py main.py --voice-command-test`.
+- CLI command: `py main.py --command-capture-test`.
 - GUI and tray action: `Voice Command Test`.
 - Voice command logs saved to `logs/voice_command_test.log`.
+- Command capture diagnostics saved to `logs/command_capture.log`.
 
 ## Phase 6 Scope
 
@@ -74,7 +78,7 @@ The GUI now uses a tabbed dark interface with quick actions for voice, tools, re
 - `AssistantCore` routes commands to OpenAI when enabled and configured.
 - The local placeholder remains as fallback when OpenAI is disabled, missing a key, or errors.
 - CLI command: `py main.py --chat-test`.
-- Voice command test sends the cleaned command through `AssistantCore`, so it can use OpenAI or fallback.
+- Voice command test sends only accepted cleaned commands through `AssistantCore`, so valid commands can use OpenAI or fallback.
 - Chat logs are saved to `logs/chat.log`.
 
 ## Phase 8 Scope
@@ -105,7 +109,7 @@ The GUI now uses a tabbed dark interface with quick actions for voice, tools, re
 
 - Continuous one-command-at-a-time voice loop.
 - CLI command: `py main.py --voice-loop`.
-- Loop flow: sleep, listen for wake phrase, prompt/beep, record one command, transcribe, route to `AssistantCore`, speak the response, return to sleep.
+- Loop flow: sleep, listen for wake phrase, prompt/beep, record one command, transcribe, validate, route accepted commands to `AssistantCore`, speak the response, return to sleep.
 - Stop commands: `stop listening`, `sleep jarvis`, `jarvis sleep`, `exit jarvis`, and `shutdown jarvis`.
 - Ctrl+C exits the CLI loop cleanly.
 - GUI and tray actions: `Start Voice Loop` and `Stop Voice Loop`.
@@ -114,7 +118,7 @@ The GUI now uses a tabbed dark interface with quick actions for voice, tools, re
 ## Phase 9.5 Scope
 
 - Wake feedback: `Yes sir?`.
-- Empty command feedback: `I didn't catch that.`
+- Rejected command feedback: `I didn’t catch that, please repeat.`
 - Return-to-sleep feedback: `Standing by.`
 - Voice loop settings: `VOICE_LOOP_ENABLED=false`, `VOICE_LOOP_MAX_EMPTY_COMMANDS=3`, `VOICE_LOOP_WAKE_COOLDOWN_SECONDS=1.5`, `VOICE_LOOP_SPEAK_STATUS=true`.
 - Post-speech cooldown before the next listen cycle to reduce self-hearing.
@@ -122,6 +126,14 @@ The GUI now uses a tabbed dark interface with quick actions for voice, tools, re
 - Stop phrases expanded to include `go to sleep`, `that is all`, and `thank you jarvis`.
 - Loop exit summary reports wake attempts, successful wakes, commands handled, empty commands, and errors.
 - GUI shows loop status, last recognized command, and last Jarvis response, and disables the loop controls while the loop is active.
+
+## v0.2.0 Phase 6 Scope
+
+- Live voice loop hardening for the full path: sleeping, whisper fuzzy wake detection, command capture, local validation, AssistantCore/OpenAI routing for valid commands, GUI response display, optional TTS, and return to sleep.
+- Invalid cleaned commands are rejected locally before `AssistantCore` or OpenAI. This includes empty text, punctuation-only text, `you`, `uh`, `um`, `hmm`, `yeah`, and `okay`.
+- Rejected commands trigger exactly `I didn’t catch that, please repeat.`
+- The loop retries command capture once. If the retry is valid, the retry text is sent to `AssistantCore`; if it is invalid, Jarvis returns to sleep.
+- The GUI transcript and loop fields show rejected commands, retry state, accepted command, assistant response, and sleeping state.
 
 ## Phase 10 Scope
 
@@ -287,7 +299,7 @@ WAKE_PHRASE=hey jarvis
 WAKE_ALIASES=hey jarvis,hi jarvis,wake up jarvis,jarvis wake up,okay jarvis,yo jarvis
 WAKE_MATCH_THRESHOLD=0.72
 WAKE_LISTEN_SECONDS=5
-WAKE_PROVIDER=openwakeword
+WAKE_PROVIDER=whisper_fuzzy
 OPENWAKEWORD_ENABLED=false
 OPENWAKEWORD_MODEL=hey_jarvis
 OPENWAKEWORD_THRESHOLD=0.5
@@ -308,7 +320,7 @@ logs/wake_diagnostics.log
 py main.py --openwakeword-test
 ```
 
-This controlled diagnostic checks the installed `openwakeword` package, lists the built-in models, opens the microphone, listens for a short period, and reports the maximum detection score.
+This controlled diagnostic checks the installed `openwakeword` package, lists the built-in models, opens the microphone, listens for a short period, and reports the maximum detection score. OpenWakeWord is currently optional and diagnostic-first; Whisper fuzzy wake detection is the safe default live provider.
 
 If `hey_jarvis` is unavailable in a given environment, choose one of the built-in model names reported by the diagnostic:
 
@@ -344,7 +356,7 @@ Use calibration when the microphone is working but the wake scores are still low
 py main.py --wake-provider-check
 ```
 
-This check reports the selected wake provider, whether OpenWakeWord is enabled and installed, whether a model is configured, whether Whisper fallback is enabled, and the effective provider that Jarvis will use.
+This check reports the selected wake provider, whether OpenWakeWord is enabled and installed, whether a model is configured, whether Whisper fallback is enabled, and the effective provider that Jarvis will use. The default selection is `whisper_fuzzy`.
 
 ## Voice Command Test
 
@@ -364,8 +376,9 @@ The command runs one controlled voice command flow:
 8. Records one command clip using `VOICE_COMMAND_RECORD_SECONDS`.
 9. Transcribes the command.
 10. Removes a wake phrase prefix from the command transcript when present.
-11. Sends the cleaned command text to the existing `AssistantCore` stub.
-12. Prints the raw command transcript, cleaned command, and placeholder Jarvis response.
+11. Validates the cleaned command and rejects bad short transcripts locally.
+12. Sends accepted command text to the existing `AssistantCore` stub.
+13. Prints the raw command transcript, cleaned command, accepted status, rejection reason when rejected, and placeholder Jarvis response when accepted.
 
 Voice command capture settings:
 
@@ -373,12 +386,16 @@ Voice command capture settings:
 WAKE_LISTEN_SECONDS=5
 VOICE_COMMAND_START_DELAY_SECONDS=1.0
 VOICE_COMMAND_RECORD_SECONDS=7
+VOICE_COMMAND_MIN_WORDS=2
+VOICE_COMMAND_REJECT_PHRASES=you,uh,um,hmm,yeah,okay
+VOICE_COMMAND_RETRY_ON_REJECT=true
+VOICE_COMMAND_MAX_RETRIES=1
 ```
 
-If the command transcription is empty or punctuation-only, Jarvis prints:
+If the command transcription is empty, punctuation-only, too short, or one of the configured rejected phrases, Jarvis prints:
 
 ```text
-I didn't catch that.
+I didn’t catch that, please repeat.
 ```
 
 Detailed voice command logs are saved to:
@@ -391,6 +408,22 @@ To speak the Jarvis response after a successful command, pass `--speak`:
 
 ```powershell
 py main.py --voice-command-test --speak
+```
+
+## Command Capture Test
+
+```powershell
+py main.py --command-capture-test
+```
+
+This records one command sample without requiring wake detection. It prints the provider, sample rate, record seconds, average RMS, max RMS, VAD threshold, whether the threshold was crossed, raw transcript, cleaned command, accepted status, rejection reason when rejected, and the diagnostic log path.
+
+Use this when wake detection works but command capture produces bad transcripts such as `You`, `uh`, or punctuation-only text.
+
+Detailed command capture logs are saved to:
+
+```text
+logs/command_capture.log
 ```
 
 ## Voice Loop
@@ -407,12 +440,15 @@ The voice loop keeps Jarvis running until stopped:
 4. Falls back to Whisper fuzzy wake detection when OpenWakeWord is unavailable.
 5. Prompts with `Yes sir?`, optionally beeps, and waits briefly before recording the command.
 6. Records one command clip.
-7. Cleans the command text.
+7. Cleans and validates the command text.
 8. Stops cleanly if the command is `stop listening`, `go to sleep`, `sleep jarvis`, `jarvis sleep`, `exit jarvis`, `shutdown jarvis`, `that is all`, or `thank you jarvis`.
-9. Sends valid commands to `AssistantCore`.
-10. Speaks accepted responses using the configured TTS provider.
-11. Speaks `Standing by.` when returning to sleep.
-12. Prints a summary on exit with wake attempts, successful wakes, commands handled, empty commands, and errors.
+9. Rejects bad short transcripts locally with `I didn’t catch that, please repeat.` and retries command capture once by default.
+10. Sends accepted commands to `AssistantCore`.
+11. Speaks accepted responses using the configured TTS provider.
+12. Speaks `Standing by.` when returning to sleep.
+13. Prints a summary on exit with wake attempts, successful wakes, commands handled, empty commands, and errors.
+
+For GUI visibility, the loop emits explicit events for rejected commands, retrying command capture, accepted commands, assistant responses, and return-to-sleep state.
 
 Press Ctrl+C to stop the CLI loop. Detailed voice loop logs are saved to:
 

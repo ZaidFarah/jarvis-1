@@ -157,7 +157,7 @@ class AppSettings(BaseSettings):
         validation_alias=AliasChoices("WAKE_LISTEN_SECONDS", "JARVIS_WAKE_LISTEN_SECONDS"),
     )
     wake_provider: str = Field(
-        default="openwakeword",
+        default="whisper_fuzzy",
         validation_alias=AliasChoices("WAKE_PROVIDER", "JARVIS_WAKE_PROVIDER"),
     )
     openwakeword_enabled: bool = Field(
@@ -228,6 +228,26 @@ class AppSettings(BaseSettings):
         ge=0.25,
         le=30.0,
         validation_alias=AliasChoices("VOICE_COMMAND_RECORD_SECONDS", "JARVIS_VOICE_COMMAND_RECORD_SECONDS"),
+    )
+    voice_command_min_words: int = Field(
+        default=2,
+        ge=1,
+        le=20,
+        validation_alias=AliasChoices("VOICE_COMMAND_MIN_WORDS", "JARVIS_VOICE_COMMAND_MIN_WORDS"),
+    )
+    voice_command_reject_phrases: str = Field(
+        default="you,uh,um,hmm,yeah,okay",
+        validation_alias=AliasChoices("VOICE_COMMAND_REJECT_PHRASES", "JARVIS_VOICE_COMMAND_REJECT_PHRASES"),
+    )
+    voice_command_retry_on_reject: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("VOICE_COMMAND_RETRY_ON_REJECT", "JARVIS_VOICE_COMMAND_RETRY_ON_REJECT"),
+    )
+    voice_command_max_retries: int = Field(
+        default=1,
+        ge=0,
+        le=5,
+        validation_alias=AliasChoices("VOICE_COMMAND_MAX_RETRIES", "JARVIS_VOICE_COMMAND_MAX_RETRIES"),
     )
     voice_loop_enabled: bool = Field(
         default=False,
@@ -825,6 +845,11 @@ class AppSettings(BaseSettings):
     def wake_alias_list(self) -> list[str]:
         aliases = [item.strip().lower() for item in self.wake_aliases.split(",")]
         return [alias for alias in aliases if alias]
+
+    @property
+    def voice_command_reject_phrase_list(self) -> list[str]:
+        phrases = [item.strip().lower() for item in self.voice_command_reject_phrases.replace("\n", ",").split(",")]
+        return [phrase for phrase in phrases if phrase]
 
     @property
     def has_openai_api_key(self) -> bool:

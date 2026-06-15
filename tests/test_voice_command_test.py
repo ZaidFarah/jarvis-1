@@ -185,8 +185,33 @@ def test_voice_command_punctuation_only_transcription_is_empty() -> None:
     assert report.raw_command_transcription == ". . . . ."
     assert report.cleaned_command == ""
     assert assistant.commands == []
+    assert report.command_validation.accepted is False
     assert NO_COMMAND_DETECTED_MESSAGE in report.errors
+    assert NO_COMMAND_DETECTED_MESSAGE in report.statuses
     assert NO_COMMAND_DETECTED_MESSAGE in text
+
+
+def test_voice_command_rejects_you_without_assistant_call() -> None:
+    settings = AppSettings(_env_file=None)
+    assistant = SpyAssistant()
+    provider = FakeProvider(["hey jarvis", "You"])
+
+    report = VoiceCommandTestRunner(
+        settings=settings,
+        assistant=assistant,
+        provider=provider,
+        recorder=fake_recorder,
+        sleeper=no_sleep,
+        beeper=no_beep,
+    ).run()
+
+    assert report.raw_command_transcription == "You"
+    assert report.cleaned_command == "You"
+    assert report.command_validation.accepted is False
+    assert report.command_validation.rejection_reason == "rejected phrase: you"
+    assert assistant.commands == []
+    assert report.assistant_response is None
+    assert NO_COMMAND_DETECTED_MESSAGE in report.errors
 
 
 def test_voice_command_uses_separate_wake_and_command_durations() -> None:

@@ -8,7 +8,13 @@ from PySide6.QtWidgets import QApplication
 
 from config.settings import AppSettings
 from gui.main_window import JarvisMainWindow
-from voice.voice_loop import RETURNING_TO_SLEEP_MESSAGE
+from voice.voice_command_test import NO_COMMAND_DETECTED_MESSAGE
+from voice.voice_loop import (
+    ACCEPTED_COMMAND_PREFIX,
+    REJECTED_COMMAND_PREFIX,
+    RETURNING_TO_SLEEP_MESSAGE,
+    RETRYING_COMMAND_CAPTURE_MESSAGE,
+)
 
 
 def _app() -> QApplication:
@@ -115,6 +121,34 @@ def test_voice_loop_gui_state_updates_controls_and_status_fields() -> None:
     assert window.log_viewer_action is not None
     assert window.backup_create_action is not None
     assert window.backup_list_action is not None
+
+    window.close()
+    app.processEvents()
+
+
+def test_voice_loop_gui_displays_reject_retry_accept_response_and_sleep() -> None:
+    app = _app()
+    settings = AppSettings(_env_file=None)
+    window = JarvisMainWindow(settings=settings, assistant=StubAssistant())
+
+    window._handle_voice_loop_status("Last recognized command: you")
+    window._handle_voice_loop_status(f"{REJECTED_COMMAND_PREFIX} you (rejected phrase: you)")
+    window._handle_voice_loop_status(NO_COMMAND_DETECTED_MESSAGE)
+    window._handle_voice_loop_status(RETRYING_COMMAND_CAPTURE_MESSAGE)
+    window._handle_voice_loop_status("Last recognized command: status report")
+    window._handle_voice_loop_status(f"{ACCEPTED_COMMAND_PREFIX} status report")
+    window._handle_voice_loop_status("Last Jarvis response: handled status report")
+    window._handle_voice_loop_status(RETURNING_TO_SLEEP_MESSAGE)
+
+    assert window.voice_loop_last_command_value.text() == "status report"
+    assert window.voice_loop_last_response_value.text() == "handled status report"
+    assert window.voice_loop_status_value.text() == RETURNING_TO_SLEEP_MESSAGE
+    transcript = window.transcript.toPlainText()
+    assert f"{REJECTED_COMMAND_PREFIX} you (rejected phrase: you)" in transcript
+    assert NO_COMMAND_DETECTED_MESSAGE in transcript
+    assert RETRYING_COMMAND_CAPTURE_MESSAGE in transcript
+    assert f"{ACCEPTED_COMMAND_PREFIX} status report" in transcript
+    assert "Last Jarvis response: handled status report" in transcript
 
     window.close()
     app.processEvents()

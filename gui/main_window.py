@@ -37,9 +37,18 @@ from services.startup_service import StartupService, format_startup_action_repor
 from gui.settings_window import SettingsWindow
 from gui.log_viewer import LogViewerWindow
 from voice.audio_diagnostics import AudioDiagnostics, format_microphone_test_summary
-from voice.voice_command_test import COMMAND_PROMPT, LISTENING_FOR_COMMAND_PROMPT, VoiceCommandTestRunner, format_voice_command_report
+from voice.voice_command_test import (
+    COMMAND_PROMPT,
+    LISTENING_FOR_COMMAND_PROMPT,
+    NO_COMMAND_DETECTED_MESSAGE,
+    VoiceCommandTestRunner,
+    format_voice_command_report,
+)
 from voice.voice_loop import (
+    ACCEPTED_COMMAND_PREFIX,
+    REJECTED_COMMAND_PREFIX,
     RETURNING_TO_SLEEP_MESSAGE,
+    RETRYING_COMMAND_CAPTURE_MESSAGE,
     STOP_COMMAND_DETECTED_MESSAGE,
     VOICE_LOOP_STARTED_MESSAGE,
     VOICE_LOOP_STOPPED_MESSAGE,
@@ -1319,7 +1328,8 @@ class JarvisMainWindow(QMainWindow):
             "Thinking": AssistantStatus.THINKING,
             "Speaking": AssistantStatus.SPEAKING,
             RETURNING_TO_SLEEP_MESSAGE: AssistantStatus.SLEEPING,
-            "I didn't catch that.": AssistantStatus.SLEEPING,
+            NO_COMMAND_DETECTED_MESSAGE: AssistantStatus.SLEEPING,
+            RETRYING_COMMAND_CAPTURE_MESSAGE: AssistantStatus.LISTENING,
             STOP_COMMAND_DETECTED_MESSAGE: AssistantStatus.SLEEPING,
             VOICE_LOOP_STOPPED_MESSAGE: AssistantStatus.SLEEPING,
         }
@@ -1327,6 +1337,27 @@ class JarvisMainWindow(QMainWindow):
             command_text = status.split(":", 1)[1].strip() or "None"
             self.voice_loop_last_command_value.setText(command_text)
             self.voice_loop_status_value.setText("No command detected" if command_text == "<empty>" else "Command received")
+            self._append_message("Jarvis", status)
+            return
+        if status.startswith(REJECTED_COMMAND_PREFIX):
+            command_text = status.removeprefix(REJECTED_COMMAND_PREFIX).strip()
+            if " (" in command_text:
+                command_text = command_text.split(" (", 1)[0].strip()
+            self.voice_loop_last_command_value.setText(f"Rejected: {command_text or '<empty>'}")
+            self.voice_loop_status_value.setText("Rejected command")
+            self.set_status(AssistantStatus.SLEEPING)
+            self._append_message("Jarvis", status)
+            return
+        if status == RETRYING_COMMAND_CAPTURE_MESSAGE:
+            self.voice_loop_status_value.setText("Retrying command capture")
+            self.set_status(AssistantStatus.LISTENING)
+            self._append_message("Jarvis", status)
+            return
+        if status.startswith(ACCEPTED_COMMAND_PREFIX):
+            command_text = status.removeprefix(ACCEPTED_COMMAND_PREFIX).strip()
+            self.voice_loop_last_command_value.setText(command_text or "None")
+            self.voice_loop_status_value.setText("Accepted command")
+            self.set_status(AssistantStatus.THINKING)
             self._append_message("Jarvis", status)
             return
         if status.startswith("Last Jarvis response:"):
