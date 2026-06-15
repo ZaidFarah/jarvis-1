@@ -189,6 +189,24 @@ class AppSettings(BaseSettings):
         le=60.0,
         validation_alias=AliasChoices("OPENWAKEWORD_TEST_SECONDS", "JARVIS_OPENWAKEWORD_TEST_SECONDS"),
     )
+    openwakeword_calibration_rounds: int = Field(
+        default=5,
+        ge=1,
+        le=20,
+        validation_alias=AliasChoices(
+            "OPENWAKEWORD_CALIBRATION_ROUNDS",
+            "JARVIS_OPENWAKEWORD_CALIBRATION_ROUNDS",
+        ),
+    )
+    openwakeword_calibration_seconds: float = Field(
+        default=4.0,
+        ge=1.0,
+        le=30.0,
+        validation_alias=AliasChoices(
+            "OPENWAKEWORD_CALIBRATION_SECONDS",
+            "JARVIS_OPENWAKEWORD_CALIBRATION_SECONDS",
+        ),
+    )
     openwakeword_fallback_to_whisper: bool = Field(
         default=True,
         validation_alias=AliasChoices(

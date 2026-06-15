@@ -37,6 +37,7 @@ The GUI now uses a tabbed dark interface with quick actions for voice, tools, re
 - Graceful error output if Faster Whisper or the model cannot load.
 - OpenWakeWord dependency support for controlled wake diagnostics.
 - `py main.py --openwakeword-test` diagnostic command.
+- `py main.py --openwakeword-calibrate` calibration command.
 - OpenWakeWord diagnostic logging to `logs/openwakeword.log`.
 
 ## Phase 4 Scope
@@ -319,6 +320,23 @@ If `hey_jarvis` is unavailable in a given environment, choose one of the built-i
 - `weather`
 
 The diagnostic reports the resolved model path when available. On this local install, the model resolved inside the OpenWakeWord package resource tree. To use a custom wake model, point `OPENWAKEWORD_MODEL` at a local `.onnx` or `.tflite` file path.
+
+## OpenWakeWord Calibration
+
+```powershell
+py main.py --openwakeword-calibrate
+```
+
+Calibration runs multiple rounds and asks you to say "Hey Jarvis" several times. It reports the maximum score for each round, the average and peak scores across all rounds, the average and max microphone RMS levels, whether the VAD threshold was crossed, and a recommended threshold based on the observed scores.
+
+Calibration settings:
+
+```dotenv
+OPENWAKEWORD_CALIBRATION_ROUNDS=5
+OPENWAKEWORD_CALIBRATION_SECONDS=4
+```
+
+Use calibration when the microphone is working but the wake scores are still low. If RMS is low, the microphone input is weak. If RMS looks healthy but the wake scores stay low, the phrase, pronunciation, or model choice may not match well.
 
 ## Wake Provider Check
 

@@ -20,7 +20,12 @@ from diagnostics.installer import format_installer_check_report, run_installer_c
 from diagnostics.final_report import run_final_report
 from diagnostics.release_notes import format_release_notes_report, run_release_notes
 from diagnostics.logs import format_log_tail_report, format_logs_list_report, list_log_files, tail_log
-from diagnostics.openwakeword import format_openwakeword_test_report, run_openwakeword_test
+from diagnostics.openwakeword import (
+    format_openwakeword_calibration_report,
+    format_openwakeword_test_report,
+    run_openwakeword_calibration,
+    run_openwakeword_test,
+)
 from diagnostics.settings_check import format_settings_check_report, run_settings_check
 from diagnostics.signing import format_signing_check_report, run_signing_check
 from diagnostics.release_check import format_release_check_report, run_release_check
@@ -259,6 +264,13 @@ def main(argv: list[str] | None = None) -> int:
         configure_logging(settings, console=False)
         report = run_openwakeword_test(settings)
         print(format_openwakeword_test_report(report))
+        return 0 if report.is_successful else 1
+
+    if "--openwakeword-calibrate" in args:
+        settings = load_settings()
+        configure_logging(settings, console=False)
+        report = run_openwakeword_calibration(settings)
+        print(format_openwakeword_calibration_report(report))
         return 0 if report.is_successful else 1
 
     if "--voice-command-test" in args:

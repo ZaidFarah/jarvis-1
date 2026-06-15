@@ -53,7 +53,7 @@ OpenAI chat uses the configured `SYSTEM_PROMPT`. The default is: `You are Jarvis
 - `wake.py`: detects the configured wake phrase, aliases, and close fuzzy matches using `difflib.SequenceMatcher`.
 - `wake_provider.py`: resolves the selected wake provider, detects OpenWakeWord availability, and keeps Whisper fuzzy wake detection as fallback.
 - `wake_diagnostics.py`: records one microphone clip, transcribes it, runs wake detection, and writes `logs/wake_diagnostics.log`.
-- `openwakeword.py`: checks the installed OpenWakeWord package, verifies model availability, captures a short microphone sample, and writes `logs/openwakeword.log`.
+- `openwakeword.py`: checks the installed OpenWakeWord package, verifies model availability, captures short microphone samples, provides tuning calibration, reports microphone RMS and VAD results, and writes `logs/openwakeword.log`.
 - `voice_command_test.py`: records one wake phrase clip, waits briefly after wake detection, optionally plays a Windows beep, records one command clip using the command duration setting, treats punctuation-only command transcripts as empty, sends valid command text to `AssistantCore`, optionally speaks the response, and writes `logs/voice_command_test.log`.
 - `voice_loop.py`: runs the continuous one-command-at-a-time voice loop, uses the selected wake provider, falls back to Whisper fuzzy wake detection when needed, handles stop commands, speaks accepted assistant responses, applies post-speech cooldowns, reports summary counters, and writes `logs/voice_loop.log`.
 - `conversation.py`: keeps short-term in-memory conversation turns, trims to the configured maximum, and formats recent history for prompts.
