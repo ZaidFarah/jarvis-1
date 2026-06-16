@@ -272,6 +272,31 @@ class AppSettings(BaseSettings):
         default=True,
         validation_alias=AliasChoices("VOICE_LOOP_SPEAK_STATUS", "JARVIS_VOICE_LOOP_SPEAK_STATUS"),
     )
+    voice_follow_up_timeout_seconds: float = Field(
+        default=10.0,
+        ge=1.0,
+        le=30.0,
+        validation_alias=AliasChoices(
+            "VOICE_FOLLOW_UP_TIMEOUT_SECONDS",
+            "JARVIS_VOICE_FOLLOW_UP_TIMEOUT_SECONDS",
+        ),
+    )
+    voice_response_mode: str = Field(
+        default="concise",
+        validation_alias=AliasChoices("VOICE_RESPONSE_MODE", "JARVIS_VOICE_RESPONSE_MODE"),
+    )
+    voice_concise_instruction: str = Field(
+        default="Answer voice commands in one or two short sentences unless the user asks for detail.",
+        validation_alias=AliasChoices("VOICE_CONCISE_INSTRUCTION", "JARVIS_VOICE_CONCISE_INSTRUCTION"),
+    )
+    voice_loop_speak_standby: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("VOICE_LOOP_SPEAK_STANDBY", "JARVIS_VOICE_LOOP_SPEAK_STANDBY"),
+    )
+    voice_loop_standby_message: str = Field(
+        default="Standing by.",
+        validation_alias=AliasChoices("VOICE_LOOP_STANDBY_MESSAGE", "JARVIS_VOICE_LOOP_STANDBY_MESSAGE"),
+    )
     agent_enabled: bool = Field(
         default=False,
         validation_alias=AliasChoices("AGENT_ENABLED", "JARVIS_AGENT_ENABLED"),
@@ -823,6 +848,23 @@ class AppSettings(BaseSettings):
         cleaned = value.strip()
         if not cleaned:
             raise ValueError("OpenAI vision model cannot be empty.")
+        return cleaned
+
+    @field_validator("voice_response_mode")
+    @classmethod
+    def normalize_voice_response_mode(cls, value: str) -> str:
+        cleaned = value.strip().lower().replace("-", "_")
+        allowed = {"concise", "normal"}
+        if cleaned not in allowed:
+            raise ValueError(f"Unsupported voice response mode: {value}")
+        return cleaned
+
+    @field_validator("voice_concise_instruction", "voice_loop_standby_message")
+    @classmethod
+    def normalize_voice_text(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("Voice text setting cannot be empty.")
         return cleaned
 
     @field_validator("system_prompt")

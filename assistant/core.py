@@ -96,6 +96,7 @@ class AssistantCore:
         self.agent_runtime: Any | None = None
         if self.settings.agent_enabled:
             self.agent_runtime = self._create_agent_runtime()
+        self._voice_mode_active = False
         if memory_store is not None:
             self.memory_store = memory_store
         elif self.settings.memory_enabled:
@@ -117,10 +118,27 @@ class AssistantCore:
 
         return self.handle_command_direct(cleaned)
 
-    def handle_command_direct(self, command: str) -> AssistantResponse:
+    def handle_voice_command(self, command: str) -> AssistantResponse:
         cleaned = command.strip()
         if not cleaned:
             return AssistantResponse(text="Please enter a command first.", accepted=False)
+
+        previous_voice_mode = self._voice_mode_active
+        self._voice_mode_active = self.settings.voice_response_mode == "concise"
+        try:
+            if self.settings.agent_enabled and self.agent_runtime is not None:
+                result = self.agent_runtime.run(cleaned)
+                return result.response
+
+            return self.handle_command_direct(cleaned, voice_mode=True)
+        finally:
+            self._voice_mode_active = previous_voice_mode
+
+    def handle_command_direct(self, command: str, *, voice_mode: bool = False) -> AssistantResponse:
+        cleaned = command.strip()
+        if not cleaned:
+            return AssistantResponse(text="Please enter a command first.", accepted=False)
+        voice_mode = voice_mode or self._voice_mode_active
 
         if cleaned.lower() == "reset conversation":
             self.reset_conversation()
@@ -168,7 +186,7 @@ class AssistantCore:
         try:
             chat_result = self.openai_service.chat(
                 cleaned,
-                system_prompt=self.settings.system_prompt,
+                system_prompt=self._chat_system_prompt(voice_mode=voice_mode),
                 conversation_history=history_context or None,
             )
         except Exception as exc:
@@ -189,6 +207,11 @@ class AssistantCore:
         from agent.runtime import AgentRuntime
 
         return AgentRuntime(settings=self.settings, assistant=self)
+
+    def _chat_system_prompt(self, *, voice_mode: bool = False) -> str:
+        if voice_mode and self.settings.voice_response_mode == "concise":
+            return f"{self.settings.system_prompt}\n\n{self.settings.voice_concise_instruction}"
+        return self.settings.system_prompt
 
     def _fallback_response(self, command: str, error: str | None = None) -> AssistantResponse:
         return AssistantResponse(

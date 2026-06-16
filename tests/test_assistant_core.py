@@ -227,6 +227,52 @@ def test_assistant_core_routes_to_openai_when_enabled() -> None:
     assert service.messages == ["status report"]
 
 
+def test_assistant_core_text_chat_keeps_normal_prompt_when_voice_is_concise() -> None:
+    service = FakeOpenAIService(OpenAIChatResult(success=True, text="OpenAI answer", used_openai=True))
+    settings = AppSettings(_env_file=None, openai_enabled=True, openai_api_key="sk-test")
+    assistant = AssistantCore(settings=settings, openai_service=service)
+
+    response = assistant.handle_command("status report")
+
+    assert response.source == "openai"
+    assert service.prompts == [settings.system_prompt]
+    assert settings.voice_concise_instruction not in (service.prompts[0] or "")
+
+
+def test_assistant_core_voice_command_uses_concise_prompt_when_configured() -> None:
+    service = FakeOpenAIService(OpenAIChatResult(success=True, text="Short answer.", used_openai=True))
+    settings = AppSettings(
+        _env_file=None,
+        openai_enabled=True,
+        openai_api_key="sk-test",
+        voice_response_mode="concise",
+        voice_concise_instruction="Keep it short for speech.",
+    )
+    assistant = AssistantCore(settings=settings, openai_service=service)
+
+    response = assistant.handle_voice_command("status report")
+
+    assert response.source == "openai"
+    assert service.messages == ["status report"]
+    assert service.prompts == [f"{settings.system_prompt}\n\nKeep it short for speech."]
+
+
+def test_assistant_core_voice_command_can_use_normal_prompt() -> None:
+    service = FakeOpenAIService(OpenAIChatResult(success=True, text="Normal answer.", used_openai=True))
+    settings = AppSettings(
+        _env_file=None,
+        openai_enabled=True,
+        openai_api_key="sk-test",
+        voice_response_mode="normal",
+    )
+    assistant = AssistantCore(settings=settings, openai_service=service)
+
+    response = assistant.handle_voice_command("status report")
+
+    assert response.source == "openai"
+    assert service.prompts == [settings.system_prompt]
+
+
 def test_assistant_core_uses_fallback_when_openai_disabled() -> None:
     service = FakeOpenAIService(
         OpenAIChatResult(success=False, text="", used_openai=False, safe_error="OpenAI is disabled.")

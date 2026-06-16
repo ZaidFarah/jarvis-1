@@ -144,6 +144,16 @@ The GUI now uses a tabbed dark interface with quick actions for voice, tools, re
 - If no follow-up is heard, or the retry is still invalid, Jarvis returns to sleep and only speaks `Standing by.` after follow-up mode is finished.
 - Whisper fuzzy wake remains the default live wake provider; OpenWakeWord remains optional and diagnostic-first.
 
+## v0.2.0 Phase 8 Scope
+
+- Voice responses use a voice-specific `AssistantCore` path.
+- `VOICE_RESPONSE_MODE=concise` is the default for voice commands only; normal text chat keeps the normal `SYSTEM_PROMPT`.
+- `VOICE_CONCISE_INSTRUCTION` controls the extra instruction appended to voice-mode OpenAI prompts.
+- `VOICE_FOLLOW_UP_TIMEOUT_SECONDS` controls the follow-up listening window.
+- Spoken standby can be disabled with `VOICE_LOOP_SPEAK_STANDBY=false` or changed with `VOICE_LOOP_STANDBY_MESSAGE`.
+- Assistant response speech no longer adds an extra cooldown before follow-up listening starts.
+- Voice loop TTS calls are centralized as a low-risk foundation for later interruption work.
+
 ## Phase 10 Scope
 
 - In-memory short-term conversation history for the current session only.
@@ -454,10 +464,10 @@ The voice loop keeps Jarvis running until stopped:
 9. Rejects bad short transcripts locally with `I didn’t catch that, please repeat.` and retries command capture once by default.
 10. Sends accepted commands to `AssistantCore`.
 11. Speaks accepted responses using the configured TTS provider.
-12. Enters one `Listening for follow-up...` window for about 10 seconds after a successful response.
+12. Enters one configurable `Listening for follow-up...` window after a successful response.
 13. Sends valid follow-up commands to `AssistantCore` without requiring the wake phrase again.
 14. Rejects invalid non-empty follow-ups locally, retries follow-up capture once, and returns to sleep if the retry is invalid or no follow-up is heard.
-15. Speaks `Standing by.` only after follow-up mode is finished and Jarvis is returning to sleep.
+15. Speaks the configured standby message only after follow-up mode is finished and Jarvis is returning to sleep, when standby speech is enabled.
 16. Prints a summary on exit with wake attempts, successful wakes, commands handled, empty commands, and errors.
 
 For GUI visibility, the loop emits explicit events for rejected commands, retrying command capture, follow-up listening, accepted commands and follow-ups, assistant responses, and return-to-sleep state.
@@ -467,6 +477,18 @@ Press Ctrl+C to stop the CLI loop. Detailed voice loop logs are saved to:
 ```text
 logs/voice_loop.log
 ```
+
+Voice loop polish settings:
+
+```dotenv
+VOICE_FOLLOW_UP_TIMEOUT_SECONDS=10
+VOICE_RESPONSE_MODE=concise
+VOICE_CONCISE_INSTRUCTION=Answer voice commands in one or two short sentences unless the user asks for detail.
+VOICE_LOOP_SPEAK_STANDBY=true
+VOICE_LOOP_STANDBY_MESSAGE=Standing by.
+```
+
+Set `VOICE_RESPONSE_MODE=normal` to use the standard chat prompt for voice responses. Set `VOICE_LOOP_SPEAK_STANDBY=false` to keep the visual `Standing by.` state without speaking it.
 
 ## OpenAI Check
 

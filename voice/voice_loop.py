@@ -50,7 +50,6 @@ LISTENING_FOR_FOLLOW_UP_PROMPT = "Listening for follow-up..."
 REJECTED_FOLLOW_UP_PREFIX = "Rejected follow-up:"
 ACCEPTED_FOLLOW_UP_PREFIX = "Accepted follow-up:"
 RETRYING_FOLLOW_UP_CAPTURE_MESSAGE = "Retrying follow-up capture..."
-FOLLOW_UP_RECORD_SECONDS = 10.0
 
 
 @dataclass(frozen=True)
@@ -341,7 +340,7 @@ class VoiceLoopRunner:
 
             self._status("Thinking", statuses)
             try:
-                assistant_response = self.assistant.handle_command(cleaned_command)
+                assistant_response = self._handle_voice_command(cleaned_command)
             except Exception as exc:
                 message = f"Assistant command failed: {type(exc).__name__}: {exc}"
                 self.voice_loop_logger.exception(message)
@@ -363,17 +362,7 @@ class VoiceLoopRunner:
 
             if assistant_response.accepted:
                 self._status("Speaking", statuses)
-                tts_result = speak_text(
-                    assistant_response.text,
-                    self.settings,
-                    speak_requested=True,
-                    provider=self.tts_provider,
-                )
-                if tts_result.error:
-                    errors.append(tts_result.error)
-                    self.summary.errors += 1
-                elif tts_result.spoken:
-                    self.sleeper(self.settings.voice_loop_wake_cooldown_seconds)
+                tts_result = self._speak_text(assistant_response.text, errors, sleep_after=False)
             else:
                 break
 
@@ -385,7 +374,7 @@ class VoiceLoopRunner:
                     statuses,
                     errors,
                     listen_prompt=LISTENING_FOR_FOLLOW_UP_PROMPT,
-                    record_seconds=FOLLOW_UP_RECORD_SECONDS,
+                    record_seconds=self.settings.voice_follow_up_timeout_seconds,
                     accepted_prefix=ACCEPTED_FOLLOW_UP_PREFIX,
                     rejected_prefix=REJECTED_FOLLOW_UP_PREFIX,
                     retry_message=RETRYING_FOLLOW_UP_CAPTURE_MESSAGE,
@@ -548,8 +537,8 @@ class VoiceLoopRunner:
         stop_requested: bool = False,
     ) -> VoiceLoopCycleReport:
         self._status(RETURNING_TO_SLEEP_MESSAGE, statuses)
-        if self.settings.voice_loop_speak_status:
-            self._speak_message(RETURNING_TO_SLEEP_MESSAGE, errors)
+        if self.settings.voice_loop_speak_status and self.settings.voice_loop_speak_standby:
+            self._speak_text(self.settings.voice_loop_standby_message, errors, sleep_after=True)
         return self._report(
             wake_transcription,
             wake_detection,
@@ -573,7 +562,16 @@ class VoiceLoopRunner:
         if self.status_callback is not None:
             self.status_callback(message)
 
+    def _handle_voice_command(self, command: str) -> AssistantResponse:
+        handle_voice_command = getattr(self.assistant, "handle_voice_command", None)
+        if callable(handle_voice_command):
+            return handle_voice_command(command)
+        return self.assistant.handle_command(command)
+
     def _speak_message(self, message: str, errors: list[str]) -> TextToSpeechResult:
+        return self._speak_text(message, errors, sleep_after=True)
+
+    def _speak_text(self, message: str, errors: list[str], *, sleep_after: bool) -> TextToSpeechResult:
         tts_result = speak_text(
             message,
             self.settings,
@@ -583,7 +581,7 @@ class VoiceLoopRunner:
         if tts_result.error:
             errors.append(tts_result.error)
             self.summary.errors += 1
-        elif tts_result.spoken:
+        elif tts_result.spoken and sleep_after:
             self.sleeper(self.settings.voice_loop_wake_cooldown_seconds)
         return tts_result
 

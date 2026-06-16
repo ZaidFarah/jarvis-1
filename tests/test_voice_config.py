@@ -44,6 +44,11 @@ def test_voice_settings_defaults_are_lightweight() -> None:
     assert settings.voice_loop_max_empty_commands == 3
     assert settings.voice_loop_wake_cooldown_seconds == 1.5
     assert settings.voice_loop_speak_status is True
+    assert settings.voice_follow_up_timeout_seconds == 10.0
+    assert settings.voice_response_mode == "concise"
+    assert settings.voice_concise_instruction == "Answer voice commands in one or two short sentences unless the user asks for detail."
+    assert settings.voice_loop_speak_standby is True
+    assert settings.voice_loop_standby_message == "Standing by."
     assert settings.tts_enabled is False
     assert settings.tts_provider == "openai"
     assert settings.tts_voice_name == ""
@@ -144,6 +149,11 @@ def test_wake_settings_read_environment(monkeypatch) -> None:
     monkeypatch.setenv("VOICE_LOOP_MAX_EMPTY_COMMANDS", "5")
     monkeypatch.setenv("VOICE_LOOP_WAKE_COOLDOWN_SECONDS", "2.5")
     monkeypatch.setenv("VOICE_LOOP_SPEAK_STATUS", "false")
+    monkeypatch.setenv("VOICE_FOLLOW_UP_TIMEOUT_SECONDS", "6.5")
+    monkeypatch.setenv("VOICE_RESPONSE_MODE", "normal")
+    monkeypatch.setenv("VOICE_CONCISE_INSTRUCTION", "  Keep voice answers short.  ")
+    monkeypatch.setenv("VOICE_LOOP_SPEAK_STANDBY", "false")
+    monkeypatch.setenv("VOICE_LOOP_STANDBY_MESSAGE", "  Awaiting wake phrase.  ")
 
     settings = AppSettings(_env_file=None)
 
@@ -168,3 +178,8 @@ def test_wake_settings_read_environment(monkeypatch) -> None:
     assert settings.voice_loop_max_empty_commands == 5
     assert settings.voice_loop_wake_cooldown_seconds == 2.5
     assert settings.voice_loop_speak_status is False
+    assert settings.voice_follow_up_timeout_seconds == 6.5
+    assert settings.voice_response_mode == "normal"
+    assert settings.voice_concise_instruction == "Keep voice answers short."
+    assert settings.voice_loop_speak_standby is False
+    assert settings.voice_loop_standby_message == "Awaiting wake phrase."
