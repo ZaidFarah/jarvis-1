@@ -239,6 +239,13 @@ class AppSettings(BaseSettings):
         default="you,uh,um,hmm,yeah,okay",
         validation_alias=AliasChoices("VOICE_COMMAND_REJECT_PHRASES", "JARVIS_VOICE_COMMAND_REJECT_PHRASES"),
     )
+    voice_command_incomplete_phrases: str = Field(
+        default="what's the,what is the,tell me about,can you,could you,please",
+        validation_alias=AliasChoices(
+            "VOICE_COMMAND_INCOMPLETE_PHRASES",
+            "JARVIS_VOICE_COMMAND_INCOMPLETE_PHRASES",
+        ),
+    )
     voice_command_retry_on_reject: bool = Field(
         default=True,
         validation_alias=AliasChoices("VOICE_COMMAND_RETRY_ON_REJECT", "JARVIS_VOICE_COMMAND_RETRY_ON_REJECT"),
@@ -273,7 +280,7 @@ class AppSettings(BaseSettings):
         validation_alias=AliasChoices("VOICE_LOOP_SPEAK_STATUS", "JARVIS_VOICE_LOOP_SPEAK_STATUS"),
     )
     voice_follow_up_timeout_seconds: float = Field(
-        default=10.0,
+        default=15.0,
         ge=1.0,
         le=30.0,
         validation_alias=AliasChoices(
@@ -290,7 +297,7 @@ class AppSettings(BaseSettings):
         validation_alias=AliasChoices("VOICE_CONCISE_INSTRUCTION", "JARVIS_VOICE_CONCISE_INSTRUCTION"),
     )
     voice_loop_speak_standby: bool = Field(
-        default=True,
+        default=False,
         validation_alias=AliasChoices("VOICE_LOOP_SPEAK_STANDBY", "JARVIS_VOICE_LOOP_SPEAK_STANDBY"),
     )
     voice_loop_standby_message: str = Field(
@@ -891,6 +898,14 @@ class AppSettings(BaseSettings):
     @property
     def voice_command_reject_phrase_list(self) -> list[str]:
         phrases = [item.strip().lower() for item in self.voice_command_reject_phrases.replace("\n", ",").split(",")]
+        return [phrase for phrase in phrases if phrase]
+
+    @property
+    def voice_command_incomplete_phrase_list(self) -> list[str]:
+        phrases = [
+            item.strip().lower()
+            for item in self.voice_command_incomplete_phrases.replace("\n", ",").split(",")
+        ]
         return [phrase for phrase in phrases if phrase]
 
     @property

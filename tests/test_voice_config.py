@@ -38,16 +38,24 @@ def test_voice_settings_defaults_are_lightweight() -> None:
     assert settings.voice_command_record_seconds == 7.0
     assert settings.voice_command_min_words == 2
     assert settings.voice_command_reject_phrase_list == ["you", "uh", "um", "hmm", "yeah", "okay"]
+    assert settings.voice_command_incomplete_phrase_list == [
+        "what's the",
+        "what is the",
+        "tell me about",
+        "can you",
+        "could you",
+        "please",
+    ]
     assert settings.voice_command_retry_on_reject is True
     assert settings.voice_command_max_retries == 1
     assert settings.voice_loop_enabled is False
     assert settings.voice_loop_max_empty_commands == 3
     assert settings.voice_loop_wake_cooldown_seconds == 1.5
     assert settings.voice_loop_speak_status is True
-    assert settings.voice_follow_up_timeout_seconds == 10.0
+    assert settings.voice_follow_up_timeout_seconds == 15.0
     assert settings.voice_response_mode == "concise"
     assert settings.voice_concise_instruction == "Answer voice commands in one or two short sentences unless the user asks for detail."
-    assert settings.voice_loop_speak_standby is True
+    assert settings.voice_loop_speak_standby is False
     assert settings.voice_loop_standby_message == "Standing by."
     assert settings.tts_enabled is False
     assert settings.tts_provider == "openai"
@@ -143,6 +151,7 @@ def test_wake_settings_read_environment(monkeypatch) -> None:
     monkeypatch.setenv("VOICE_COMMAND_RECORD_SECONDS", "8")
     monkeypatch.setenv("VOICE_COMMAND_MIN_WORDS", "3")
     monkeypatch.setenv("VOICE_COMMAND_REJECT_PHRASES", "you, nope")
+    monkeypatch.setenv("VOICE_COMMAND_INCOMPLETE_PHRASES", "what's the, can you")
     monkeypatch.setenv("VOICE_COMMAND_RETRY_ON_REJECT", "false")
     monkeypatch.setenv("VOICE_COMMAND_MAX_RETRIES", "2")
     monkeypatch.setenv("VOICE_LOOP_ENABLED", "true")
@@ -172,6 +181,7 @@ def test_wake_settings_read_environment(monkeypatch) -> None:
     assert settings.voice_command_record_seconds == 8.0
     assert settings.voice_command_min_words == 3
     assert settings.voice_command_reject_phrase_list == ["you", "nope"]
+    assert settings.voice_command_incomplete_phrase_list == ["what's the", "can you"]
     assert settings.voice_command_retry_on_reject is False
     assert settings.voice_command_max_retries == 2
     assert settings.voice_loop_enabled is True

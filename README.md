@@ -154,6 +154,16 @@ The GUI now uses a tabbed dark interface with quick actions for voice, tools, re
 - Assistant response speech no longer adds an extra cooldown before follow-up listening starts.
 - Voice loop TTS calls are centralized as a low-risk foundation for later interruption work.
 
+## v0.2.0 Phase 9 Scope
+
+- Follow-up listening is more forgiving with `VOICE_FOLLOW_UP_TIMEOUT_SECONDS=15` by default.
+- `Standing by.` remains the visual return-to-sleep state, but it is not spoken by default because it can delay natural follow-up speech.
+- `VOICE_COMMAND_INCOMPLETE_PHRASES` rejects broken partial transcripts such as `what's the`, `what is the`, `tell me about`, `can you`, `could you`, and `please`.
+- Incomplete transcripts are rejected locally before `AssistantCore` or OpenAI and get one retry capture.
+- Live voice-loop logging includes average RMS, max RMS, VAD crossed status, raw transcript, cleaned transcript, accepted status, and rejection reason.
+- `logs/voice_loop.log` uses a managed append-only Loguru sink to avoid Windows rotation/retention races.
+- The GUI voice surface now shows a larger assistant state area, orb feedback, transcript panel, response panel, live provider/wake/RMS/VAD diagnostics, and clearer voice-loop controls.
+
 ## Phase 10 Scope
 
 - In-memory short-term conversation history for the current session only.
@@ -407,11 +417,12 @@ VOICE_COMMAND_START_DELAY_SECONDS=1.0
 VOICE_COMMAND_RECORD_SECONDS=7
 VOICE_COMMAND_MIN_WORDS=2
 VOICE_COMMAND_REJECT_PHRASES=you,uh,um,hmm,yeah,okay
+VOICE_COMMAND_INCOMPLETE_PHRASES=what's the,what is the,tell me about,can you,could you,please
 VOICE_COMMAND_RETRY_ON_REJECT=true
 VOICE_COMMAND_MAX_RETRIES=1
 ```
 
-If the command transcription is empty, punctuation-only, too short, or one of the configured rejected phrases, Jarvis prints:
+If the command transcription is empty, punctuation-only, too short, one of the configured rejected phrases, or an incomplete partial phrase, Jarvis prints:
 
 ```text
 I didn’t catch that, please repeat.
@@ -466,11 +477,11 @@ The voice loop keeps Jarvis running until stopped:
 11. Speaks accepted responses using the configured TTS provider.
 12. Enters one configurable `Listening for follow-up...` window after a successful response.
 13. Sends valid follow-up commands to `AssistantCore` without requiring the wake phrase again.
-14. Rejects invalid non-empty follow-ups locally, retries follow-up capture once, and returns to sleep if the retry is invalid or no follow-up is heard.
+14. Rejects invalid or incomplete non-empty follow-ups locally, retries follow-up capture once, and returns to sleep if the retry is invalid or no follow-up is heard.
 15. Speaks the configured standby message only after follow-up mode is finished and Jarvis is returning to sleep, when standby speech is enabled.
 16. Prints a summary on exit with wake attempts, successful wakes, commands handled, empty commands, and errors.
 
-For GUI visibility, the loop emits explicit events for rejected commands, retrying command capture, follow-up listening, accepted commands and follow-ups, assistant responses, and return-to-sleep state.
+For GUI visibility, the loop emits explicit events for rejected commands, retrying command capture, follow-up listening, accepted commands and follow-ups, assistant responses, return-to-sleep state, wake diagnostics, and command capture RMS/VAD diagnostics.
 
 Press Ctrl+C to stop the CLI loop. Detailed voice loop logs are saved to:
 
@@ -481,10 +492,10 @@ logs/voice_loop.log
 Voice loop polish settings:
 
 ```dotenv
-VOICE_FOLLOW_UP_TIMEOUT_SECONDS=10
+VOICE_FOLLOW_UP_TIMEOUT_SECONDS=15
 VOICE_RESPONSE_MODE=concise
 VOICE_CONCISE_INSTRUCTION=Answer voice commands in one or two short sentences unless the user asks for detail.
-VOICE_LOOP_SPEAK_STANDBY=true
+VOICE_LOOP_SPEAK_STANDBY=false
 VOICE_LOOP_STANDBY_MESSAGE=Standing by.
 ```
 

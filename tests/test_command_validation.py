@@ -35,8 +35,24 @@ def test_filler_commands_rejected() -> None:
         assert result.rejection_reason == f"rejected phrase: {phrase}"
 
 
+def test_incomplete_commands_rejected() -> None:
+    for phrase in ["what's the", "what is the", "tell me about", "can you", "could you", "please"]:
+        result = validate_cleaned_command(
+            phrase,
+            reject_phrases=REJECT_PHRASES,
+            incomplete_phrases=["what's the", "what is the", "tell me about", "can you", "could you", "please"],
+        )
+
+        assert result.accepted is False
+        assert result.rejection_reason == f"incomplete transcript: {phrase}"
+
+
 def test_valid_command_accepted() -> None:
-    result = validate_cleaned_command("status report", reject_phrases=REJECT_PHRASES)
+    result = validate_cleaned_command(
+        "status report",
+        reject_phrases=REJECT_PHRASES,
+        incomplete_phrases=["what's the", "what is the", "tell me about", "can you", "could you", "please"],
+    )
 
     assert result.accepted is True
     assert result.rejection_reason is None

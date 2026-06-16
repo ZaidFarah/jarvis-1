@@ -8,6 +8,7 @@ from voice.voice_command_test import COMMAND_PROMPT, LISTENING_FOR_COMMAND_PROMP
 from voice.voice_loop import (
     ACCEPTED_COMMAND_PREFIX,
     ACCEPTED_FOLLOW_UP_PREFIX,
+    CAPTURE_DIAGNOSTICS_PREFIX,
     LISTENING_FOR_FOLLOW_UP_PROMPT,
     REJECTED_COMMAND_PREFIX,
     REJECTED_FOLLOW_UP_PREFIX,
@@ -15,6 +16,7 @@ from voice.voice_loop import (
     RETRYING_COMMAND_CAPTURE_MESSAGE,
     RETRYING_FOLLOW_UP_CAPTURE_MESSAGE,
     STOP_COMMAND_DETECTED_MESSAGE,
+    WAKE_DIAGNOSTICS_PREFIX,
     VoiceLoopRunner,
     is_stop_command,
 )
@@ -342,6 +344,52 @@ def test_voice_loop_rejects_bad_command_before_openai_then_valid_retry_is_sent()
     assert openai_service.prompts == [f"{settings.system_prompt}\n\n{settings.voice_concise_instruction}"]
 
 
+def test_voice_loop_retries_incomplete_command_before_assistant_call() -> None:
+    settings = AppSettings(_env_file=None)
+    settings.voice_loop_speak_status = False
+    assistant = SpyAssistant()
+    provider = FakeProvider(["hey jarvis", "what's the", "weather report", ""])
+    events: list[str] = []
+
+    report = VoiceLoopRunner(
+        settings=settings,
+        assistant=assistant,
+        provider=provider,
+        recorder=fake_recorder,
+        sleeper=no_sleep,
+        beeper=no_beep,
+        status_callback=events.append,
+    ).run_once()
+
+    assert report.cleaned_command == "weather report"
+    assert report.command_validation.accepted is True
+    assert assistant.commands == ["weather report"]
+    assert f"{REJECTED_COMMAND_PREFIX} what's the (incomplete transcript: what's the)" in events
+    assert RETRYING_COMMAND_CAPTURE_MESSAGE in events
+    assert f"{ACCEPTED_COMMAND_PREFIX} weather report" in events
+
+
+def test_voice_loop_incomplete_command_retries_once_even_when_reject_retry_disabled() -> None:
+    settings = AppSettings(_env_file=None)
+    settings.voice_loop_speak_status = False
+    settings.voice_command_retry_on_reject = False
+    assistant = SpyAssistant()
+    provider = FakeProvider(["hey jarvis", "can you", "status report", ""])
+
+    report = VoiceLoopRunner(
+        settings=settings,
+        assistant=assistant,
+        provider=provider,
+        recorder=fake_recorder,
+        sleeper=no_sleep,
+        beeper=no_beep,
+    ).run_once()
+
+    assert report.cleaned_command == "status report"
+    assert assistant.commands == ["status report"]
+    assert report.statuses.count(RETRYING_COMMAND_CAPTURE_MESSAGE) == 1
+
+
 def test_voice_loop_valid_follow_up_does_not_require_wake_phrase() -> None:
     settings = AppSettings(_env_file=None)
     settings.voice_loop_speak_status = False
@@ -398,6 +446,30 @@ def test_voice_loop_rejects_invalid_follow_up_before_openai_then_valid_retry_is_
     assert f"{ACCEPTED_FOLLOW_UP_PREFIX} second question" in events
 
 
+def test_voice_loop_retries_incomplete_follow_up_and_sends_valid_retry() -> None:
+    settings = AppSettings(_env_file=None)
+    settings.voice_loop_speak_status = False
+    assistant = SpyAssistant()
+    provider = FakeProvider(["hey jarvis", "status report", "tell me about", "weather report"])
+    events: list[str] = []
+
+    report = VoiceLoopRunner(
+        settings=settings,
+        assistant=assistant,
+        provider=provider,
+        recorder=fake_recorder,
+        sleeper=no_sleep,
+        beeper=no_beep,
+        status_callback=events.append,
+    ).run_once()
+
+    assert report.cleaned_command == "weather report"
+    assert assistant.commands == ["status report", "weather report"]
+    assert f"{REJECTED_FOLLOW_UP_PREFIX} tell me about (incomplete transcript: tell me about)" in events
+    assert RETRYING_FOLLOW_UP_CAPTURE_MESSAGE in events
+    assert f"{ACCEPTED_FOLLOW_UP_PREFIX} weather report" in events
+
+
 def test_voice_loop_returns_to_sleep_when_follow_up_retry_is_invalid() -> None:
     settings = AppSettings(_env_file=None)
     settings.voice_loop_speak_status = False
@@ -452,6 +524,38 @@ def test_voice_loop_follow_up_timeout_returns_to_sleep_without_wake_retry() -> N
     assert NO_COMMAND_DETECTED_MESSAGE not in report.statuses
     assert report.statuses[-1] == RETURNING_TO_SLEEP_MESSAGE
     assert durations[-1] == 4.25
+
+
+def test_voice_loop_emits_live_audio_diagnostics() -> None:
+    settings = AppSettings(_env_file=None)
+    settings.voice_loop_speak_status = False
+    assistant = SpyAssistant()
+    provider = FakeProvider(["hey jarvis", "status report", ""])
+    events: list[str] = []
+
+    report = VoiceLoopRunner(
+        settings=settings,
+        assistant=assistant,
+        provider=provider,
+        recorder=fake_recorder,
+        sleeper=no_sleep,
+        beeper=no_beep,
+        status_callback=events.append,
+    ).run_once()
+
+    wake_diagnostics = [event for event in events if event.startswith(WAKE_DIAGNOSTICS_PREFIX)]
+    capture_diagnostics = [event for event in events if event.startswith(CAPTURE_DIAGNOSTICS_PREFIX)]
+
+    assert wake_diagnostics
+    assert "score=" in wake_diagnostics[0]
+    assert "average_rms=" in wake_diagnostics[0]
+    assert capture_diagnostics
+    assert "provider=fake_stt" in capture_diagnostics[0]
+    assert "average_rms=" in capture_diagnostics[0]
+    assert "max_rms=" in capture_diagnostics[0]
+    assert "vad_crossed=yes" in capture_diagnostics[0]
+    assert report.command_audio_metrics is not None
+    assert report.command_audio_metrics.average_rms > 0
 
 
 def test_voice_loop_does_not_sleep_between_response_and_follow_up_capture() -> None:

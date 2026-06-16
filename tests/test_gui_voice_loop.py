@@ -12,12 +12,14 @@ from voice.voice_command_test import NO_COMMAND_DETECTED_MESSAGE
 from voice.voice_loop import (
     ACCEPTED_COMMAND_PREFIX,
     ACCEPTED_FOLLOW_UP_PREFIX,
+    CAPTURE_DIAGNOSTICS_PREFIX,
     LISTENING_FOR_FOLLOW_UP_PROMPT,
     REJECTED_COMMAND_PREFIX,
     REJECTED_FOLLOW_UP_PREFIX,
     RETURNING_TO_SLEEP_MESSAGE,
     RETRYING_COMMAND_CAPTURE_MESSAGE,
     RETRYING_FOLLOW_UP_CAPTURE_MESSAGE,
+    WAKE_DIAGNOSTICS_PREFIX,
 )
 
 
@@ -51,6 +53,10 @@ def test_voice_loop_gui_state_updates_controls_and_status_fields() -> None:
         "Diagnostics",
     ]
     assert window.mode_value.text() == "Idle"
+    assert window.voice_state_value.text() == "Sleeping"
+    assert window.voice_detail_value.text() == "Waiting for wake phrase"
+    assert window.voice_response_panel.toPlainText() == "Jarvis responses will appear here."
+    assert window.voice_provider_value.text() == settings.speech_to_text_provider
     assert window.agent_enabled_value.text() in {"Enabled", "Disabled"}
     assert window.start_voice_loop_button.isEnabled() is True
     assert window.stop_voice_loop_button.isEnabled() is False
@@ -104,6 +110,7 @@ def test_voice_loop_gui_state_updates_controls_and_status_fields() -> None:
     assert window.voice_loop_status_value.text() == RETURNING_TO_SLEEP_MESSAGE
     assert window.voice_loop_last_command_value.text() == "status report"
     assert window.voice_loop_last_response_value.text() == "handled status report"
+    assert window.voice_response_panel.toPlainText() == "handled status report"
     assert window.reminders_check_value.text() == "Due reminders:"
     assert window.notification_result_value.text() == "Delivered"
     assert window.health_result_value.text() == "Completed"
@@ -152,7 +159,7 @@ def test_voice_loop_gui_displays_reject_retry_accept_response_and_sleep() -> Non
     assert NO_COMMAND_DETECTED_MESSAGE in transcript
     assert RETRYING_COMMAND_CAPTURE_MESSAGE in transcript
     assert f"{ACCEPTED_COMMAND_PREFIX} status report" in transcript
-    assert "Last Jarvis response: handled status report" in transcript
+    assert "Jarvis: handled status report" in transcript
 
     window.close()
     app.processEvents()
@@ -182,12 +189,40 @@ def test_voice_loop_gui_displays_follow_up_states() -> None:
     assert window.voice_loop_last_command_value.text() == "weather report"
     assert window.voice_loop_last_response_value.text() == "handled weather report"
     assert window.voice_loop_status_value.text() == RETURNING_TO_SLEEP_MESSAGE
+    assert window.voice_response_panel.toPlainText() == "handled weather report"
     transcript = window.transcript.toPlainText()
     assert LISTENING_FOR_FOLLOW_UP_PROMPT in transcript
     assert f"{REJECTED_FOLLOW_UP_PREFIX} you (rejected phrase: you)" in transcript
     assert RETRYING_FOLLOW_UP_CAPTURE_MESSAGE in transcript
     assert f"{ACCEPTED_FOLLOW_UP_PREFIX} weather report" in transcript
-    assert "Last Jarvis response: handled weather report" in transcript
+    assert "Jarvis: handled weather report" in transcript
+
+    window.close()
+    app.processEvents()
+
+
+def test_voice_loop_gui_updates_live_diagnostics_without_state_regression() -> None:
+    app = _app()
+    settings = AppSettings(_env_file=None)
+    window = JarvisMainWindow(settings=settings, assistant=StubAssistant())
+
+    window._handle_voice_loop_status(LISTENING_FOR_FOLLOW_UP_PROMPT)
+    assert window.status.value == "Follow-up"
+
+    window._handle_voice_loop_status(
+        f"{WAKE_DIAGNOSTICS_PREFIX} provider=whisper_fuzzy score=0.810 threshold=0.720 "
+        "average_rms=0.010000 max_rms=0.020000 vad_crossed=yes"
+    )
+    window._handle_voice_loop_status(
+        f"{CAPTURE_DIAGNOSTICS_PREFIX} provider=fake_stt sample_rate=16000 record_seconds=15.00 "
+        "average_rms=0.015000 max_rms=0.040000 vad_crossed=yes"
+    )
+
+    assert window.status.value == "Follow-up"
+    assert window.voice_provider_value.text() == "fake_stt"
+    assert window.voice_wake_score_value.text() == "0.810 / 0.720"
+    assert window.voice_rms_value.text() == "0.015000 / 0.040000"
+    assert window.voice_vad_value.text() == "yes"
 
     window.close()
     app.processEvents()

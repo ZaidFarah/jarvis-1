@@ -20,6 +20,7 @@ def validate_cleaned_command(
     *,
     min_words: int = 2,
     reject_phrases: Sequence[str] | str = (),
+    incomplete_phrases: Sequence[str] | str = (),
 ) -> CommandValidationResult:
     command = " ".join(str(cleaned_command).strip().split())
     if not command:
@@ -35,6 +36,10 @@ def validate_cleaned_command(
     rejected = set(_normalize_reject_phrases(reject_phrases))
     if normalized in rejected:
         return CommandValidationResult(False, command, f"rejected phrase: {normalized}")
+
+    incomplete = _normalize_phrase_map(incomplete_phrases)
+    if normalized in incomplete:
+        return CommandValidationResult(False, command, f"incomplete transcript: {incomplete[normalized]}")
 
     word_count = len(normalized.split())
     if word_count < max(1, min_words):
@@ -68,6 +73,15 @@ def _normalize_reject_phrases(value: Sequence[str] | str) -> list[str]:
         if cleaned and cleaned not in normalized:
             normalized.append(cleaned)
     return normalized
+
+
+def _normalize_phrase_map(value: Sequence[str] | str) -> dict[str, str]:
+    phrases: dict[str, str] = {}
+    for phrase in parse_reject_phrases(value):
+        normalized = _normalize_phrase(phrase)
+        if normalized and normalized not in phrases:
+            phrases[normalized] = phrase.strip().lower()
+    return phrases
 
 
 def _normalize_phrase(value: str) -> str:

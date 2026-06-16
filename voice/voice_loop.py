@@ -11,16 +11,14 @@ from loguru import logger
 
 from assistant.core import AssistantCore, AssistantResponse
 from config.settings import AppSettings
+from services.logging_service import add_managed_file_sink
+from voice.command_capture import AudioCaptureMetrics, calculate_audio_capture_metrics
 from voice.command_validation import CommandValidationResult, validate_cleaned_command
 from voice.stt import create_speech_to_text_provider
 from voice.tts import TextToSpeechResult, speak_text
 from voice.voice_command_test import COMMAND_PROMPT, LISTENING_FOR_COMMAND_PROMPT, NO_COMMAND_DETECTED_MESSAGE
 from voice.wake import WakeDetectionResult, WakeDetector, remove_wake_phrase_prefix
 from voice.wake_provider import OpenWakeWordWakeProvider, WakeProviderResolution, create_openwakeword_provider, resolve_wake_provider
-
-
-_VOICE_LOOP_LOG_SINK_ID: int | None = None
-_VOICE_LOOP_LOG_FILE: Path | None = None
 
 
 StatusCallback = Callable[[str], None]
@@ -50,6 +48,8 @@ LISTENING_FOR_FOLLOW_UP_PROMPT = "Listening for follow-up..."
 REJECTED_FOLLOW_UP_PREFIX = "Rejected follow-up:"
 ACCEPTED_FOLLOW_UP_PREFIX = "Accepted follow-up:"
 RETRYING_FOLLOW_UP_CAPTURE_MESSAGE = "Retrying follow-up capture..."
+WAKE_DIAGNOSTICS_PREFIX = "Wake diagnostics:"
+CAPTURE_DIAGNOSTICS_PREFIX = "Capture diagnostics:"
 
 
 @dataclass(frozen=True)
@@ -57,6 +57,7 @@ class CommandCaptureResult:
     raw_transcription: str
     cleaned_command: str
     validation: CommandValidationResult
+    audio_metrics: AudioCaptureMetrics | None = None
     no_follow_up: bool = False
     stop_requested: bool = False
 
@@ -92,6 +93,7 @@ class VoiceLoopCycleReport:
     raw_command_transcription: str
     cleaned_command: str
     command_validation: CommandValidationResult
+    command_audio_metrics: AudioCaptureMetrics | None
     assistant_response: AssistantResponse | None
     tts_result: TextToSpeechResult | None
     statuses: list[str]
@@ -175,6 +177,7 @@ class VoiceLoopRunner:
         wake_transcription = ""
         raw_command_transcription = ""
         cleaned_command = ""
+        command_audio_metrics: AudioCaptureMetrics | None = None
         assistant_response: AssistantResponse | None = None
         tts_result: TextToSpeechResult | None = None
         stop_requested = False
@@ -235,6 +238,7 @@ class VoiceLoopRunner:
                     wake_detection.detected,
                     f"{wake_detection.score:.3f}",
                 )
+            self._log_wake_diagnostics(wake_samples, wake_detection)
         except Exception as exc:
             message = f"Wake phrase stage failed: {type(exc).__name__}: {exc}"
             self.voice_loop_logger.exception(message)
@@ -305,6 +309,7 @@ class VoiceLoopRunner:
 
         raw_command_transcription = command_capture.raw_transcription
         cleaned_command = command_capture.cleaned_command
+        command_audio_metrics = command_capture.audio_metrics
         if not command_capture.validation.accepted:
             return self._return_to_sleep_report(
                 wake_transcription,
@@ -315,6 +320,7 @@ class VoiceLoopRunner:
                 tts_result,
                 statuses,
                 errors,
+                command_audio_metrics=command_audio_metrics,
                 stop_requested=command_capture.stop_requested,
             )
 
@@ -335,6 +341,7 @@ class VoiceLoopRunner:
                     tts_result,
                     statuses,
                     errors,
+                    command_audio_metrics=command_audio_metrics,
                     stop_requested=True,
                 )
 
@@ -355,6 +362,7 @@ class VoiceLoopRunner:
                     tts_result,
                     statuses,
                     errors,
+                    command_audio_metrics=command_audio_metrics,
                 )
 
             self._emit(f"Last Jarvis response: {assistant_response.text}")
@@ -395,6 +403,7 @@ class VoiceLoopRunner:
 
             raw_command_transcription = follow_up_capture.raw_transcription
             cleaned_command = follow_up_capture.cleaned_command
+            command_audio_metrics = follow_up_capture.audio_metrics
             follow_up_used = True
 
         return self._return_to_sleep_report(
@@ -406,6 +415,7 @@ class VoiceLoopRunner:
             tts_result,
             statuses,
             errors,
+            command_audio_metrics=command_audio_metrics,
             stop_requested=stop_requested,
         )
 
@@ -415,9 +425,15 @@ class VoiceLoopRunner:
         *,
         listen_prompt: str = LISTENING_FOR_COMMAND_PROMPT,
         record_seconds: float | None = None,
-    ) -> tuple[str, str, CommandValidationResult]:
+    ) -> tuple[str, str, CommandValidationResult, AudioCaptureMetrics]:
         self._status(listen_prompt, statuses)
         command_samples = self.recorder(record_seconds or self.settings.voice_command_record_seconds)
+        audio_metrics = calculate_audio_capture_metrics(
+            command_samples,
+            self.settings.voice_sample_rate,
+            self.settings.voice_vad_threshold,
+        )
+        self._log_capture_audio_diagnostics(audio_metrics, record_seconds or self.settings.voice_command_record_seconds)
         raw_command_transcription = self.provider.transcribe(command_samples, self.settings.voice_sample_rate).text.strip()
         cleaned_command = remove_wake_phrase_prefix(
             raw_command_transcription,
@@ -428,6 +444,7 @@ class VoiceLoopRunner:
             cleaned_command,
             min_words=self.settings.voice_command_min_words,
             reject_phrases=self.settings.voice_command_reject_phrase_list,
+            incomplete_phrases=self.settings.voice_command_incomplete_phrase_list,
         )
         self.voice_loop_logger.info(
             "Command transcription={} cleaned={} accepted={} reason={}",
@@ -436,7 +453,7 @@ class VoiceLoopRunner:
             command_validation.accepted,
             command_validation.rejection_reason or "<none>",
         )
-        return raw_command_transcription, cleaned_command, command_validation
+        return raw_command_transcription, cleaned_command, command_validation, audio_metrics
 
     def _capture_valid_command(
         self,
@@ -453,10 +470,10 @@ class VoiceLoopRunner:
         empty_transcript_is_no_follow_up: bool = False,
         ignored_cleaned_commands: set[str] | None = None,
     ) -> CommandCaptureResult:
-        max_retries = self.settings.voice_command_max_retries if self.settings.voice_command_retry_on_reject else 0
+        base_max_retries = self.settings.voice_command_max_retries if self.settings.voice_command_retry_on_reject else 0
         attempt = 0
         while True:
-            raw_transcription, cleaned_command, validation = self._capture_command(
+            raw_transcription, cleaned_command, validation, audio_metrics = self._capture_command(
                 statuses,
                 listen_prompt=listen_prompt,
                 record_seconds=record_seconds,
@@ -468,6 +485,7 @@ class VoiceLoopRunner:
                     raw_transcription=raw_transcription,
                     cleaned_command=cleaned_command,
                     validation=validation,
+                    audio_metrics=audio_metrics,
                     no_follow_up=True,
                 )
 
@@ -477,6 +495,7 @@ class VoiceLoopRunner:
                     raw_transcription=raw_transcription,
                     cleaned_command=cleaned_command,
                     validation=validation,
+                    audio_metrics=audio_metrics,
                     no_follow_up=True,
                 )
 
@@ -487,6 +506,7 @@ class VoiceLoopRunner:
                     raw_transcription=raw_transcription,
                     cleaned_command=cleaned_command,
                     validation=validation,
+                    audio_metrics=audio_metrics,
                 )
 
             rejection_reason = validation.rejection_reason or "invalid command"
@@ -501,7 +521,8 @@ class VoiceLoopRunner:
             self._status(NO_COMMAND_DETECTED_MESSAGE, statuses)
             if self.settings.voice_loop_speak_status:
                 self._speak_message(NO_COMMAND_DETECTED_MESSAGE, errors)
-            if attempt < max_retries:
+            max_retries_for_rejection = max(base_max_retries, 1 if _is_incomplete_transcript(validation) else 0)
+            if attempt < max_retries_for_rejection:
                 attempt += 1
                 self._status(retry_message, statuses)
                 if retry_start_delay_seconds > 0:
@@ -521,6 +542,7 @@ class VoiceLoopRunner:
                 raw_transcription=raw_transcription,
                 cleaned_command=cleaned_command,
                 validation=validation,
+                audio_metrics=audio_metrics,
                 stop_requested=stop_requested,
             )
 
@@ -534,6 +556,7 @@ class VoiceLoopRunner:
         tts_result: TextToSpeechResult | None,
         statuses: list[str],
         errors: list[str],
+        command_audio_metrics: AudioCaptureMetrics | None = None,
         stop_requested: bool = False,
     ) -> VoiceLoopCycleReport:
         self._status(RETURNING_TO_SLEEP_MESSAGE, statuses)
@@ -548,6 +571,7 @@ class VoiceLoopRunner:
             tts_result,
             statuses,
             errors,
+            command_audio_metrics=command_audio_metrics,
             stop_requested=stop_requested,
         )
 
@@ -595,6 +619,7 @@ class VoiceLoopRunner:
         tts_result: TextToSpeechResult | None,
         statuses: list[str],
         errors: list[str],
+        command_audio_metrics: AudioCaptureMetrics | None = None,
         stop_requested: bool = False,
     ) -> VoiceLoopCycleReport:
         wake_provider_name = self.wake_provider_resolution.effective_provider
@@ -605,6 +630,7 @@ class VoiceLoopRunner:
             cleaned_command,
             min_words=self.settings.voice_command_min_words,
             reject_phrases=self.settings.voice_command_reject_phrase_list,
+            incomplete_phrases=self.settings.voice_command_incomplete_phrase_list,
         )
         return VoiceLoopCycleReport(
             provider_name=self.provider.name,
@@ -617,6 +643,7 @@ class VoiceLoopRunner:
             raw_command_transcription=raw_command_transcription,
             cleaned_command=cleaned_command,
             command_validation=command_validation,
+            command_audio_metrics=command_audio_metrics,
             assistant_response=assistant_response,
             tts_result=tts_result,
             statuses=statuses,
@@ -691,30 +718,62 @@ class VoiceLoopRunner:
             return
 
     def _ensure_voice_loop_log_sink(self) -> None:
-        global _VOICE_LOOP_LOG_FILE, _VOICE_LOOP_LOG_SINK_ID
-        if _VOICE_LOOP_LOG_SINK_ID is not None and _VOICE_LOOP_LOG_FILE == self.log_file:
-            return
-
-        if _VOICE_LOOP_LOG_SINK_ID is not None:
-            try:
-                logger.remove(_VOICE_LOOP_LOG_SINK_ID)
-            except ValueError:
-                pass
-
-        self.settings.log_dir.mkdir(parents=True, exist_ok=True)
-        _VOICE_LOOP_LOG_SINK_ID = logger.add(
+        add_managed_file_sink(
             self.log_file,
             level="DEBUG",
-            rotation="1 MB",
-            retention="7 days",
-            encoding="utf-8",
-            backtrace=False,
-            diagnose=False,
             filter=lambda record: bool(record["extra"].get("voice_loop")),
         )
-        _VOICE_LOOP_LOG_FILE = self.log_file
+
+    def _log_wake_diagnostics(self, samples: list[float], wake_detection: WakeDetectionResult) -> None:
+        metrics = calculate_audio_capture_metrics(
+            samples,
+            self.settings.voice_sample_rate,
+            self.settings.voice_vad_threshold,
+        )
+        self.voice_loop_logger.info(
+            "Wake diagnostics provider={} score={} threshold={} average_rms={} max_rms={} vad_crossed={}",
+            self.wake_provider_resolution.effective_provider,
+            f"{wake_detection.score:.3f}",
+            f"{wake_detection.threshold:.3f}",
+            f"{metrics.average_rms:.6f}",
+            f"{metrics.max_rms:.6f}",
+            metrics.vad_threshold_crossed,
+        )
+        self._emit(
+            f"{WAKE_DIAGNOSTICS_PREFIX} provider={self.wake_provider_resolution.effective_provider} "
+            f"score={wake_detection.score:.3f} threshold={wake_detection.threshold:.3f} "
+            f"average_rms={metrics.average_rms:.6f} max_rms={metrics.max_rms:.6f} "
+            f"vad_crossed={_yes_no(metrics.vad_threshold_crossed)}"
+        )
+
+    def _log_capture_audio_diagnostics(self, metrics: AudioCaptureMetrics, record_seconds: float) -> None:
+        self.voice_loop_logger.info(
+            "Command audio diagnostics provider={} sample_rate={} record_seconds={} average_rms={} max_rms={} "
+            "vad_threshold={} vad_crossed={}",
+            self.provider.name,
+            self.settings.voice_sample_rate,
+            f"{record_seconds:.2f}",
+            f"{metrics.average_rms:.6f}",
+            f"{metrics.max_rms:.6f}",
+            f"{metrics.vad_threshold:.6f}",
+            metrics.vad_threshold_crossed,
+        )
+        self._emit(
+            f"{CAPTURE_DIAGNOSTICS_PREFIX} provider={self.provider.name} "
+            f"sample_rate={self.settings.voice_sample_rate} record_seconds={record_seconds:.2f} "
+            f"average_rms={metrics.average_rms:.6f} max_rms={metrics.max_rms:.6f} "
+            f"vad_crossed={_yes_no(metrics.vad_threshold_crossed)}"
+        )
 
 
 def is_stop_command(command_text: str) -> bool:
     normalized = " ".join(command_text.lower().strip().split())
     return normalized in STOP_COMMANDS
+
+
+def _is_incomplete_transcript(validation: CommandValidationResult) -> bool:
+    return bool(validation.rejection_reason and validation.rejection_reason.startswith("incomplete transcript:"))
+
+
+def _yes_no(value: bool) -> str:
+    return "yes" if value else "no"

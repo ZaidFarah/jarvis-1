@@ -7,6 +7,7 @@ from main import main
 from voice.command_capture import (
     CommandCaptureDiagnosticRunner,
     CommandCaptureReport,
+    calculate_audio_capture_metrics,
     format_command_capture_report,
 )
 from voice.command_validation import validate_cleaned_command
@@ -77,6 +78,15 @@ def test_command_capture_runner_reports_validation_and_audio_levels(tmp_path: Pa
     assert "accepted: no" in text
     assert "rejection reason: rejected phrase: you" in text
     assert "diagnostic log:" in text
+
+
+def test_audio_capture_metrics_helper_reports_rms_and_vad() -> None:
+    metrics = calculate_audio_capture_metrics([0.0, 0.2, -0.2, 0.0], sample_rate=16000, vad_threshold=0.05)
+
+    assert metrics.average_rms > 0
+    assert metrics.max_rms > 0
+    assert metrics.vad_threshold == 0.05
+    assert metrics.vad_threshold_crossed is True
 
 
 def test_command_capture_cli_command_formats_report(tmp_path: Path, monkeypatch, capsys) -> None:

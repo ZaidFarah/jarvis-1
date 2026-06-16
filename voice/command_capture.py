@@ -9,14 +9,19 @@ from typing import Any
 from loguru import logger
 
 from config.settings import AppSettings
+from services.logging_service import add_managed_file_sink
 from voice.command_validation import CommandValidationResult, validate_cleaned_command
 from voice.stt import create_speech_to_text_provider
 from voice.vad import RmsVoiceActivityDetector
 from voice.wake import clean_command_text
 
 
-_COMMAND_CAPTURE_LOG_SINK_ID: int | None = None
-_COMMAND_CAPTURE_LOG_FILE: Path | None = None
+@dataclass(frozen=True)
+class AudioCaptureMetrics:
+    average_rms: float
+    max_rms: float
+    vad_threshold: float
+    vad_threshold_crossed: bool
 
 
 @dataclass(frozen=True)
@@ -77,6 +82,7 @@ class CommandCaptureDiagnosticRunner:
             cleaned_command,
             min_words=self.settings.voice_command_min_words,
             reject_phrases=self.settings.voice_command_reject_phrase_list,
+            incomplete_phrases=self.settings.voice_command_incomplete_phrase_list,
         )
 
         self.capture_logger.info(
@@ -94,19 +100,20 @@ class CommandCaptureDiagnosticRunner:
 
         try:
             samples = self._record_microphone()
-            average_rms = self._calculate_rms(samples)
-            max_rms = self._calculate_max_rms(samples, self.settings.voice_sample_rate)
-            vad_result = RmsVoiceActivityDetector(self.settings.voice_vad_threshold).analyze(
-                [max_rms],
+            metrics = calculate_audio_capture_metrics(
+                samples,
                 self.settings.voice_sample_rate,
+                self.settings.voice_vad_threshold,
             )
-            vad_crossed = vad_result.is_speech
+            average_rms = metrics.average_rms
+            max_rms = metrics.max_rms
+            vad_crossed = metrics.vad_threshold_crossed
             self.capture_logger.info(
                 "Recorded command sample samples={} average_rms={} max_rms={} threshold={} crossed={}",
                 len(samples),
                 f"{average_rms:.6f}",
                 f"{max_rms:.6f}",
-                self.settings.voice_vad_threshold,
+                metrics.vad_threshold,
                 vad_crossed,
             )
         except Exception as exc:
@@ -122,6 +129,7 @@ class CommandCaptureDiagnosticRunner:
                 cleaned_command,
                 min_words=self.settings.voice_command_min_words,
                 reject_phrases=self.settings.voice_command_reject_phrase_list,
+                incomplete_phrases=self.settings.voice_command_incomplete_phrase_list,
             )
             self.capture_logger.info(
                 "Command capture transcription={} cleaned={} accepted={} reason={}",
@@ -196,45 +204,49 @@ class CommandCaptureDiagnosticRunner:
 
     @staticmethod
     def _calculate_rms(samples: list[float]) -> float:
-        if not samples:
-            return 0.0
-        return sqrt(sum(sample * sample for sample in samples) / len(samples))
+        return calculate_rms(samples)
 
     @classmethod
     def _calculate_max_rms(cls, samples: list[float], sample_rate: int) -> float:
-        if not samples:
-            return 0.0
-
-        window_size = max(1, int(sample_rate * 0.1))
-        max_rms = 0.0
-        for start in range(0, len(samples), window_size):
-            window = samples[start : start + window_size]
-            max_rms = max(max_rms, cls._calculate_rms(window))
-        return max_rms
+        del cls
+        return calculate_max_rms(samples, sample_rate)
 
     def _ensure_log_sink(self) -> None:
-        global _COMMAND_CAPTURE_LOG_FILE, _COMMAND_CAPTURE_LOG_SINK_ID
-        if _COMMAND_CAPTURE_LOG_SINK_ID is not None and _COMMAND_CAPTURE_LOG_FILE == self.log_file:
-            return
-
-        if _COMMAND_CAPTURE_LOG_SINK_ID is not None:
-            try:
-                logger.remove(_COMMAND_CAPTURE_LOG_SINK_ID)
-            except ValueError:
-                pass
-
-        self.settings.log_dir.mkdir(parents=True, exist_ok=True)
-        _COMMAND_CAPTURE_LOG_SINK_ID = logger.add(
+        add_managed_file_sink(
             self.log_file,
             level="DEBUG",
-            rotation="1 MB",
-            retention="7 days",
-            encoding="utf-8",
-            backtrace=False,
-            diagnose=False,
             filter=lambda record: bool(record["extra"].get("command_capture")),
         )
-        _COMMAND_CAPTURE_LOG_FILE = self.log_file
+
+
+def calculate_audio_capture_metrics(samples: list[float], sample_rate: int, vad_threshold: float) -> AudioCaptureMetrics:
+    average_rms = calculate_rms(samples)
+    max_rms = calculate_max_rms(samples, sample_rate)
+    vad_result = RmsVoiceActivityDetector(vad_threshold).analyze([max_rms], sample_rate)
+    return AudioCaptureMetrics(
+        average_rms=average_rms,
+        max_rms=max_rms,
+        vad_threshold=vad_threshold,
+        vad_threshold_crossed=vad_result.is_speech,
+    )
+
+
+def calculate_rms(samples: list[float]) -> float:
+    if not samples:
+        return 0.0
+    return sqrt(sum(sample * sample for sample in samples) / len(samples))
+
+
+def calculate_max_rms(samples: list[float], sample_rate: int) -> float:
+    if not samples:
+        return 0.0
+
+    window_size = max(1, int(sample_rate * 0.1))
+    max_rms = 0.0
+    for start in range(0, len(samples), window_size):
+        window = samples[start : start + window_size]
+        max_rms = max(max_rms, calculate_rms(window))
+    return max_rms
 
 
 def run_command_capture_test(settings: AppSettings | None = None) -> CommandCaptureReport:

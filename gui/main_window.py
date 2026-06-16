@@ -47,6 +47,7 @@ from voice.voice_command_test import (
 from voice.voice_loop import (
     ACCEPTED_COMMAND_PREFIX,
     ACCEPTED_FOLLOW_UP_PREFIX,
+    CAPTURE_DIAGNOSTICS_PREFIX,
     LISTENING_FOR_FOLLOW_UP_PROMPT,
     REJECTED_COMMAND_PREFIX,
     REJECTED_FOLLOW_UP_PREFIX,
@@ -56,6 +57,7 @@ from voice.voice_loop import (
     STOP_COMMAND_DETECTED_MESSAGE,
     VOICE_LOOP_STARTED_MESSAGE,
     VOICE_LOOP_STOPPED_MESSAGE,
+    WAKE_DIAGNOSTICS_PREFIX,
     VoiceLoopRunner,
 )
 from vision.vision_service import format_vision_check_report
@@ -66,6 +68,7 @@ class AssistantStatus(str, Enum):
     LISTENING = "Listening"
     THINKING = "Thinking"
     SPEAKING = "Speaking"
+    FOLLOW_UP = "Follow-up"
     WAKE_DETECTED = "Wake detected"
     ERROR = "Error"
 
@@ -75,6 +78,7 @@ STATUS_COLORS = {
     AssistantStatus.LISTENING: "#37d6ff",
     AssistantStatus.THINKING: "#a78bfa",
     AssistantStatus.SPEAKING: "#6ee7b7",
+    AssistantStatus.FOLLOW_UP: "#22c55e",
     AssistantStatus.WAKE_DETECTED: "#facc15",
     AssistantStatus.ERROR: "#fb7185",
 }
@@ -144,7 +148,8 @@ class JarvisMainWindow(QMainWindow):
             flags |= Qt.WindowType.WindowStaysOnTopHint
         self.setWindowFlags(flags)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.resize(self.settings.window_width, self.settings.window_height)
+        self.setMinimumSize(760, 720)
+        self.resize(max(self.settings.window_width, 780), max(self.settings.window_height, 760))
 
         self.orb = OrbWidget()
         self.status = AssistantStatus.SLEEPING
@@ -180,6 +185,13 @@ class JarvisMainWindow(QMainWindow):
         self.voice_loop_status_value = QLabel("Idle")
         self.voice_loop_last_command_value = QLabel("None")
         self.voice_loop_last_response_value = QLabel("None")
+        self.voice_state_value = QLabel("Sleeping")
+        self.voice_detail_value = QLabel("Waiting for wake phrase")
+        self.voice_provider_value = QLabel(self.settings.speech_to_text_provider)
+        self.voice_wake_score_value = QLabel("--")
+        self.voice_rms_value = QLabel("--")
+        self.voice_vad_value = QLabel("--")
+        self.voice_response_panel = QTextEdit()
         self.agent_enabled_value = QLabel("Enabled" if settings.agent_enabled else "Disabled")
         self.reminders_check_value = QLabel("Idle")
         self.notification_result_value = QLabel("Idle")
@@ -244,6 +256,12 @@ class JarvisMainWindow(QMainWindow):
         self.voice_loop_status_value.setObjectName("voiceLoopValue")
         self.voice_loop_last_command_value.setObjectName("voiceLoopValue")
         self.voice_loop_last_response_value.setObjectName("voiceLoopValue")
+        self.voice_state_value.setObjectName("stateValue")
+        self.voice_detail_value.setObjectName("stateDetail")
+        self.voice_provider_value.setObjectName("voiceLoopValue")
+        self.voice_wake_score_value.setObjectName("voiceLoopValue")
+        self.voice_rms_value.setObjectName("voiceLoopValue")
+        self.voice_vad_value.setObjectName("voiceLoopValue")
         self.agent_enabled_value.setObjectName("voiceLoopValue")
         self.reminders_check_value.setObjectName("voiceLoopValue")
         self.notification_result_value.setObjectName("voiceLoopValue")
@@ -276,7 +294,10 @@ class JarvisMainWindow(QMainWindow):
 
         self.transcript.setReadOnly(True)
         self.transcript.setObjectName("transcript")
-        self.transcript.setText("Jarvis foundation online.\nType a command to test the Phase 1 assistant stub.")
+        self.transcript.setText("Jarvis voice transcript will appear here.")
+        self.voice_response_panel.setReadOnly(True)
+        self.voice_response_panel.setObjectName("responsePanel")
+        self.voice_response_panel.setText("Jarvis responses will appear here.")
 
         self.command_input.setPlaceholderText("Type a command...")
         self.command_input.setObjectName("commandInput")
@@ -315,22 +336,69 @@ class JarvisMainWindow(QMainWindow):
         input_row.addWidget(self.mic_test_button)
         input_row.addWidget(self.voice_command_button)
         input_row.addWidget(self.chat_test_button)
-        input_row.addWidget(self.start_voice_loop_button)
-        input_row.addWidget(self.stop_voice_loop_button)
         input_row.addWidget(self.send_button)
+
+        assistant_panel = QFrame()
+        assistant_panel.setObjectName("assistantPanel")
+        assistant_layout = QHBoxLayout(assistant_panel)
+        assistant_layout.setContentsMargins(18, 16, 18, 16)
+        assistant_layout.setSpacing(18)
+        assistant_layout.addWidget(self.orb, alignment=Qt.AlignmentFlag.AlignVCenter)
+
+        state_block = QVBoxLayout()
+        state_title = QLabel("Current state")
+        state_title.setObjectName("panelTitle")
+        self.voice_state_value.setText("Sleeping")
+        self.voice_detail_value.setText("Waiting for wake phrase")
+        state_block.addWidget(state_title)
+        state_block.addWidget(self.voice_state_value)
+        state_block.addWidget(self.voice_detail_value)
+        loop_buttons = QHBoxLayout()
+        loop_buttons.addWidget(self.start_voice_loop_button)
+        loop_buttons.addWidget(self.stop_voice_loop_button)
+        loop_buttons.addStretch(1)
+        state_block.addLayout(loop_buttons)
+        assistant_layout.addLayout(state_block, stretch=2)
+
+        diagnostics_panel = QFrame()
+        diagnostics_panel.setObjectName("diagnosticsPanel")
+        diagnostics_grid = QGridLayout(diagnostics_panel)
+        diagnostics_grid.setContentsMargins(12, 10, 12, 10)
+        diagnostics_grid.setHorizontalSpacing(12)
+        diagnostics_grid.setVerticalSpacing(6)
+        diagnostics_title = QLabel("Live diagnostics")
+        diagnostics_title.setObjectName("panelTitle")
+        diagnostics_grid.addWidget(diagnostics_title, 0, 0, 1, 2)
+        diagnostics_grid.addWidget(QLabel("Provider"), 1, 0)
+        diagnostics_grid.addWidget(self.voice_provider_value, 1, 1)
+        diagnostics_grid.addWidget(QLabel("Wake score"), 2, 0)
+        diagnostics_grid.addWidget(self.voice_wake_score_value, 2, 1)
+        diagnostics_grid.addWidget(QLabel("RMS"), 3, 0)
+        diagnostics_grid.addWidget(self.voice_rms_value, 3, 1)
+        diagnostics_grid.addWidget(QLabel("VAD"), 4, 0)
+        diagnostics_grid.addWidget(self.voice_vad_value, 4, 1)
+        assistant_layout.addWidget(diagnostics_panel, stretch=1)
 
         self.tabs = QTabWidget()
         self.tabs.setObjectName("mainTabs")
 
         voice_tab = QWidget()
-        voice_layout = QVBoxLayout(voice_tab)
+        voice_layout = QGridLayout(voice_tab)
         voice_layout.setContentsMargins(12, 12, 12, 12)
-        voice_layout.setSpacing(10)
-        voice_intro = QLabel("Speak to Jarvis, type a command, or run a quick voice test.")
-        voice_intro.setObjectName("sectionNote")
-        voice_layout.addWidget(voice_intro)
-        voice_layout.addWidget(self.transcript, stretch=1)
-        voice_layout.addLayout(input_row)
+        voice_layout.setHorizontalSpacing(12)
+        voice_layout.setVerticalSpacing(10)
+        transcript_title = QLabel("What Jarvis heard")
+        transcript_title.setObjectName("panelTitle")
+        response_title = QLabel("Jarvis response")
+        response_title.setObjectName("panelTitle")
+        voice_layout.addWidget(transcript_title, 0, 0)
+        voice_layout.addWidget(response_title, 0, 1)
+        voice_layout.addWidget(self.transcript, 1, 0)
+        voice_layout.addWidget(self.voice_response_panel, 1, 1)
+        voice_layout.setColumnStretch(0, 1)
+        voice_layout.setColumnStretch(1, 1)
+        voice_layout.setRowStretch(1, 1)
+        voice_layout.addLayout(input_row, 2, 0, 1, 2)
 
         tools_tab = QWidget()
         tools_layout = QGridLayout(tools_tab)
@@ -477,7 +545,7 @@ class JarvisMainWindow(QMainWindow):
         layout.setContentsMargins(24, 22, 24, 24)
         layout.setSpacing(16)
         layout.addLayout(title_row)
-        layout.addWidget(self.orb, alignment=Qt.AlignmentFlag.AlignHCenter)
+        layout.addWidget(assistant_panel)
         layout.addWidget(self.tabs)
         layout.addWidget(loop_info)
 
@@ -531,6 +599,31 @@ class JarvisMainWindow(QMainWindow):
                 border: 1px solid rgba(71, 85, 105, 100);
                 border-radius: 12px;
             }
+            #assistantPanel {
+                background: rgba(3, 12, 24, 180);
+                border: 1px solid rgba(34, 211, 238, 110);
+                border-radius: 14px;
+            }
+            #diagnosticsPanel {
+                background: rgba(15, 23, 42, 150);
+                border: 1px solid rgba(71, 85, 105, 130);
+                border-radius: 12px;
+            }
+            #panelTitle {
+                color: #93c5fd;
+                font-size: 12px;
+                font-weight: 700;
+            }
+            #stateValue {
+                color: #e5fbff;
+                font-size: 28px;
+                font-weight: 800;
+            }
+            #stateDetail {
+                color: #a5f3fc;
+                font-size: 13px;
+                font-weight: 600;
+            }
             #voiceLoopValue {
                 color: #dff9ff;
                 font-weight: 500;
@@ -573,6 +666,14 @@ class JarvisMainWindow(QMainWindow):
                 color: #e2eef7;
                 background: rgba(3, 7, 18, 125);
                 border: 1px solid rgba(71, 85, 105, 120);
+                border-radius: 12px;
+                padding: 12px;
+                font-size: 13px;
+            }
+            #responsePanel {
+                color: #f8fbff;
+                background: rgba(8, 17, 34, 150);
+                border: 1px solid rgba(56, 189, 248, 110);
                 border-radius: 12px;
                 padding: 12px;
                 font-size: 13px;
@@ -1329,7 +1430,7 @@ class JarvisMainWindow(QMainWindow):
             "Wake detected": AssistantStatus.WAKE_DETECTED,
             COMMAND_PROMPT: AssistantStatus.WAKE_DETECTED,
             LISTENING_FOR_COMMAND_PROMPT: AssistantStatus.LISTENING,
-            LISTENING_FOR_FOLLOW_UP_PROMPT: AssistantStatus.LISTENING,
+            LISTENING_FOR_FOLLOW_UP_PROMPT: AssistantStatus.FOLLOW_UP,
             "Thinking": AssistantStatus.THINKING,
             "Speaking": AssistantStatus.SPEAKING,
             RETURNING_TO_SLEEP_MESSAGE: AssistantStatus.SLEEPING,
@@ -1339,11 +1440,19 @@ class JarvisMainWindow(QMainWindow):
             STOP_COMMAND_DETECTED_MESSAGE: AssistantStatus.SLEEPING,
             VOICE_LOOP_STOPPED_MESSAGE: AssistantStatus.SLEEPING,
         }
+        if status.startswith(WAKE_DIAGNOSTICS_PREFIX):
+            self._update_wake_diagnostics(status)
+            self._append_message("Diagnostics", status)
+            return
+        if status.startswith(CAPTURE_DIAGNOSTICS_PREFIX):
+            self._update_capture_diagnostics(status)
+            self._append_message("Diagnostics", status)
+            return
         if status.startswith("Last recognized command:"):
             command_text = status.split(":", 1)[1].strip() or "None"
             self.voice_loop_last_command_value.setText(command_text)
             self.voice_loop_status_value.setText("No command detected" if command_text == "<empty>" else "Command received")
-            self._append_message("Jarvis", status)
+            self._append_message("Heard", command_text)
             return
         if status.startswith(REJECTED_COMMAND_PREFIX):
             command_text = status.removeprefix(REJECTED_COMMAND_PREFIX).strip()
@@ -1351,7 +1460,7 @@ class JarvisMainWindow(QMainWindow):
                 command_text = command_text.split(" (", 1)[0].strip()
             self.voice_loop_last_command_value.setText(f"Rejected: {command_text or '<empty>'}")
             self.voice_loop_status_value.setText("Rejected command")
-            self.set_status(AssistantStatus.SLEEPING)
+            self.set_status(AssistantStatus.LISTENING)
             self._append_message("Jarvis", status)
             return
         if status.startswith(REJECTED_FOLLOW_UP_PREFIX):
@@ -1360,7 +1469,7 @@ class JarvisMainWindow(QMainWindow):
                 command_text = command_text.split(" (", 1)[0].strip()
             self.voice_loop_last_command_value.setText(f"Rejected follow-up: {command_text or '<empty>'}")
             self.voice_loop_status_value.setText("Rejected follow-up")
-            self.set_status(AssistantStatus.SLEEPING)
+            self.set_status(AssistantStatus.FOLLOW_UP)
             self._append_message("Jarvis", status)
             return
         if status == RETRYING_COMMAND_CAPTURE_MESSAGE:
@@ -1388,9 +1497,11 @@ class JarvisMainWindow(QMainWindow):
             self._append_message("Jarvis", status)
             return
         if status.startswith("Last Jarvis response:"):
-            self.voice_loop_last_response_value.setText(status.split(":", 1)[1].strip() or "None")
+            response_text = status.split(":", 1)[1].strip() or "None"
+            self.voice_loop_last_response_value.setText(response_text)
+            self.voice_response_panel.setText(response_text)
             self.voice_loop_status_value.setText("Response ready")
-            self._append_message("Jarvis", status)
+            self._append_message("Jarvis", response_text)
             return
         if status.startswith("Voice loop summary:"):
             self.voice_loop_status_value.setText(status)
@@ -1422,9 +1533,11 @@ class JarvisMainWindow(QMainWindow):
             self.stop_voice_loop_action.setEnabled(running)
         if running:
             self.voice_loop_status_value.setText("Running")
+            self.voice_detail_value.setText("Voice loop active")
             self._set_mode("Voice Loop")
         elif self.voice_loop_runner is None:
             self.voice_loop_status_value.setText("Idle")
+            self.voice_detail_value.setText("Waiting for wake phrase")
             self._set_mode("Idle")
 
     def _set_reminder_watch_running(self, running: bool) -> None:
@@ -1444,6 +1557,17 @@ class JarvisMainWindow(QMainWindow):
     def set_status(self, status: AssistantStatus) -> None:
         self.status = status
         self.status_label.setText(status.value)
+        self.voice_state_value.setText(status.value)
+        detail_map = {
+            AssistantStatus.SLEEPING: "Waiting for wake phrase",
+            AssistantStatus.LISTENING: "Listening through microphone",
+            AssistantStatus.THINKING: "Processing command",
+            AssistantStatus.SPEAKING: "Speaking response",
+            AssistantStatus.FOLLOW_UP: "Listening for follow-up",
+            AssistantStatus.WAKE_DETECTED: "Wake phrase detected",
+            AssistantStatus.ERROR: "Attention needed",
+        }
+        self.voice_detail_value.setText(detail_map[status])
         color = STATUS_COLORS[status]
         self.status_label.setStyleSheet(
             f"background: rgba(37, 99, 235, 70); border: 1px solid {color}; color: #dff9ff;"
@@ -1452,6 +1576,41 @@ class JarvisMainWindow(QMainWindow):
 
     def _append_message(self, speaker: str, message: str) -> None:
         self.transcript.append(f"\n{speaker}: {message}")
+
+    def _update_wake_diagnostics(self, status: str) -> None:
+        values = self._parse_diagnostics(status.removeprefix(WAKE_DIAGNOSTICS_PREFIX))
+        if provider := values.get("provider"):
+            self.voice_provider_value.setText(provider)
+        score = values.get("score")
+        threshold = values.get("threshold")
+        if score and threshold:
+            self.voice_wake_score_value.setText(f"{score} / {threshold}")
+        elif score:
+            self.voice_wake_score_value.setText(score)
+        self._update_rms_labels(values)
+
+    def _update_capture_diagnostics(self, status: str) -> None:
+        values = self._parse_diagnostics(status.removeprefix(CAPTURE_DIAGNOSTICS_PREFIX))
+        if provider := values.get("provider"):
+            self.voice_provider_value.setText(provider)
+        self._update_rms_labels(values)
+
+    def _update_rms_labels(self, values: dict[str, str]) -> None:
+        average_rms = values.get("average_rms", "--")
+        max_rms = values.get("max_rms", "--")
+        self.voice_rms_value.setText(f"{average_rms} / {max_rms}")
+        if vad_crossed := values.get("vad_crossed"):
+            self.voice_vad_value.setText(vad_crossed)
+
+    @staticmethod
+    def _parse_diagnostics(payload: str) -> dict[str, str]:
+        values: dict[str, str] = {}
+        for part in payload.strip().split():
+            if "=" not in part:
+                continue
+            key, value = part.split("=", 1)
+            values[key.strip()] = value.strip()
+        return values
 
     def request_quit(self) -> None:
         if self.voice_loop_runner is not None:

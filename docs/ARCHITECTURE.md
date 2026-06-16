@@ -16,7 +16,7 @@
 
 ### Logging
 
-`services/logging_service.py` configures Loguru for console logs and `logs/jarvis.log`. Diagnostic logs are written separately for audio, STT, wake, voice command, OpenAI checks, and TTS. Detailed provider, tool, and security audit logging will be added in later approved phases.
+`services/logging_service.py` configures Loguru for console logs and `logs/jarvis.log`. It also provides a managed append-only file sink helper for live diagnostics so Windows does not rotate active voice log files while microphone capture is running. Diagnostic logs are written separately for audio, STT, wake, voice command, OpenAI checks, TTS, command capture, and the live voice loop. Detailed provider, tool, and security audit logging will be added in later approved phases.
 
 ### Startup Service
 
@@ -54,10 +54,10 @@ OpenAI chat uses the configured `SYSTEM_PROMPT`. The default is: `You are Jarvis
 - `wake_provider.py`: resolves the selected wake provider, detects OpenWakeWord availability, and keeps Whisper fuzzy wake detection as the current default fallback.
 - `wake_diagnostics.py`: records one microphone clip, transcribes it, runs wake detection, and writes `logs/wake_diagnostics.log`.
 - `openwakeword.py`: checks the installed OpenWakeWord package, verifies model availability, captures short microphone samples, provides tuning calibration, reports microphone RMS and VAD results, and writes `logs/openwakeword.log`. OpenWakeWord remains diagnostic/optional until a better user-matched model is available.
-- `command_validation.py`: rejects empty, punctuation-only, configured filler phrases such as `you`, `uh`, `um`, `hmm`, `yeah`, and `okay`, and commands below the configured minimum word count.
-- `command_capture.py`: records one command sample without requiring wake detection, reports microphone RMS/VAD, raw transcript, cleaned command, accepted status, rejection reason, and writes `logs/command_capture.log`.
+- `command_validation.py`: rejects empty, punctuation-only, configured filler phrases such as `you`, `uh`, `um`, `hmm`, `yeah`, and `okay`, configured incomplete transcripts such as `what's the`, `tell me about`, `can you`, and `please`, and commands below the configured minimum word count.
+- `command_capture.py`: records one command sample without requiring wake detection, reports microphone RMS/VAD, raw transcript, cleaned command, accepted status, rejection reason, exposes shared audio metric helpers for the live loop, and writes `logs/command_capture.log`.
 - `voice_command_test.py`: records one wake phrase clip, waits briefly after wake detection, optionally plays a Windows beep, records one command clip using the command duration setting, validates cleaned command text, sends only accepted command text to `AssistantCore`, optionally speaks the response, and writes `logs/voice_command_test.log`.
-- `voice_loop.py`: runs the continuous voice loop, uses the selected wake provider, falls back to Whisper fuzzy wake detection when needed, rejects bad command transcripts locally with one retry by default, handles accepted commands through the voice-specific `AssistantCore` path, speaks accepted assistant responses, enters one configurable follow-up listening window before sleeping, accepts a valid follow-up command without another wake phrase, emits rejected/retry/follow-up/accepted/response/sleep events for the GUI, handles stop commands, centralizes TTS calls for future interruption work, applies cooldown only where needed for spoken status messages rather than between response speech and follow-up capture, reports summary counters, and writes `logs/voice_loop.log`.
+- `voice_loop.py`: runs the continuous voice loop, uses the selected wake provider, falls back to Whisper fuzzy wake detection when needed, rejects bad and incomplete command transcripts locally with retry before `AssistantCore` or OpenAI, handles accepted commands through the voice-specific `AssistantCore` path, speaks accepted assistant responses, enters a configurable follow-up listening window before sleeping, accepts a valid follow-up command without another wake phrase, emits rejected/retry/follow-up/accepted/response/sleep events plus wake score and RMS/VAD diagnostics for the GUI, handles stop commands, centralizes TTS calls for future interruption work, applies cooldown only where needed for spoken status messages rather than between response speech and follow-up capture, reports summary counters, and writes `logs/voice_loop.log` through the managed append-only sink.
 - `conversation.py`: keeps short-term in-memory conversation turns, trims to the configured maximum, and formats recent history for prompts.
 - `memory/store.py`: manages SQLite persistence for explicit user-approved memories, rejects sensitive secrets, and supports remember/list/forget/reset operations.
 - `integrations/weather_service.py`: performs explicit weather checks, fetches current weather only when enabled and keyed, redacts secret-like error text, and writes `logs/weather.log`.
@@ -71,16 +71,16 @@ No ElevenLabs, voice cloning, real-time OpenAI voice conversation, permissions s
 
 `gui/main_window.py` contains the PySide6 floating Jarvis shell:
 
-- dark frameless window
-- animated orb
+- dark frameless assistant-style window
+- animated orb and large current-state panel
 - system tray icon
 - manual command input
 - microphone test button
 - start and stop voice loop controls
 - current loop status, last command, and last response fields
-- live loop event handling for rejected command, retrying capture, follow-up listening, accepted command and follow-up, assistant response, and sleeping state
-- transcript panel
-- status states: Sleeping, Listening, Thinking, Speaking, Error
+- live loop event handling for rejected command, retrying capture, follow-up listening, accepted command and follow-up, assistant response, sleeping state, wake score, provider, RMS, and VAD diagnostics
+- separate transcript and response panels
+- status states: Sleeping, Listening, Thinking, Speaking, Follow-up, Error
 - diagnostics controls for startup check, startup enable, and startup disable
 
 The window can be hidden to the tray and safely exited from the tray menu.
@@ -114,7 +114,7 @@ Future phases should add capabilities behind explicit approval gates:
 
 ## Safety Boundary
 
-Phase 9 has no tools, no startup background service, and no permissions system. It cannot access email, calendar, browser automation, desktop automation, memory, screenshots, or local file content. OpenAI usage is limited to accepted plain text chat responses and text-to-speech from the user command text, accepted follow-up text, or assistant response. Empty, punctuation-only, and configured filler command transcripts are rejected locally before OpenAI; the follow-up path uses the same validation boundary before routing text to `AssistantCore`. Voice concise mode changes only the OpenAI prompt used for accepted voice commands; normal text chat keeps the normal prompt. The OpenAI TTS voice direction is an original assistant voice: calm, mature, professional, British-inspired, deep but clear, slightly cinematic, and natural paced. It must not clone or imitate a real actor or copyrighted movie character.
+Phase 9 has no tools, no startup background service, and no permissions system. It cannot access email, calendar, browser automation, desktop automation, memory, screenshots, or local file content. OpenAI usage is limited to accepted plain text chat responses and text-to-speech from the user command text, accepted follow-up text, or assistant response. Empty, punctuation-only, configured filler, and configured incomplete command transcripts are rejected locally before OpenAI; the follow-up path uses the same validation boundary before routing text to `AssistantCore`. Voice concise mode changes only the OpenAI prompt used for accepted voice commands; normal text chat keeps the normal prompt. The OpenAI TTS voice direction is an original assistant voice: calm, mature, professional, British-inspired, deep but clear, slightly cinematic, and natural paced. It must not clone or imitate a real actor or copyrighted movie character.
 
 Phase 10 adds only in-memory conversation context. It does not persist history to disk or add long-term memory, databases, or retrieval systems.
 
