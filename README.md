@@ -164,6 +164,16 @@ The GUI now uses a tabbed dark interface with quick actions for voice, tools, re
 - `logs/voice_loop.log` uses a managed append-only Loguru sink to avoid Windows rotation/retention races.
 - The GUI voice surface now shows a larger assistant state area, orb feedback, transcript panel, response panel, live provider/wake/RMS/VAD diagnostics, and clearer voice-loop controls.
 
+## v0.2.0 Phase 10 Scope
+
+- Speech repair runs after STT cleanup and before command validation.
+- Jarvis preserves the raw transcript, then produces a repaired transcript, confidence, strategy, and repair reason.
+- Repaired command text is what reaches validation and `AssistantCore` when repair succeeds; broken raw speech is not sent to OpenAI.
+- Repair uses configured rules, incomplete phrase rules, recent accepted voice-command context, common intents, and optional OpenAI repair.
+- `VOICE_USE_OPENAI_REPAIR=false` by default. When enabled, OpenAI repair is skipped for empty speech, punctuation-only speech, filler speech, and clearly invalid very short input.
+- Low-confidence repairs ask for confirmation with `Did you mean: <repaired command>?` before continuing.
+- GUI diagnostics show `Speech`, `Interpreted`, repair confidence, and repair strategy.
+
 ## Phase 10 Scope
 
 - In-memory short-term conversation history for the current session only.
@@ -405,9 +415,10 @@ The command runs one controlled voice command flow:
 8. Records one command clip using `VOICE_COMMAND_RECORD_SECONDS`.
 9. Transcribes the command.
 10. Removes a wake phrase prefix from the command transcript when present.
-11. Validates the cleaned command and rejects bad short transcripts locally.
-12. Sends accepted command text to the existing `AssistantCore` stub.
-13. Prints the raw command transcript, cleaned command, accepted status, rejection reason when rejected, and placeholder Jarvis response when accepted.
+11. Repairs the cleaned transcript when speech repair is enabled.
+12. Validates the repaired command and rejects bad short transcripts locally.
+13. Sends accepted repaired command text to the existing `AssistantCore` stub.
+14. Prints the raw command transcript, repaired command, repair confidence/strategy, accepted status, rejection reason when rejected, and placeholder Jarvis response when accepted.
 
 Voice command capture settings:
 
@@ -417,7 +428,13 @@ VOICE_COMMAND_START_DELAY_SECONDS=1.0
 VOICE_COMMAND_RECORD_SECONDS=7
 VOICE_COMMAND_MIN_WORDS=2
 VOICE_COMMAND_REJECT_PHRASES=you,uh,um,hmm,yeah,okay
-VOICE_COMMAND_INCOMPLETE_PHRASES=what's the,what is the,tell me about,can you,could you,please
+VOICE_COMMAND_INCOMPLETE_PHRASES=what's the,what is the,tell me about,can you,could you,weather in,remind me,please
+VOICE_SPEECH_REPAIR_ENABLED=true
+VOICE_USE_OPENAI_REPAIR=false
+VOICE_REPAIR_RULES=did it noting him today whats the=>what's the weather in {weather_default_city} today;did it nottingham today whats the=>what's the weather in {weather_default_city} today
+VOICE_REPAIR_INCOMPLETE_PHRASES=what's the,what is the,tell me about,can you,could you,weather in,remind me,please
+VOICE_REPAIR_CONFIRMATION_THRESHOLD=0.75
+VOICE_REPAIR_CONFIRMATION_SECONDS=3
 VOICE_COMMAND_RETRY_ON_REJECT=true
 VOICE_COMMAND_MAX_RETRIES=1
 ```
@@ -446,7 +463,7 @@ py main.py --voice-command-test --speak
 py main.py --command-capture-test
 ```
 
-This records one command sample without requiring wake detection. It prints the provider, sample rate, record seconds, average RMS, max RMS, VAD threshold, whether the threshold was crossed, raw transcript, cleaned command, accepted status, rejection reason when rejected, and the diagnostic log path.
+This records one command sample without requiring wake detection. It prints the provider, sample rate, record seconds, average RMS, max RMS, VAD threshold, whether the threshold was crossed, raw transcript, cleaned/repaired command, repair confidence, repair strategy, accepted status, rejection reason when rejected, and the diagnostic log path.
 
 Use this when wake detection works but command capture produces bad transcripts such as `You`, `uh`, or punctuation-only text.
 
@@ -470,18 +487,20 @@ The voice loop keeps Jarvis running until stopped:
 4. Falls back to Whisper fuzzy wake detection when OpenWakeWord is unavailable.
 5. Prompts with `Yes sir?`, optionally beeps, and waits briefly before recording the command.
 6. Records one command clip.
-7. Cleans and validates the command text.
-8. Stops cleanly if the command is `stop listening`, `go to sleep`, `sleep jarvis`, `jarvis sleep`, `exit jarvis`, `shutdown jarvis`, `that is all`, or `thank you jarvis`.
-9. Rejects bad short transcripts locally with `I didn’t catch that, please repeat.` and retries command capture once by default.
-10. Sends accepted commands to `AssistantCore`.
-11. Speaks accepted responses using the configured TTS provider.
-12. Enters one configurable `Listening for follow-up...` window after a successful response.
-13. Sends valid follow-up commands to `AssistantCore` without requiring the wake phrase again.
-14. Rejects invalid or incomplete non-empty follow-ups locally, retries follow-up capture once, and returns to sleep if the retry is invalid or no follow-up is heard.
-15. Speaks the configured standby message only after follow-up mode is finished and Jarvis is returning to sleep, when standby speech is enabled.
-16. Prints a summary on exit with wake attempts, successful wakes, commands handled, empty commands, and errors.
+7. Repairs the cleaned transcript using rules, context, common intents, and optional OpenAI repair.
+8. Validates the repaired command text.
+9. Asks for confirmation before using a low-confidence repair.
+10. Stops cleanly if the command is `stop listening`, `go to sleep`, `sleep jarvis`, `jarvis sleep`, `exit jarvis`, `shutdown jarvis`, `that is all`, or `thank you jarvis`.
+11. Rejects bad short transcripts locally with `I didn’t catch that, please repeat.` and retries command capture once by default.
+12. Sends accepted repaired commands to `AssistantCore`.
+13. Speaks accepted responses using the configured TTS provider.
+14. Enters one configurable `Listening for follow-up...` window after a successful response.
+15. Sends valid follow-up commands to `AssistantCore` without requiring the wake phrase again.
+16. Rejects invalid or incomplete non-empty follow-ups locally, retries follow-up capture once, and returns to sleep if the retry is invalid or no follow-up is heard.
+17. Speaks the configured standby message only after follow-up mode is finished and Jarvis is returning to sleep, when standby speech is enabled.
+18. Prints a summary on exit with wake attempts, successful wakes, commands handled, empty commands, and errors.
 
-For GUI visibility, the loop emits explicit events for rejected commands, retrying command capture, follow-up listening, accepted commands and follow-ups, assistant responses, return-to-sleep state, wake diagnostics, and command capture RMS/VAD diagnostics.
+For GUI visibility, the loop emits explicit events for rejected commands, retrying command capture, follow-up listening, accepted commands and follow-ups, assistant responses, return-to-sleep state, wake diagnostics, command capture RMS/VAD diagnostics, and speech repair diagnostics.
 
 Press Ctrl+C to stop the CLI loop. Detailed voice loop logs are saved to:
 

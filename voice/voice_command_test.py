@@ -17,6 +17,7 @@ from voice.command_validation import (
     validate_cleaned_command,
 )
 from voice.interfaces import TranscriptionResult
+from voice.speech_repair import SpeechRepairResult, SpeechRepairer
 from voice.stt import create_speech_to_text_provider
 from voice.tts import TextToSpeechResult, speak_text
 from voice.wake import WakeDetectionResult, WakeDetector, remove_wake_phrase_prefix
@@ -44,6 +45,7 @@ class VoiceCommandTestReport:
     wake_detection: WakeDetectionResult
     raw_command_transcription: str
     cleaned_command: str
+    speech_repair: SpeechRepairResult | None
     command_validation: CommandValidationResult
     assistant_response: AssistantResponse | None
     tts_result: TextToSpeechResult | None
@@ -90,6 +92,7 @@ class VoiceCommandTestRunner:
         self.status_callback = status_callback
         self.log_file = self.settings.log_dir / "voice_command_test.log"
         self.voice_logger = logger.bind(voice_command_test=True)
+        self.speech_repairer = SpeechRepairer(settings)
         self._ensure_voice_command_log_sink()
 
     def run(self) -> VoiceCommandTestReport:
@@ -98,10 +101,12 @@ class VoiceCommandTestRunner:
         wake_transcription = ""
         raw_command_transcription = ""
         cleaned_command = ""
+        speech_repair: SpeechRepairResult | None = None
         command_validation = validate_cleaned_command(
             cleaned_command,
             min_words=self.settings.voice_command_min_words,
             reject_phrases=self.settings.voice_command_reject_phrase_list,
+            incomplete_phrases=self.settings.voice_command_incomplete_phrase_list,
         )
         assistant_response: AssistantResponse | None = None
         tts_result: TextToSpeechResult | None = None
@@ -129,6 +134,7 @@ class VoiceCommandTestRunner:
                 tts_result,
                 statuses,
                 errors,
+                speech_repair=speech_repair,
             )
 
         try:
@@ -157,6 +163,7 @@ class VoiceCommandTestRunner:
                 tts_result,
                 statuses,
                 errors,
+                speech_repair=speech_repair,
             )
 
         if not wake_detection.detected:
@@ -171,6 +178,7 @@ class VoiceCommandTestRunner:
                 tts_result,
                 statuses,
                 errors,
+                speech_repair=speech_repair,
             )
 
         self._status("Wake detected", statuses)
@@ -183,20 +191,29 @@ class VoiceCommandTestRunner:
             self._status(LISTENING_FOR_COMMAND_PROMPT, statuses)
             command_samples = self.recorder(self.settings.voice_command_record_seconds)
             raw_command_transcription = self.provider.transcribe(command_samples, self.settings.voice_sample_rate).text.strip()
-            cleaned_command = remove_wake_phrase_prefix(
+            cleaned_transcription = remove_wake_phrase_prefix(
                 raw_command_transcription,
                 wake_phrase=self.settings.wake_phrase,
                 aliases=self.settings.wake_alias_list,
             )
+            speech_repair = self.speech_repairer.repair(
+                cleaned_transcription,
+                raw_transcript=raw_command_transcription,
+            )
+            cleaned_command = speech_repair.repaired_transcript
             command_validation = validate_cleaned_command(
                 cleaned_command,
                 min_words=self.settings.voice_command_min_words,
                 reject_phrases=self.settings.voice_command_reject_phrase_list,
+                incomplete_phrases=self.settings.voice_command_incomplete_phrase_list,
             )
             self.voice_logger.info(
-                "Command transcription={} cleaned={} accepted={} reason={}",
+                "Command transcription={} cleaned={} repaired={} confidence={} strategy={} accepted={} reason={}",
                 raw_command_transcription or "<empty>",
+                speech_repair.cleaned_transcript or "<empty>",
                 cleaned_command or "<empty>",
+                f"{speech_repair.confidence:.2f}",
+                speech_repair.strategy,
                 command_validation.accepted,
                 command_validation.rejection_reason or "<none>",
             )
@@ -215,6 +232,7 @@ class VoiceCommandTestRunner:
                 tts_result,
                 statuses,
                 errors,
+                speech_repair=speech_repair,
             )
 
         if not command_validation.accepted:
@@ -236,6 +254,7 @@ class VoiceCommandTestRunner:
                 tts_result,
                 statuses,
                 errors,
+                speech_repair=speech_repair,
             )
 
         self._status("Thinking", statuses)
@@ -262,6 +281,7 @@ class VoiceCommandTestRunner:
             tts_result,
             statuses,
             errors,
+            speech_repair=speech_repair,
         )
 
     def _status(self, status: str, statuses: list[str]) -> None:
@@ -280,6 +300,7 @@ class VoiceCommandTestRunner:
         tts_result: TextToSpeechResult | None,
         statuses: list[str],
         errors: list[str],
+        speech_repair: SpeechRepairResult | None = None,
     ) -> VoiceCommandTestReport:
         return VoiceCommandTestReport(
             provider_name=self.provider.name,
@@ -288,6 +309,7 @@ class VoiceCommandTestRunner:
             wake_detection=wake_detection,
             raw_command_transcription=raw_command_transcription,
             cleaned_command=cleaned_command,
+            speech_repair=speech_repair,
             command_validation=command_validation,
             assistant_response=assistant_response,
             tts_result=tts_result,
@@ -376,6 +398,15 @@ def format_voice_command_report(report: VoiceCommandTestReport) -> str:
         f"  cleaned command: {report.cleaned_command if report.cleaned_command else '<empty>'}",
         f"  accepted: {_yes_no(report.command_validation.accepted)}",
     ]
+    if report.speech_repair is not None:
+        lines.extend(
+            [
+                f"  repaired command: {report.speech_repair.repaired_transcript if report.speech_repair.repaired_transcript else '<empty>'}",
+                f"  repair confidence: {report.speech_repair.confidence:.2f}",
+                f"  repair strategy: {report.speech_repair.strategy}",
+                f"  repair reason: {report.speech_repair.repair_reason}",
+            ]
+        )
     if report.command_validation.rejection_reason:
         lines.append(f"  rejection reason: {report.command_validation.rejection_reason}")
 

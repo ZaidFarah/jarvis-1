@@ -15,6 +15,7 @@ from voice.voice_loop import (
     RETURNING_TO_SLEEP_MESSAGE,
     RETRYING_COMMAND_CAPTURE_MESSAGE,
     RETRYING_FOLLOW_UP_CAPTURE_MESSAGE,
+    SPEECH_REPAIR_PREFIX,
     STOP_COMMAND_DETECTED_MESSAGE,
     WAKE_DIAGNOSTICS_PREFIX,
     VoiceLoopRunner,
@@ -348,7 +349,7 @@ def test_voice_loop_retries_incomplete_command_before_assistant_call() -> None:
     settings = AppSettings(_env_file=None)
     settings.voice_loop_speak_status = False
     assistant = SpyAssistant()
-    provider = FakeProvider(["hey jarvis", "what's the", "weather report", ""])
+    provider = FakeProvider(["hey jarvis", "can you", "weather report", ""])
     events: list[str] = []
 
     report = VoiceLoopRunner(
@@ -364,9 +365,90 @@ def test_voice_loop_retries_incomplete_command_before_assistant_call() -> None:
     assert report.cleaned_command == "weather report"
     assert report.command_validation.accepted is True
     assert assistant.commands == ["weather report"]
-    assert f"{REJECTED_COMMAND_PREFIX} what's the (incomplete transcript: what's the)" in events
+    assert f"{REJECTED_COMMAND_PREFIX} can you (incomplete transcript: can you)" in events
     assert RETRYING_COMMAND_CAPTURE_MESSAGE in events
     assert f"{ACCEPTED_COMMAND_PREFIX} weather report" in events
+
+
+def test_voice_loop_repairs_broken_weather_transcript_before_assistant_call() -> None:
+    settings = AppSettings(_env_file=None, weather_default_city="Nottingham")
+    settings.voice_loop_speak_status = False
+    assistant = SpyAssistant()
+    provider = FakeProvider(["hey jarvis", "Did it noting him today? What's the", ""])
+    events: list[str] = []
+
+    report = VoiceLoopRunner(
+        settings=settings,
+        assistant=assistant,
+        provider=provider,
+        recorder=fake_recorder,
+        sleeper=no_sleep,
+        beeper=no_beep,
+        status_callback=events.append,
+    ).run_once()
+
+    assert report.raw_command_transcription == "Did it noting him today? What's the"
+    assert report.cleaned_command == "what's the weather in Nottingham today"
+    assert report.speech_repair is not None
+    assert report.speech_repair.strategy == "rule"
+    assert report.command_validation.accepted is True
+    assert assistant.commands == ["what's the weather in Nottingham today"]
+    assert "Did it noting him today? What's the" not in assistant.commands
+    repair_events = [event for event in events if event.startswith(SPEECH_REPAIR_PREFIX)]
+    assert repair_events
+    assert "confidence=0.92" in repair_events[0]
+    assert "strategy=rule" in repair_events[0]
+
+
+def test_voice_loop_low_confidence_repair_confirmed_yes_continues() -> None:
+    settings = AppSettings(_env_file=None, weather_default_city="Nottingham")
+    settings.voice_loop_speak_status = True
+    assistant = SpyAssistant()
+    tts_provider = FakeTtsProvider()
+    provider = FakeProvider(["hey jarvis", "what's the", "yes", ""])
+    events: list[str] = []
+
+    report = VoiceLoopRunner(
+        settings=settings,
+        assistant=assistant,
+        provider=provider,
+        tts_provider=tts_provider,
+        recorder=fake_recorder,
+        sleeper=no_sleep,
+        beeper=no_beep,
+        status_callback=events.append,
+    ).run_once()
+
+    assert report.cleaned_command == "what's the weather in Nottingham today?"
+    assert assistant.commands == ["what's the weather in Nottingham today?"]
+    assert "Did you mean: what's the weather in Nottingham today?" in report.statuses
+    assert "Repair confirmation: yes" in events
+    assert "Did you mean: what's the weather in Nottingham today?" in tts_provider.spoken
+
+
+def test_voice_loop_low_confidence_repair_denied_retries_without_assistant_call_for_raw() -> None:
+    settings = AppSettings(_env_file=None, weather_default_city="Nottingham")
+    settings.voice_loop_speak_status = False
+    assistant = SpyAssistant()
+    provider = FakeProvider(["hey jarvis", "what's the", "no", "status report", ""])
+    events: list[str] = []
+
+    report = VoiceLoopRunner(
+        settings=settings,
+        assistant=assistant,
+        provider=provider,
+        recorder=fake_recorder,
+        sleeper=no_sleep,
+        beeper=no_beep,
+        status_callback=events.append,
+    ).run_once()
+
+    assert report.cleaned_command == "status report"
+    assert assistant.commands == ["status report"]
+    assert "what's the" not in assistant.commands
+    assert "Repair confirmation: no" in events
+    assert f"{REJECTED_COMMAND_PREFIX} what's the weather in Nottingham today? (repair not confirmed)" in events
+    assert RETRYING_COMMAND_CAPTURE_MESSAGE in events
 
 
 def test_voice_loop_incomplete_command_retries_once_even_when_reject_retry_disabled() -> None:
@@ -414,6 +496,34 @@ def test_voice_loop_valid_follow_up_does_not_require_wake_phrase() -> None:
     assert f"{ACCEPTED_COMMAND_PREFIX} status report" in events
     assert f"{ACCEPTED_FOLLOW_UP_PREFIX} weather report" in events
     assert "Last Jarvis response: handled weather report" in events
+
+
+def test_voice_loop_repairs_follow_up_from_recent_weather_context() -> None:
+    settings = AppSettings(_env_file=None, weather_default_city="Nottingham")
+    settings.voice_loop_speak_status = False
+    assistant = SpyAssistant()
+    provider = FakeProvider(["hey jarvis", "what's the weather in Nottingham today", "what's the"])
+    events: list[str] = []
+
+    report = VoiceLoopRunner(
+        settings=settings,
+        assistant=assistant,
+        provider=provider,
+        recorder=fake_recorder,
+        sleeper=no_sleep,
+        beeper=no_beep,
+        status_callback=events.append,
+    ).run_once()
+
+    assert report.cleaned_command == "what's the weather in Nottingham today?"
+    assert assistant.commands == [
+        "what's the weather in Nottingham today",
+        "what's the weather in Nottingham today?",
+    ]
+    assert report.speech_repair is not None
+    assert report.speech_repair.strategy == "context"
+    assert "Repair confirmation: yes" not in events
+    assert f"{ACCEPTED_FOLLOW_UP_PREFIX} what's the weather in Nottingham today?" in events
 
 
 def test_voice_loop_rejects_invalid_follow_up_before_openai_then_valid_retry_is_sent() -> None:

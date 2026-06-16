@@ -166,6 +166,31 @@ def test_voice_command_report_includes_safe_placeholder_response() -> None:
     assert "not allowed" in text
 
 
+def test_voice_command_repairs_broken_transcript_before_assistant_call() -> None:
+    settings = AppSettings(_env_file=None, weather_default_city="Nottingham")
+    assistant = SpyAssistant()
+    provider = FakeProvider(["hey jarvis", "Did it noting him today? What's the"])
+
+    report = VoiceCommandTestRunner(
+        settings=settings,
+        assistant=assistant,
+        provider=provider,
+        recorder=fake_recorder,
+        sleeper=no_sleep,
+        beeper=no_beep,
+    ).run()
+    text = format_voice_command_report(report)
+
+    assert report.raw_command_transcription == "Did it noting him today? What's the"
+    assert report.cleaned_command == "what's the weather in Nottingham today"
+    assert report.speech_repair is not None
+    assert report.speech_repair.strategy == "rule"
+    assert assistant.commands == ["what's the weather in Nottingham today"]
+    assert "repaired command: what's the weather in Nottingham today" in text
+    assert "repair confidence: 0.92" in text
+    assert "repair strategy: rule" in text
+
+
 def test_voice_command_punctuation_only_transcription_is_empty() -> None:
     settings = AppSettings(_env_file=None)
     assistant = SpyAssistant()

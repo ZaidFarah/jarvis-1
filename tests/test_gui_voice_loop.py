@@ -19,6 +19,7 @@ from voice.voice_loop import (
     RETURNING_TO_SLEEP_MESSAGE,
     RETRYING_COMMAND_CAPTURE_MESSAGE,
     RETRYING_FOLLOW_UP_CAPTURE_MESSAGE,
+    SPEECH_REPAIR_PREFIX,
     WAKE_DIAGNOSTICS_PREFIX,
 )
 
@@ -57,6 +58,10 @@ def test_voice_loop_gui_state_updates_controls_and_status_fields() -> None:
     assert window.voice_detail_value.text() == "Waiting for wake phrase"
     assert window.voice_response_panel.toPlainText() == "Jarvis responses will appear here."
     assert window.voice_provider_value.text() == settings.speech_to_text_provider
+    assert window.voice_raw_speech_value.text() == "--"
+    assert window.voice_interpreted_value.text() == "--"
+    assert window.voice_repair_confidence_value.text() == "--"
+    assert window.voice_repair_strategy_value.text() == "--"
     assert window.agent_enabled_value.text() in {"Enabled", "Disabled"}
     assert window.start_voice_loop_button.isEnabled() is True
     assert window.stop_voice_loop_button.isEnabled() is False
@@ -223,6 +228,28 @@ def test_voice_loop_gui_updates_live_diagnostics_without_state_regression() -> N
     assert window.voice_wake_score_value.text() == "0.810 / 0.720"
     assert window.voice_rms_value.text() == "0.015000 / 0.040000"
     assert window.voice_vad_value.text() == "yes"
+
+    window.close()
+    app.processEvents()
+
+
+def test_voice_loop_gui_updates_speech_repair_display() -> None:
+    app = _app()
+    settings = AppSettings(_env_file=None)
+    window = JarvisMainWindow(settings=settings, assistant=StubAssistant())
+
+    window._handle_voice_loop_status(
+        f"{SPEECH_REPAIR_PREFIX} raw=Did it noting him today? What's the | "
+        "repaired=what's the weather in Nottingham today | "
+        "confidence=0.92 | strategy=rule | reason=matched repair rule"
+    )
+    window._handle_voice_loop_status("Did you mean: what's the weather in Nottingham today?")
+
+    assert window.voice_raw_speech_value.text() == "Did it noting him today? What's the"
+    assert window.voice_interpreted_value.text() == "what's the weather in Nottingham today"
+    assert window.voice_repair_confidence_value.text() == "92%"
+    assert window.voice_repair_strategy_value.text() == "rule"
+    assert window.voice_loop_status_value.text() == "Confirming repair"
 
     window.close()
     app.processEvents()

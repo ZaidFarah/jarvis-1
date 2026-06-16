@@ -44,8 +44,28 @@ def test_voice_settings_defaults_are_lightweight() -> None:
         "tell me about",
         "can you",
         "could you",
+        "weather in",
+        "remind me",
         "please",
     ]
+    assert settings.voice_speech_repair_enabled is True
+    assert settings.voice_use_openai_repair is False
+    assert settings.voice_repair_rule_pairs == [
+        ("did it noting him today whats the", "what's the weather in Nottingham today"),
+        ("did it nottingham today whats the", "what's the weather in Nottingham today"),
+    ]
+    assert settings.voice_repair_incomplete_phrase_list == [
+        "what's the",
+        "what is the",
+        "tell me about",
+        "can you",
+        "could you",
+        "weather in",
+        "remind me",
+        "please",
+    ]
+    assert settings.voice_repair_confirmation_threshold == 0.75
+    assert settings.voice_repair_confirmation_seconds == 3.0
     assert settings.voice_command_retry_on_reject is True
     assert settings.voice_command_max_retries == 1
     assert settings.voice_loop_enabled is False
@@ -152,6 +172,12 @@ def test_wake_settings_read_environment(monkeypatch) -> None:
     monkeypatch.setenv("VOICE_COMMAND_MIN_WORDS", "3")
     monkeypatch.setenv("VOICE_COMMAND_REJECT_PHRASES", "you, nope")
     monkeypatch.setenv("VOICE_COMMAND_INCOMPLETE_PHRASES", "what's the, can you")
+    monkeypatch.setenv("VOICE_SPEECH_REPAIR_ENABLED", "false")
+    monkeypatch.setenv("VOICE_USE_OPENAI_REPAIR", "true")
+    monkeypatch.setenv("VOICE_REPAIR_RULES", "bad words=>good words")
+    monkeypatch.setenv("VOICE_REPAIR_INCOMPLETE_PHRASES", "weather in, remind me")
+    monkeypatch.setenv("VOICE_REPAIR_CONFIRMATION_THRESHOLD", "0.6")
+    monkeypatch.setenv("VOICE_REPAIR_CONFIRMATION_SECONDS", "2.5")
     monkeypatch.setenv("VOICE_COMMAND_RETRY_ON_REJECT", "false")
     monkeypatch.setenv("VOICE_COMMAND_MAX_RETRIES", "2")
     monkeypatch.setenv("VOICE_LOOP_ENABLED", "true")
@@ -182,6 +208,12 @@ def test_wake_settings_read_environment(monkeypatch) -> None:
     assert settings.voice_command_min_words == 3
     assert settings.voice_command_reject_phrase_list == ["you", "nope"]
     assert settings.voice_command_incomplete_phrase_list == ["what's the", "can you"]
+    assert settings.voice_speech_repair_enabled is False
+    assert settings.voice_use_openai_repair is True
+    assert settings.voice_repair_rule_pairs == [("bad words", "good words")]
+    assert settings.voice_repair_incomplete_phrase_list == ["weather in", "remind me"]
+    assert settings.voice_repair_confirmation_threshold == 0.6
+    assert settings.voice_repair_confirmation_seconds == 2.5
     assert settings.voice_command_retry_on_reject is False
     assert settings.voice_command_max_retries == 2
     assert settings.voice_loop_enabled is True

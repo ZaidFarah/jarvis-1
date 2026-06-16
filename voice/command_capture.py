@@ -11,6 +11,7 @@ from loguru import logger
 from config.settings import AppSettings
 from services.logging_service import add_managed_file_sink
 from voice.command_validation import CommandValidationResult, validate_cleaned_command
+from voice.speech_repair import SpeechRepairResult, SpeechRepairer
 from voice.stt import create_speech_to_text_provider
 from voice.vad import RmsVoiceActivityDetector
 from voice.wake import clean_command_text
@@ -38,6 +39,7 @@ class CommandCaptureReport:
     cleaned_command: str
     validation: CommandValidationResult
     log_file: Path
+    speech_repair: SpeechRepairResult | None = None
     errors: list[str] = field(default_factory=list)
 
     @property
@@ -68,6 +70,7 @@ class CommandCaptureDiagnosticRunner:
         self.sounddevice_module = sounddevice_module
         self.log_file = self.settings.log_dir / "command_capture.log"
         self.capture_logger = logger.bind(command_capture=True)
+        self.speech_repairer = SpeechRepairer(settings)
         self._ensure_log_sink()
 
     def run(self) -> CommandCaptureReport:
@@ -78,6 +81,7 @@ class CommandCaptureDiagnosticRunner:
         vad_crossed = False
         raw_transcript = ""
         cleaned_command = ""
+        speech_repair: SpeechRepairResult | None = None
         validation = validate_cleaned_command(
             cleaned_command,
             min_words=self.settings.voice_command_min_words,
@@ -96,7 +100,16 @@ class CommandCaptureDiagnosticRunner:
             message = "Speech-to-text provider is not available. Command capture test cannot run."
             self.capture_logger.error(message)
             errors.append(message)
-            return self._report(average_rms, max_rms, vad_crossed, raw_transcript, cleaned_command, validation, errors)
+            return self._report(
+                average_rms,
+                max_rms,
+                vad_crossed,
+                raw_transcript,
+                cleaned_command,
+                speech_repair,
+                validation,
+                errors,
+            )
 
         try:
             samples = self._record_microphone()
@@ -120,11 +133,22 @@ class CommandCaptureDiagnosticRunner:
             message = f"Microphone recording failed: {type(exc).__name__}: {exc}"
             self.capture_logger.exception(message)
             errors.append(message)
-            return self._report(average_rms, max_rms, vad_crossed, raw_transcript, cleaned_command, validation, errors)
+            return self._report(
+                average_rms,
+                max_rms,
+                vad_crossed,
+                raw_transcript,
+                cleaned_command,
+                speech_repair,
+                validation,
+                errors,
+            )
 
         try:
             raw_transcript = self.provider.transcribe(samples, self.settings.voice_sample_rate).text.strip()
-            cleaned_command = clean_command_text(raw_transcript)
+            cleaned_transcript = clean_command_text(raw_transcript)
+            speech_repair = self.speech_repairer.repair(cleaned_transcript, raw_transcript=raw_transcript)
+            cleaned_command = speech_repair.repaired_transcript
             validation = validate_cleaned_command(
                 cleaned_command,
                 min_words=self.settings.voice_command_min_words,
@@ -132,9 +156,12 @@ class CommandCaptureDiagnosticRunner:
                 incomplete_phrases=self.settings.voice_command_incomplete_phrase_list,
             )
             self.capture_logger.info(
-                "Command capture transcription={} cleaned={} accepted={} reason={}",
+                "Command capture transcription={} cleaned={} repaired={} confidence={} strategy={} accepted={} reason={}",
                 raw_transcript or "<empty>",
+                speech_repair.cleaned_transcript or "<empty>",
                 cleaned_command or "<empty>",
+                f"{speech_repair.confidence:.2f}",
+                speech_repair.strategy,
                 validation.accepted,
                 validation.rejection_reason or "<none>",
             )
@@ -143,7 +170,16 @@ class CommandCaptureDiagnosticRunner:
             self.capture_logger.exception(message)
             errors.append(message)
 
-        return self._report(average_rms, max_rms, vad_crossed, raw_transcript, cleaned_command, validation, errors)
+        return self._report(
+            average_rms,
+            max_rms,
+            vad_crossed,
+            raw_transcript,
+            cleaned_command,
+            speech_repair,
+            validation,
+            errors,
+        )
 
     def _report(
         self,
@@ -152,6 +188,7 @@ class CommandCaptureDiagnosticRunner:
         vad_crossed: bool,
         raw_transcript: str,
         cleaned_command: str,
+        speech_repair: SpeechRepairResult | None,
         validation: CommandValidationResult,
         errors: list[str],
     ) -> CommandCaptureReport:
@@ -166,6 +203,7 @@ class CommandCaptureDiagnosticRunner:
             vad_threshold_crossed=vad_crossed,
             raw_transcript=raw_transcript,
             cleaned_command=cleaned_command,
+            speech_repair=speech_repair,
             validation=validation,
             log_file=self.log_file,
             errors=errors,
@@ -270,6 +308,15 @@ def format_command_capture_report(report: CommandCaptureReport) -> str:
         f"cleaned command: {report.cleaned_command if report.cleaned_command else '<empty>'}",
         f"accepted: {_yes_no(report.accepted)}",
     ]
+    if report.speech_repair is not None:
+        lines.extend(
+            [
+                f"repaired transcript: {report.speech_repair.repaired_transcript if report.speech_repair.repaired_transcript else '<empty>'}",
+                f"repair confidence: {report.speech_repair.confidence:.2f}",
+                f"repair strategy: {report.speech_repair.strategy}",
+                f"repair reason: {report.speech_repair.repair_reason}",
+            ]
+        )
     if report.rejection_reason:
         lines.append(f"rejection reason: {report.rejection_reason}")
     lines.append(f"diagnostic log: {report.log_file}")

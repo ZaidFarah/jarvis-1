@@ -63,6 +63,8 @@ def test_command_capture_runner_reports_validation_and_audio_levels(tmp_path: Pa
     assert report.vad_threshold_crossed is True
     assert report.raw_transcript == "you"
     assert report.cleaned_command == "you"
+    assert report.speech_repair is not None
+    assert report.speech_repair.strategy == "skipped"
     assert report.accepted is False
     assert report.rejection_reason == "rejected phrase: you"
     assert report.log_file == tmp_path / "logs" / "command_capture.log"
@@ -75,6 +77,7 @@ def test_command_capture_runner_reports_validation_and_audio_levels(tmp_path: Pa
     assert "VAD threshold crossed: yes" in text
     assert "raw transcript: you" in text
     assert "cleaned command: you" in text
+    assert "repair strategy: skipped" in text
     assert "accepted: no" in text
     assert "rejection reason: rejected phrase: you" in text
     assert "diagnostic log:" in text
@@ -87,6 +90,32 @@ def test_audio_capture_metrics_helper_reports_rms_and_vad() -> None:
     assert metrics.max_rms > 0
     assert metrics.vad_threshold == 0.05
     assert metrics.vad_threshold_crossed is True
+
+
+def test_command_capture_runner_reports_speech_repair(tmp_path: Path) -> None:
+    settings = AppSettings(
+        _env_file=None,
+        log_dir=tmp_path / "logs",
+        weather_default_city="Nottingham",
+        voice_command_record_seconds=0.25,
+    )
+
+    report = CommandCaptureDiagnosticRunner(
+        settings,
+        provider=FakeProvider("Did it noting him today? What's the"),
+        sounddevice_module=FakeSoundDevice(),
+    ).run()
+    text = format_command_capture_report(report)
+
+    assert report.raw_transcript == "Did it noting him today? What's the"
+    assert report.cleaned_command == "what's the weather in Nottingham today"
+    assert report.speech_repair is not None
+    assert report.speech_repair.confidence == 0.92
+    assert report.speech_repair.strategy == "rule"
+    assert report.accepted is True
+    assert "repaired transcript: what's the weather in Nottingham today" in text
+    assert "repair confidence: 0.92" in text
+    assert "repair strategy: rule" in text
 
 
 def test_command_capture_cli_command_formats_report(tmp_path: Path, monkeypatch, capsys) -> None:

@@ -240,10 +240,50 @@ class AppSettings(BaseSettings):
         validation_alias=AliasChoices("VOICE_COMMAND_REJECT_PHRASES", "JARVIS_VOICE_COMMAND_REJECT_PHRASES"),
     )
     voice_command_incomplete_phrases: str = Field(
-        default="what's the,what is the,tell me about,can you,could you,please",
+        default="what's the,what is the,tell me about,can you,could you,weather in,remind me,please",
         validation_alias=AliasChoices(
             "VOICE_COMMAND_INCOMPLETE_PHRASES",
             "JARVIS_VOICE_COMMAND_INCOMPLETE_PHRASES",
+        ),
+    )
+    voice_speech_repair_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("VOICE_SPEECH_REPAIR_ENABLED", "JARVIS_VOICE_SPEECH_REPAIR_ENABLED"),
+    )
+    voice_use_openai_repair: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("VOICE_USE_OPENAI_REPAIR", "JARVIS_VOICE_USE_OPENAI_REPAIR"),
+    )
+    voice_repair_rules: str = Field(
+        default=(
+            "did it noting him today whats the=>what's the weather in {weather_default_city} today;"
+            "did it nottingham today whats the=>what's the weather in {weather_default_city} today"
+        ),
+        validation_alias=AliasChoices("VOICE_REPAIR_RULES", "JARVIS_VOICE_REPAIR_RULES"),
+    )
+    voice_repair_incomplete_phrases: str = Field(
+        default="what's the,what is the,tell me about,can you,could you,weather in,remind me,please",
+        validation_alias=AliasChoices(
+            "VOICE_REPAIR_INCOMPLETE_PHRASES",
+            "JARVIS_VOICE_REPAIR_INCOMPLETE_PHRASES",
+        ),
+    )
+    voice_repair_confirmation_threshold: float = Field(
+        default=0.75,
+        ge=0.0,
+        le=1.0,
+        validation_alias=AliasChoices(
+            "VOICE_REPAIR_CONFIRMATION_THRESHOLD",
+            "JARVIS_VOICE_REPAIR_CONFIRMATION_THRESHOLD",
+        ),
+    )
+    voice_repair_confirmation_seconds: float = Field(
+        default=3.0,
+        ge=0.25,
+        le=10.0,
+        validation_alias=AliasChoices(
+            "VOICE_REPAIR_CONFIRMATION_SECONDS",
+            "JARVIS_VOICE_REPAIR_CONFIRMATION_SECONDS",
         ),
     )
     voice_command_retry_on_reject: bool = Field(
@@ -907,6 +947,31 @@ class AppSettings(BaseSettings):
             for item in self.voice_command_incomplete_phrases.replace("\n", ",").split(",")
         ]
         return [phrase for phrase in phrases if phrase]
+
+    @property
+    def voice_repair_incomplete_phrase_list(self) -> list[str]:
+        phrases = [
+            item.strip().lower()
+            for item in self.voice_repair_incomplete_phrases.replace("\n", ",").split(",")
+        ]
+        return [phrase for phrase in phrases if phrase]
+
+    @property
+    def voice_repair_rule_pairs(self) -> list[tuple[str, str]]:
+        rules: list[tuple[str, str]] = []
+        for raw_rule in self.voice_repair_rules.replace("\n", ";").split(";"):
+            if "=>" not in raw_rule:
+                continue
+            source, target = raw_rule.split("=>", 1)
+            source = " ".join(source.strip().split())
+            target = " ".join(target.strip().split())
+            if source and target:
+                try:
+                    target = target.format(weather_default_city=self.weather_default_city)
+                except (KeyError, ValueError):
+                    pass
+                rules.append((source, target))
+        return rules
 
     @property
     def has_openai_api_key(self) -> bool:

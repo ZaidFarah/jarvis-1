@@ -14,6 +14,14 @@ from config.settings import AppSettings
 from services.logging_service import add_managed_file_sink
 from voice.command_capture import AudioCaptureMetrics, calculate_audio_capture_metrics
 from voice.command_validation import CommandValidationResult, validate_cleaned_command
+from voice.speech_repair import (
+    OpenAIRepairer,
+    REPAIR_OPENAI_PROMPT,
+    SpeechRepairResult,
+    SpeechRepairer,
+    is_confirmation_no,
+    is_confirmation_yes,
+)
 from voice.stt import create_speech_to_text_provider
 from voice.tts import TextToSpeechResult, speak_text
 from voice.voice_command_test import COMMAND_PROMPT, LISTENING_FOR_COMMAND_PROMPT, NO_COMMAND_DETECTED_MESSAGE
@@ -50,6 +58,7 @@ ACCEPTED_FOLLOW_UP_PREFIX = "Accepted follow-up:"
 RETRYING_FOLLOW_UP_CAPTURE_MESSAGE = "Retrying follow-up capture..."
 WAKE_DIAGNOSTICS_PREFIX = "Wake diagnostics:"
 CAPTURE_DIAGNOSTICS_PREFIX = "Capture diagnostics:"
+SPEECH_REPAIR_PREFIX = "Speech repair:"
 
 
 @dataclass(frozen=True)
@@ -57,6 +66,7 @@ class CommandCaptureResult:
     raw_transcription: str
     cleaned_command: str
     validation: CommandValidationResult
+    speech_repair: SpeechRepairResult | None = None
     audio_metrics: AudioCaptureMetrics | None = None
     no_follow_up: bool = False
     stop_requested: bool = False
@@ -93,6 +103,7 @@ class VoiceLoopCycleReport:
     raw_command_transcription: str
     cleaned_command: str
     command_validation: CommandValidationResult
+    speech_repair: SpeechRepairResult | None
     command_audio_metrics: AudioCaptureMetrics | None
     assistant_response: AssistantResponse | None
     tts_result: TextToSpeechResult | None
@@ -121,6 +132,7 @@ class VoiceLoopRunner:
         status_callback: StatusCallback | None = None,
         wake_provider: OpenWakeWordWakeProvider | None = None,
         wake_provider_resolution: WakeProviderResolution | None = None,
+        openai_repairer: OpenAIRepairer | None = None,
     ) -> None:
         self.settings = settings
         self.assistant = assistant or AssistantCore(settings=settings)
@@ -132,11 +144,16 @@ class VoiceLoopRunner:
         self.status_callback = status_callback
         self.log_file = self.settings.log_dir / "voice_loop.log"
         self.voice_loop_logger = logger.bind(voice_loop=True)
+        self.speech_repairer = SpeechRepairer(
+            settings,
+            openai_repairer=openai_repairer or self._repair_with_openai,
+        )
         self.wake_provider_resolution = wake_provider_resolution or resolve_wake_provider(settings)
         self.wake_provider = wake_provider or self._create_wake_provider()
         self._stop_requested = False
         self.summary = VoiceLoopSummary()
         self._consecutive_empty_commands = 0
+        self._recent_voice_commands: list[str] = []
         self._ensure_voice_loop_log_sink()
 
     def request_stop(self) -> None:
@@ -177,6 +194,7 @@ class VoiceLoopRunner:
         wake_transcription = ""
         raw_command_transcription = ""
         cleaned_command = ""
+        speech_repair: SpeechRepairResult | None = None
         command_audio_metrics: AudioCaptureMetrics | None = None
         assistant_response: AssistantResponse | None = None
         tts_result: TextToSpeechResult | None = None
@@ -309,6 +327,7 @@ class VoiceLoopRunner:
 
         raw_command_transcription = command_capture.raw_transcription
         cleaned_command = command_capture.cleaned_command
+        speech_repair = command_capture.speech_repair
         command_audio_metrics = command_capture.audio_metrics
         if not command_capture.validation.accepted:
             return self._return_to_sleep_report(
@@ -320,6 +339,7 @@ class VoiceLoopRunner:
                 tts_result,
                 statuses,
                 errors,
+                speech_repair=speech_repair,
                 command_audio_metrics=command_audio_metrics,
                 stop_requested=command_capture.stop_requested,
             )
@@ -341,6 +361,7 @@ class VoiceLoopRunner:
                     tts_result,
                     statuses,
                     errors,
+                    speech_repair=speech_repair,
                     command_audio_metrics=command_audio_metrics,
                     stop_requested=True,
                 )
@@ -362,6 +383,7 @@ class VoiceLoopRunner:
                     tts_result,
                     statuses,
                     errors,
+                    speech_repair=speech_repair,
                     command_audio_metrics=command_audio_metrics,
                 )
 
@@ -371,6 +393,7 @@ class VoiceLoopRunner:
             if assistant_response.accepted:
                 self._status("Speaking", statuses)
                 tts_result = self._speak_text(assistant_response.text, errors, sleep_after=False)
+                self._remember_voice_command(cleaned_command)
             else:
                 break
 
@@ -403,6 +426,7 @@ class VoiceLoopRunner:
 
             raw_command_transcription = follow_up_capture.raw_transcription
             cleaned_command = follow_up_capture.cleaned_command
+            speech_repair = follow_up_capture.speech_repair
             command_audio_metrics = follow_up_capture.audio_metrics
             follow_up_used = True
 
@@ -415,6 +439,7 @@ class VoiceLoopRunner:
             tts_result,
             statuses,
             errors,
+            speech_repair=speech_repair,
             command_audio_metrics=command_audio_metrics,
             stop_requested=stop_requested,
         )
@@ -425,7 +450,7 @@ class VoiceLoopRunner:
         *,
         listen_prompt: str = LISTENING_FOR_COMMAND_PROMPT,
         record_seconds: float | None = None,
-    ) -> tuple[str, str, CommandValidationResult, AudioCaptureMetrics]:
+    ) -> tuple[str, str, CommandValidationResult, AudioCaptureMetrics, SpeechRepairResult]:
         self._status(listen_prompt, statuses)
         command_samples = self.recorder(record_seconds or self.settings.voice_command_record_seconds)
         audio_metrics = calculate_audio_capture_metrics(
@@ -435,25 +460,35 @@ class VoiceLoopRunner:
         )
         self._log_capture_audio_diagnostics(audio_metrics, record_seconds or self.settings.voice_command_record_seconds)
         raw_command_transcription = self.provider.transcribe(command_samples, self.settings.voice_sample_rate).text.strip()
-        cleaned_command = remove_wake_phrase_prefix(
+        cleaned_transcription = remove_wake_phrase_prefix(
             raw_command_transcription,
             wake_phrase=self.settings.wake_phrase,
             aliases=self.settings.wake_alias_list,
         )
+        speech_repair = self.speech_repairer.repair(
+            cleaned_transcription,
+            raw_transcript=raw_command_transcription,
+            recent_commands=self._recent_voice_commands,
+        )
+        cleaned_command = speech_repair.repaired_transcript
         command_validation = validate_cleaned_command(
             cleaned_command,
             min_words=self.settings.voice_command_min_words,
             reject_phrases=self.settings.voice_command_reject_phrase_list,
             incomplete_phrases=self.settings.voice_command_incomplete_phrase_list,
         )
+        self._log_speech_repair_diagnostics(speech_repair)
         self.voice_loop_logger.info(
-            "Command transcription={} cleaned={} accepted={} reason={}",
+            "Command transcription={} cleaned={} repaired={} confidence={} strategy={} accepted={} reason={}",
             raw_command_transcription or "<empty>",
-            cleaned_command or "<empty>",
+            speech_repair.cleaned_transcript or "<empty>",
+            speech_repair.repaired_transcript or "<empty>",
+            f"{speech_repair.confidence:.2f}",
+            speech_repair.strategy,
             command_validation.accepted,
             command_validation.rejection_reason or "<none>",
         )
-        return raw_command_transcription, cleaned_command, command_validation, audio_metrics
+        return raw_command_transcription, cleaned_command, command_validation, audio_metrics, speech_repair
 
     def _capture_valid_command(
         self,
@@ -473,7 +508,7 @@ class VoiceLoopRunner:
         base_max_retries = self.settings.voice_command_max_retries if self.settings.voice_command_retry_on_reject else 0
         attempt = 0
         while True:
-            raw_transcription, cleaned_command, validation, audio_metrics = self._capture_command(
+            raw_transcription, cleaned_command, validation, audio_metrics, speech_repair = self._capture_command(
                 statuses,
                 listen_prompt=listen_prompt,
                 record_seconds=record_seconds,
@@ -485,6 +520,7 @@ class VoiceLoopRunner:
                     raw_transcription=raw_transcription,
                     cleaned_command=cleaned_command,
                     validation=validation,
+                    speech_repair=speech_repair,
                     audio_metrics=audio_metrics,
                     no_follow_up=True,
                 )
@@ -495,9 +531,15 @@ class VoiceLoopRunner:
                     raw_transcription=raw_transcription,
                     cleaned_command=cleaned_command,
                     validation=validation,
+                    speech_repair=speech_repair,
                     audio_metrics=audio_metrics,
                     no_follow_up=True,
                 )
+
+            if validation.accepted and speech_repair.needs_confirmation(self.settings.voice_repair_confirmation_threshold):
+                confirmed, confirmation_reason = self._confirm_repair(speech_repair, statuses, errors)
+                if not confirmed:
+                    validation = CommandValidationResult(False, cleaned_command, confirmation_reason)
 
             self._emit(f"Last recognized command: {cleaned_command or '<empty>'}")
             if validation.accepted:
@@ -506,6 +548,7 @@ class VoiceLoopRunner:
                     raw_transcription=raw_transcription,
                     cleaned_command=cleaned_command,
                     validation=validation,
+                    speech_repair=speech_repair,
                     audio_metrics=audio_metrics,
                 )
 
@@ -542,6 +585,7 @@ class VoiceLoopRunner:
                 raw_transcription=raw_transcription,
                 cleaned_command=cleaned_command,
                 validation=validation,
+                speech_repair=speech_repair,
                 audio_metrics=audio_metrics,
                 stop_requested=stop_requested,
             )
@@ -556,6 +600,7 @@ class VoiceLoopRunner:
         tts_result: TextToSpeechResult | None,
         statuses: list[str],
         errors: list[str],
+        speech_repair: SpeechRepairResult | None = None,
         command_audio_metrics: AudioCaptureMetrics | None = None,
         stop_requested: bool = False,
     ) -> VoiceLoopCycleReport:
@@ -571,6 +616,7 @@ class VoiceLoopRunner:
             tts_result,
             statuses,
             errors,
+            speech_repair=speech_repair,
             command_audio_metrics=command_audio_metrics,
             stop_requested=stop_requested,
         )
@@ -619,6 +665,7 @@ class VoiceLoopRunner:
         tts_result: TextToSpeechResult | None,
         statuses: list[str],
         errors: list[str],
+        speech_repair: SpeechRepairResult | None = None,
         command_audio_metrics: AudioCaptureMetrics | None = None,
         stop_requested: bool = False,
     ) -> VoiceLoopCycleReport:
@@ -643,6 +690,7 @@ class VoiceLoopRunner:
             raw_command_transcription=raw_command_transcription,
             cleaned_command=cleaned_command,
             command_validation=command_validation,
+            speech_repair=speech_repair,
             command_audio_metrics=command_audio_metrics,
             assistant_response=assistant_response,
             tts_result=tts_result,
@@ -722,6 +770,68 @@ class VoiceLoopRunner:
             self.log_file,
             level="DEBUG",
             filter=lambda record: bool(record["extra"].get("voice_loop")),
+        )
+
+    def _repair_with_openai(self, cleaned: str) -> str | None:
+        openai_service = getattr(self.assistant, "openai_service", None)
+        if openai_service is None:
+            return None
+        result = openai_service.chat(cleaned, system_prompt=REPAIR_OPENAI_PROMPT)
+        if not result.success or not result.text:
+            return None
+        return result.text
+
+    def _remember_voice_command(self, command: str) -> None:
+        cleaned = " ".join(command.strip().split())
+        if not cleaned:
+            return
+        self._recent_voice_commands.append(cleaned)
+        if len(self._recent_voice_commands) > 8:
+            del self._recent_voice_commands[: len(self._recent_voice_commands) - 8]
+
+    def _confirm_repair(
+        self,
+        speech_repair: SpeechRepairResult,
+        statuses: list[str],
+        errors: list[str],
+    ) -> tuple[bool, str]:
+        repaired = speech_repair.repaired_transcript.rstrip(" ?")
+        prompt = f"Did you mean: {repaired}?"
+        self._status(prompt, statuses)
+        if self.settings.voice_loop_speak_status or self.settings.tts_enabled:
+            self._speak_text(prompt, errors, sleep_after=False)
+        samples = self.recorder(self.settings.voice_repair_confirmation_seconds)
+        confirmation = self.provider.transcribe(samples, self.settings.voice_sample_rate).text.strip()
+        self.voice_loop_logger.info(
+            "Repair confirmation transcript={} repaired={}",
+            confirmation or "<empty>",
+            speech_repair.repaired_transcript,
+        )
+        if is_confirmation_yes(confirmation):
+            self._emit("Repair confirmation: yes")
+            return True, "repair confirmed"
+        if is_confirmation_no(confirmation):
+            self._emit("Repair confirmation: no")
+            return False, "repair not confirmed"
+        self._emit(f"Repair confirmation: invalid ({confirmation or '<empty>'})")
+        return False, "repair confirmation invalid"
+
+    def _log_speech_repair_diagnostics(self, speech_repair: SpeechRepairResult) -> None:
+        self.voice_loop_logger.info(
+            "Speech repair raw={} cleaned={} repaired={} confidence={} strategy={} reason={}",
+            speech_repair.raw_transcript or "<empty>",
+            speech_repair.cleaned_transcript or "<empty>",
+            speech_repair.repaired_transcript or "<empty>",
+            f"{speech_repair.confidence:.2f}",
+            speech_repair.strategy,
+            speech_repair.repair_reason,
+        )
+        self._emit(
+            f"{SPEECH_REPAIR_PREFIX} raw={speech_repair.raw_transcript or '<empty>'} | "
+            f"repaired={speech_repair.repaired_transcript or '<empty>'} | "
+            f"confidence={speech_repair.confidence:.2f} | "
+            f"strategy={speech_repair.strategy} | "
+            f"reason={speech_repair.repair_reason}"
         )
 
     def _log_wake_diagnostics(self, samples: list[float], wake_detection: WakeDetectionResult) -> None:

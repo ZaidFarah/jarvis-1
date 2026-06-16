@@ -54,6 +54,7 @@ from voice.voice_loop import (
     RETURNING_TO_SLEEP_MESSAGE,
     RETRYING_COMMAND_CAPTURE_MESSAGE,
     RETRYING_FOLLOW_UP_CAPTURE_MESSAGE,
+    SPEECH_REPAIR_PREFIX,
     STOP_COMMAND_DETECTED_MESSAGE,
     VOICE_LOOP_STARTED_MESSAGE,
     VOICE_LOOP_STOPPED_MESSAGE,
@@ -191,6 +192,10 @@ class JarvisMainWindow(QMainWindow):
         self.voice_wake_score_value = QLabel("--")
         self.voice_rms_value = QLabel("--")
         self.voice_vad_value = QLabel("--")
+        self.voice_raw_speech_value = QLabel("--")
+        self.voice_interpreted_value = QLabel("--")
+        self.voice_repair_confidence_value = QLabel("--")
+        self.voice_repair_strategy_value = QLabel("--")
         self.voice_response_panel = QTextEdit()
         self.agent_enabled_value = QLabel("Enabled" if settings.agent_enabled else "Disabled")
         self.reminders_check_value = QLabel("Idle")
@@ -262,6 +267,10 @@ class JarvisMainWindow(QMainWindow):
         self.voice_wake_score_value.setObjectName("voiceLoopValue")
         self.voice_rms_value.setObjectName("voiceLoopValue")
         self.voice_vad_value.setObjectName("voiceLoopValue")
+        self.voice_raw_speech_value.setObjectName("voiceLoopValue")
+        self.voice_interpreted_value.setObjectName("voiceLoopValue")
+        self.voice_repair_confidence_value.setObjectName("voiceLoopValue")
+        self.voice_repair_strategy_value.setObjectName("voiceLoopValue")
         self.agent_enabled_value.setObjectName("voiceLoopValue")
         self.reminders_check_value.setObjectName("voiceLoopValue")
         self.notification_result_value.setObjectName("voiceLoopValue")
@@ -377,6 +386,14 @@ class JarvisMainWindow(QMainWindow):
         diagnostics_grid.addWidget(self.voice_rms_value, 3, 1)
         diagnostics_grid.addWidget(QLabel("VAD"), 4, 0)
         diagnostics_grid.addWidget(self.voice_vad_value, 4, 1)
+        diagnostics_grid.addWidget(QLabel("Speech"), 5, 0)
+        diagnostics_grid.addWidget(self.voice_raw_speech_value, 5, 1)
+        diagnostics_grid.addWidget(QLabel("Interpreted"), 6, 0)
+        diagnostics_grid.addWidget(self.voice_interpreted_value, 6, 1)
+        diagnostics_grid.addWidget(QLabel("Confidence"), 7, 0)
+        diagnostics_grid.addWidget(self.voice_repair_confidence_value, 7, 1)
+        diagnostics_grid.addWidget(QLabel("Strategy"), 8, 0)
+        diagnostics_grid.addWidget(self.voice_repair_strategy_value, 8, 1)
         assistant_layout.addWidget(diagnostics_panel, stretch=1)
 
         self.tabs = QTabWidget()
@@ -1448,6 +1465,19 @@ class JarvisMainWindow(QMainWindow):
             self._update_capture_diagnostics(status)
             self._append_message("Diagnostics", status)
             return
+        if status.startswith(SPEECH_REPAIR_PREFIX):
+            self._update_speech_repair(status)
+            self._append_message("Diagnostics", status)
+            return
+        if status.startswith("Did you mean:"):
+            self.voice_loop_status_value.setText("Confirming repair")
+            self.set_status(AssistantStatus.LISTENING)
+            self._append_message("Jarvis", status)
+            return
+        if status.startswith("Repair confirmation:"):
+            self.voice_loop_status_value.setText(status)
+            self._append_message("Jarvis", status)
+            return
         if status.startswith("Last recognized command:"):
             command_text = status.split(":", 1)[1].strip() or "None"
             self.voice_loop_last_command_value.setText(command_text)
@@ -1595,6 +1625,18 @@ class JarvisMainWindow(QMainWindow):
             self.voice_provider_value.setText(provider)
         self._update_rms_labels(values)
 
+    def _update_speech_repair(self, status: str) -> None:
+        values = self._parse_pipe_diagnostics(status.removeprefix(SPEECH_REPAIR_PREFIX))
+        self.voice_raw_speech_value.setText(values.get("raw", "--"))
+        self.voice_interpreted_value.setText(values.get("repaired", "--"))
+        confidence = values.get("confidence")
+        if confidence:
+            try:
+                self.voice_repair_confidence_value.setText(f"{float(confidence) * 100:.0f}%")
+            except ValueError:
+                self.voice_repair_confidence_value.setText(confidence)
+        self.voice_repair_strategy_value.setText(values.get("strategy", "--"))
+
     def _update_rms_labels(self, values: dict[str, str]) -> None:
         average_rms = values.get("average_rms", "--")
         max_rms = values.get("max_rms", "--")
@@ -1606,6 +1648,16 @@ class JarvisMainWindow(QMainWindow):
     def _parse_diagnostics(payload: str) -> dict[str, str]:
         values: dict[str, str] = {}
         for part in payload.strip().split():
+            if "=" not in part:
+                continue
+            key, value = part.split("=", 1)
+            values[key.strip()] = value.strip()
+        return values
+
+    @staticmethod
+    def _parse_pipe_diagnostics(payload: str) -> dict[str, str]:
+        values: dict[str, str] = {}
+        for part in payload.strip().split("|"):
             if "=" not in part:
                 continue
             key, value = part.split("=", 1)
