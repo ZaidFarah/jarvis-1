@@ -5,6 +5,16 @@ from dataclasses import dataclass
 from difflib import SequenceMatcher
 
 
+_WAKE_TOKEN_CONFUSIONS = {
+    "jervis": "jarvis",
+    "jarves": "jarvis",
+    "jarvus": "jarvis",
+    "jarviss": "jarvis",
+    "jarvish": "jarvis",
+    "charvis": "jarvis",
+}
+
+
 @dataclass(frozen=True)
 class WakeDetectionResult:
     detected: bool
@@ -30,13 +40,24 @@ class WakeDetector:
             return WakeDetectionResult(False, transcript, None, 0.0, self.threshold, "none")
 
         for phrase in phrases:
-            if phrase and phrase in normalized:
+            if phrase and _contains_phrase(normalized, phrase):
                 return WakeDetectionResult(True, transcript, phrase, 1.0, self.threshold, "exact")
+
+        phonetic_normalized = self._phonetic_normalize(normalized)
+        if phonetic_normalized != normalized:
+            for phrase in phrases:
+                phonetic_phrase = self._phonetic_normalize(phrase)
+                if phrase and _contains_phrase(phonetic_normalized, phonetic_phrase):
+                    score = 0.94
+                    if score >= self.threshold:
+                        return WakeDetectionResult(True, transcript, phrase, score, self.threshold, "phonetic")
 
         best_phrase: str | None = None
         best_score = 0.0
         for phrase in phrases:
             for candidate in self._candidates(normalized, phrase):
+                if not _has_anchor_token(candidate, phrase):
+                    continue
                 score = SequenceMatcher(None, candidate, phrase).ratio()
                 if score > best_score:
                     best_score = score
@@ -65,6 +86,12 @@ class WakeDetector:
         without_punctuation = re.sub(r"[^a-z0-9\s]", " ", lowered)
         return re.sub(r"\s+", " ", without_punctuation).strip()
 
+    @classmethod
+    def _phonetic_normalize(cls, text: str) -> str:
+        words = [cls._normalize(word) for word in text.split()]
+        mapped = [_WAKE_TOKEN_CONFUSIONS.get(word, word) for word in words if word]
+        return " ".join(mapped)
+
     @staticmethod
     def _candidates(transcript: str, phrase: str) -> list[str]:
         transcript_words = transcript.split()
@@ -91,6 +118,10 @@ def remove_wake_phrase_prefix(command_text: str, wake_phrase: str, aliases: list
         match = pattern.match(command_text)
         if match:
             return clean_command_text(command_text[match.end() :])
+
+    fuzzy_cleaned = _remove_fuzzy_wake_prefix(command_text, phrases)
+    if fuzzy_cleaned is not None:
+        return fuzzy_cleaned
 
     return clean_command_text(command_text)
 
@@ -119,3 +150,57 @@ def _wake_prefix_pattern(phrase: str) -> re.Pattern[str]:
     separator = r"[\s,.;:!?\"'()\[\]-]+"
     body = separator.join(re.escape(word) for word in words)
     return re.compile(rf"^\s*{body}(?=$|[\s,.;:!?\"'()\[\]-])", re.IGNORECASE)
+
+
+def _contains_phrase(transcript: str, phrase: str) -> bool:
+    transcript_words = transcript.split()
+    phrase_words = phrase.split()
+    if not transcript_words or not phrase_words:
+        return False
+
+    phrase_len = len(phrase_words)
+    for start in range(0, len(transcript_words) - phrase_len + 1):
+        if transcript_words[start : start + phrase_len] == phrase_words:
+            return True
+    return False
+
+
+def _has_anchor_token(candidate: str, phrase: str) -> bool:
+    anchor_words = [word for word in phrase.split() if len(word) >= 4]
+    if not anchor_words:
+        return True
+
+    candidate_words = candidate.split()
+    for candidate_word in candidate_words:
+        phonetic_candidate = _WAKE_TOKEN_CONFUSIONS.get(candidate_word, candidate_word)
+        for anchor in anchor_words:
+            phonetic_anchor = _WAKE_TOKEN_CONFUSIONS.get(anchor, anchor)
+            if phonetic_candidate == phonetic_anchor:
+                return True
+            if SequenceMatcher(None, phonetic_candidate, phonetic_anchor).ratio() >= 0.78:
+                return True
+    return False
+
+
+def _remove_fuzzy_wake_prefix(command_text: str, phrases: list[str]) -> str | None:
+    cleaned = clean_command_text(command_text)
+    words = re.findall(r"[a-zA-Z0-9']+", cleaned)
+    if not words:
+        return None
+
+    normalized_words = [WakeDetector._normalize(word) for word in words]
+    for phrase in sorted(phrases, key=len, reverse=True):
+        phrase_words = phrase.split()
+        min_len = max(1, len(phrase_words) - 1)
+        max_len = min(len(normalized_words), len(phrase_words) + 1)
+        for size in range(min_len, max_len + 1):
+            candidate = " ".join(normalized_words[:size])
+            phonetic_candidate = WakeDetector._phonetic_normalize(candidate)
+            phonetic_phrase = WakeDetector._phonetic_normalize(phrase)
+            score = max(
+                SequenceMatcher(None, candidate, phrase).ratio(),
+                SequenceMatcher(None, phonetic_candidate, phonetic_phrase).ratio(),
+            )
+            if score >= 0.84 and _has_anchor_token(candidate, phrase):
+                return clean_command_text(" ".join(words[size:]))
+    return None

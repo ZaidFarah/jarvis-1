@@ -33,8 +33,15 @@ def test_fuzzy_wake_phrase_match() -> None:
 
     assert result.detected is True
     assert result.matched_phrase == "hey jarvis"
-    assert result.match_type == "fuzzy"
+    assert result.match_type == "phonetic"
     assert result.score >= result.threshold
+
+
+def test_wake_matching_rejects_similar_non_wake_words() -> None:
+    result = make_detector().detect("hey drivers")
+
+    assert result.detected is False
+    assert result.match_type == "none"
 
 
 def test_non_match() -> None:
@@ -100,3 +107,13 @@ def test_empty_command_after_wake_phrase_only() -> None:
     )
 
     assert cleaned == ""
+
+
+def test_fuzzy_wake_phrase_removal_handles_common_jarvis_mishearing() -> None:
+    cleaned = remove_wake_phrase_prefix(
+        "hey jervis status report",
+        wake_phrase="hey jarvis",
+        aliases=["okay jarvis"],
+    )
+
+    assert cleaned == "status report"

@@ -58,11 +58,22 @@ def test_voice_loop_gui_state_updates_controls_and_status_fields() -> None:
     assert window.voice_detail_value.text() == "Waiting for wake phrase"
     assert window.voice_response_panel.toPlainText() == "Jarvis responses will appear here."
     assert window.voice_provider_value.text() == settings.speech_to_text_provider
+    assert window.voice_stt_model_value.text() == settings.whisper_model
+    assert window.voice_stt_device_value.text() == f"{settings.whisper_device} / {settings.whisper_compute_type}"
+    assert window.voice_wake_provider_value.text() == settings.wake_provider
+    assert window.voice_tts_provider_value.text() == settings.tts_provider
+    assert window.voice_response_mode_value.text() == settings.voice_response_mode
+    assert window.voice_wake_ack_value.text() == "Off"
+    assert window.voice_response_speech_value.text() == "On"
     assert window.voice_raw_speech_value.text() == "--"
     assert window.voice_interpreted_value.text() == "--"
     assert window.voice_repair_confidence_value.text() == "--"
     assert window.voice_repair_strategy_value.text() == "--"
+    assert window.voice_timing_wake_capture_value.text() == "--"
+    assert window.voice_timing_total_value.text() == "--"
     assert window.agent_enabled_value.text() in {"Enabled", "Disabled"}
+    assert window.start_voice_loop_button.text() == "Start Voice"
+    assert window.stop_voice_loop_button.text() == "Stop Voice"
     assert window.start_voice_loop_button.isEnabled() is True
     assert window.stop_voice_loop_button.isEnabled() is False
     assert window.chat_test_button.text() == "Chat Test"
@@ -222,12 +233,22 @@ def test_voice_loop_gui_updates_live_diagnostics_without_state_regression() -> N
         f"{CAPTURE_DIAGNOSTICS_PREFIX} provider=fake_stt sample_rate=16000 record_seconds=15.00 "
         "average_rms=0.015000 max_rms=0.040000 vad_crossed=yes"
     )
+    window._handle_voice_loop_status(
+        "Timing summary: wake_capture_ms=12.3 wake_transcribe_ms=34.5 command_capture_ms=56.7 "
+        "command_transcribe_ms=78.9 openai_ms=0.0 tts_ms=0.0 total_turn_ms=123.4 slow_stages=command_capture_ms"
+    )
 
     assert window.status.value == "Follow-up"
     assert window.voice_provider_value.text() == "fake_stt"
     assert window.voice_wake_score_value.text() == "0.810 / 0.720"
     assert window.voice_rms_value.text() == "0.015000 / 0.040000"
     assert window.voice_vad_value.text() == "yes"
+    assert window.voice_timing_wake_capture_value.text() == "12 ms"
+    assert window.voice_timing_wake_transcribe_value.text() == "34 ms"
+    assert window.voice_timing_command_capture_value.text() == "57 ms"
+    assert window.voice_timing_command_transcribe_value.text() == "79 ms"
+    assert window.voice_timing_total_value.text() == "123 ms"
+    assert window.voice_timing_slow_value.text() == "command_capture_ms"
 
     window.close()
     app.processEvents()

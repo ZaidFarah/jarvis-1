@@ -129,6 +129,10 @@ def test_voice_loop_one_cycle_state_transitions_calls_assistant_and_tts() -> Non
     assert assistant.commands == ["status report"]
     assert assistant.voice_commands == ["status report"]
     assert tts_provider.spoken == ["handled status report"]
+    assert report.timing is not None
+    assert report.timing.command_capture_ms >= 0
+    assert report.timing.command_transcribe_ms >= 0
+    assert report.timing.total_turn_ms >= 0
     assert report.statuses == [
         "Sleeping",
         "Listening for wake phrase",
@@ -203,6 +207,32 @@ def test_voice_loop_openwakeword_path_does_not_transcribe_wake_clip_first() -> N
     assert durations[0] == settings.openwakeword_listen_chunk_ms / 1000.0
     assert settings.voice_command_record_seconds in durations
     assert durations[-1] == settings.voice_follow_up_timeout_seconds
+
+
+def test_voice_loop_emits_timing_summary_for_cli_and_gui() -> None:
+    settings = AppSettings(_env_file=None)
+    settings.voice_loop_speak_status = False
+    assistant = SpyAssistant()
+    provider = FakeProvider(["hey jarvis", "status report", ""])
+    events: list[str] = []
+
+    report = VoiceLoopRunner(
+        settings=settings,
+        assistant=assistant,
+        provider=provider,
+        recorder=fake_recorder,
+        sleeper=no_sleep,
+        beeper=no_beep,
+        status_callback=events.append,
+    ).run_once()
+
+    timing_events = [event for event in events if event.startswith("Timing summary:")]
+    assert timing_events
+    assert "wake_capture_ms=" in timing_events[0]
+    assert "command_capture_ms=" in timing_events[0]
+    assert "total_turn_ms=" in timing_events[0]
+    assert report.timing is not None
+    assert report.timing.total_turn_ms >= 0
 
 
 def test_voice_loop_stop_command_detection() -> None:
@@ -320,6 +350,52 @@ def test_voice_loop_retries_rejected_command_and_handles_valid_retry() -> None:
     assert "Last recognized command: status report" in events
     assert f"{ACCEPTED_COMMAND_PREFIX} status report" in events
     assert "Last Jarvis response: handled status report" in events
+
+
+def test_voice_loop_defaults_do_not_speak_wake_ack() -> None:
+    settings = AppSettings(_env_file=None)
+    settings.voice_loop_speak_status = True
+    assistant = SpyAssistant()
+    tts_provider = FakeTtsProvider()
+    provider = FakeProvider(["hey jarvis", "status report", ""])
+
+    report = VoiceLoopRunner(
+        settings=settings,
+        assistant=assistant,
+        provider=provider,
+        tts_provider=tts_provider,
+        recorder=fake_recorder,
+        sleeper=no_sleep,
+        beeper=no_beep,
+    ).run_once()
+
+    assert COMMAND_PROMPT not in tts_provider.spoken
+    assert "handled status report" in tts_provider.spoken
+    assert report.cleaned_command == "status report"
+
+
+def test_voice_loop_can_skip_response_speech_for_faster_follow_up() -> None:
+    settings = AppSettings(_env_file=None)
+    settings.voice_loop_speak_status = False
+    settings.voice_loop_speak_responses = False
+    assistant = SpyAssistant()
+    tts_provider = FakeTtsProvider()
+    provider = FakeProvider(["hey jarvis", "status report", "weather report", ""])
+
+    report = VoiceLoopRunner(
+        settings=settings,
+        assistant=assistant,
+        provider=provider,
+        tts_provider=tts_provider,
+        recorder=fake_recorder,
+        sleeper=no_sleep,
+        beeper=no_beep,
+    ).run_once()
+
+    assert tts_provider.spoken == []
+    assert assistant.voice_commands == ["status report", "weather report"]
+    assert report.timing is not None
+    assert report.timing.tts_ms == 0.0
 
 
 def test_voice_loop_rejects_bad_command_before_openai_then_valid_retry_is_sent() -> None:
@@ -722,10 +798,11 @@ def test_voice_loop_returns_to_sleep_after_retry_is_also_invalid() -> None:
     assert RETURNING_TO_SLEEP_MESSAGE in events
 
 
-def test_voice_loop_cooldown_exists_after_speaking() -> None:
+def test_voice_loop_does_not_add_cooldown_after_wake_ack_or_response_speech() -> None:
     settings = AppSettings(_env_file=None)
     settings.voice_loop_wake_cooldown_seconds = 1.5
     settings.voice_loop_speak_status = True
+    settings.voice_loop_speak_wake_ack = True
     assistant = SpyAssistant()
     tts_provider = FakeTtsProvider()
     provider = FakeProvider(["hey jarvis", "status report"])
@@ -745,8 +822,9 @@ def test_voice_loop_cooldown_exists_after_speaking() -> None:
     ).run_once()
 
     assert report.cleaned_command == "status report"
-    assert 1.5 in sleep_calls
+    assert sleep_calls == []
     assert len(tts_provider.spoken) >= 2
+    assert COMMAND_PROMPT in tts_provider.spoken
 
 
 def test_voice_loop_can_suppress_spoken_standby() -> None:
@@ -768,8 +846,8 @@ def test_voice_loop_can_suppress_spoken_standby() -> None:
     ).run_once()
 
     assert report.statuses[-1] == RETURNING_TO_SLEEP_MESSAGE
-    assert COMMAND_PROMPT in tts_provider.spoken
     assert "handled status report" in tts_provider.spoken
+    assert COMMAND_PROMPT not in tts_provider.spoken
     assert RETURNING_TO_SLEEP_MESSAGE not in tts_provider.spoken
 
 

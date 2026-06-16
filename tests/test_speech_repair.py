@@ -47,6 +47,19 @@ def test_speech_repair_common_weather_intent_needs_confirmation() -> None:
     assert result.needs_confirmation(settings.voice_repair_confirmation_threshold) is True
 
 
+def test_speech_repair_repairs_weather_homophone_without_rewriting_other_whether_phrases() -> None:
+    settings = AppSettings(_env_file=None)
+    repairer = SpeechRepairer(settings)
+
+    weather = repairer.repair("what is the whether in London")
+    ordinary = repairer.repair("whether I should go")
+
+    assert weather.repaired_transcript == "what is the weather in London"
+    assert weather.confidence == 0.86
+    assert weather.strategy == REPAIR_STRATEGY_COMMON_INTENT
+    assert ordinary.repaired_transcript == "whether I should go"
+
+
 def test_speech_repair_context_completes_recent_reminder() -> None:
     settings = AppSettings(_env_file=None)
 

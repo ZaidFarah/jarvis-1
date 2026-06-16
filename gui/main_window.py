@@ -149,8 +149,8 @@ class JarvisMainWindow(QMainWindow):
             flags |= Qt.WindowType.WindowStaysOnTopHint
         self.setWindowFlags(flags)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setMinimumSize(760, 720)
-        self.resize(max(self.settings.window_width, 780), max(self.settings.window_height, 760))
+        self.setMinimumSize(980, 840)
+        self.resize(max(self.settings.window_width, 1040), max(self.settings.window_height, 880))
 
         self.orb = OrbWidget()
         self.status = AssistantStatus.SLEEPING
@@ -163,8 +163,8 @@ class JarvisMainWindow(QMainWindow):
         self.command_input = QLineEdit()
         self.mic_test_button = QPushButton("Mic Test")
         self.voice_command_button = QPushButton("Voice Test")
-        self.start_voice_loop_button = QPushButton("Start Loop")
-        self.stop_voice_loop_button = QPushButton("Stop Loop")
+        self.start_voice_loop_button = QPushButton("Start Voice")
+        self.stop_voice_loop_button = QPushButton("Stop Voice")
         self.check_reminders_button = QPushButton("Check Reminders")
         self.notification_test_button = QPushButton("Test Notification")
         self.health_check_button = QPushButton("Run Health Check")
@@ -189,6 +189,13 @@ class JarvisMainWindow(QMainWindow):
         self.voice_state_value = QLabel("Sleeping")
         self.voice_detail_value = QLabel("Waiting for wake phrase")
         self.voice_provider_value = QLabel(self.settings.speech_to_text_provider)
+        self.voice_stt_model_value = QLabel(self.settings.whisper_model)
+        self.voice_stt_device_value = QLabel(f"{self.settings.whisper_device} / {self.settings.whisper_compute_type}")
+        self.voice_wake_provider_value = QLabel(self.settings.wake_provider)
+        self.voice_tts_provider_value = QLabel(self.settings.tts_provider)
+        self.voice_response_mode_value = QLabel(self.settings.voice_response_mode)
+        self.voice_wake_ack_value = QLabel("On" if self.settings.voice_loop_speak_wake_ack else "Off")
+        self.voice_response_speech_value = QLabel("On" if self.settings.voice_loop_speak_responses else "Off")
         self.voice_wake_score_value = QLabel("--")
         self.voice_rms_value = QLabel("--")
         self.voice_vad_value = QLabel("--")
@@ -196,6 +203,14 @@ class JarvisMainWindow(QMainWindow):
         self.voice_interpreted_value = QLabel("--")
         self.voice_repair_confidence_value = QLabel("--")
         self.voice_repair_strategy_value = QLabel("--")
+        self.voice_timing_wake_capture_value = QLabel("--")
+        self.voice_timing_wake_transcribe_value = QLabel("--")
+        self.voice_timing_command_capture_value = QLabel("--")
+        self.voice_timing_command_transcribe_value = QLabel("--")
+        self.voice_timing_openai_value = QLabel("--")
+        self.voice_timing_tts_value = QLabel("--")
+        self.voice_timing_total_value = QLabel("--")
+        self.voice_timing_slow_value = QLabel("--")
         self.voice_response_panel = QTextEdit()
         self.agent_enabled_value = QLabel("Enabled" if settings.agent_enabled else "Disabled")
         self.reminders_check_value = QLabel("Idle")
@@ -264,6 +279,13 @@ class JarvisMainWindow(QMainWindow):
         self.voice_state_value.setObjectName("stateValue")
         self.voice_detail_value.setObjectName("stateDetail")
         self.voice_provider_value.setObjectName("voiceLoopValue")
+        self.voice_stt_model_value.setObjectName("voiceLoopValue")
+        self.voice_stt_device_value.setObjectName("voiceLoopValue")
+        self.voice_wake_provider_value.setObjectName("voiceLoopValue")
+        self.voice_tts_provider_value.setObjectName("voiceLoopValue")
+        self.voice_response_mode_value.setObjectName("voiceLoopValue")
+        self.voice_wake_ack_value.setObjectName("voiceLoopValue")
+        self.voice_response_speech_value.setObjectName("voiceLoopValue")
         self.voice_wake_score_value.setObjectName("voiceLoopValue")
         self.voice_rms_value.setObjectName("voiceLoopValue")
         self.voice_vad_value.setObjectName("voiceLoopValue")
@@ -271,6 +293,14 @@ class JarvisMainWindow(QMainWindow):
         self.voice_interpreted_value.setObjectName("voiceLoopValue")
         self.voice_repair_confidence_value.setObjectName("voiceLoopValue")
         self.voice_repair_strategy_value.setObjectName("voiceLoopValue")
+        self.voice_timing_wake_capture_value.setObjectName("voiceLoopValue")
+        self.voice_timing_wake_transcribe_value.setObjectName("voiceLoopValue")
+        self.voice_timing_command_capture_value.setObjectName("voiceLoopValue")
+        self.voice_timing_command_transcribe_value.setObjectName("voiceLoopValue")
+        self.voice_timing_openai_value.setObjectName("voiceLoopValue")
+        self.voice_timing_tts_value.setObjectName("voiceLoopValue")
+        self.voice_timing_total_value.setObjectName("voiceLoopValue")
+        self.voice_timing_slow_value.setObjectName("voiceLoopValue")
         self.agent_enabled_value.setObjectName("voiceLoopValue")
         self.reminders_check_value.setObjectName("voiceLoopValue")
         self.notification_result_value.setObjectName("voiceLoopValue")
@@ -303,17 +333,19 @@ class JarvisMainWindow(QMainWindow):
 
         self.transcript.setReadOnly(True)
         self.transcript.setObjectName("transcript")
+        self.transcript.setMinimumHeight(240)
         self.transcript.setText("Jarvis voice transcript will appear here.")
         self.voice_response_panel.setReadOnly(True)
         self.voice_response_panel.setObjectName("responsePanel")
+        self.voice_response_panel.setMinimumHeight(240)
         self.voice_response_panel.setText("Jarvis responses will appear here.")
 
         self.command_input.setPlaceholderText("Type a command...")
         self.command_input.setObjectName("commandInput")
         self.mic_test_button.setObjectName("secondaryButton")
         self.voice_command_button.setObjectName("secondaryButton")
-        self.start_voice_loop_button.setObjectName("secondaryButton")
-        self.stop_voice_loop_button.setObjectName("secondaryButton")
+        self.start_voice_loop_button.setObjectName("primaryButton")
+        self.stop_voice_loop_button.setObjectName("dangerButton")
         self.stop_voice_loop_button.setEnabled(False)
         self.check_reminders_button.setObjectName("secondaryButton")
         self.notification_test_button.setObjectName("secondaryButton")
@@ -369,32 +401,64 @@ class JarvisMainWindow(QMainWindow):
         state_block.addLayout(loop_buttons)
         assistant_layout.addLayout(state_block, stretch=2)
 
-        diagnostics_panel = QFrame()
-        diagnostics_panel.setObjectName("diagnosticsPanel")
-        diagnostics_grid = QGridLayout(diagnostics_panel)
-        diagnostics_grid.setContentsMargins(12, 10, 12, 10)
-        diagnostics_grid.setHorizontalSpacing(12)
-        diagnostics_grid.setVerticalSpacing(6)
-        diagnostics_title = QLabel("Live diagnostics")
-        diagnostics_title.setObjectName("panelTitle")
-        diagnostics_grid.addWidget(diagnostics_title, 0, 0, 1, 2)
-        diagnostics_grid.addWidget(QLabel("Provider"), 1, 0)
-        diagnostics_grid.addWidget(self.voice_provider_value, 1, 1)
-        diagnostics_grid.addWidget(QLabel("Wake score"), 2, 0)
-        diagnostics_grid.addWidget(self.voice_wake_score_value, 2, 1)
-        diagnostics_grid.addWidget(QLabel("RMS"), 3, 0)
-        diagnostics_grid.addWidget(self.voice_rms_value, 3, 1)
-        diagnostics_grid.addWidget(QLabel("VAD"), 4, 0)
-        diagnostics_grid.addWidget(self.voice_vad_value, 4, 1)
-        diagnostics_grid.addWidget(QLabel("Speech"), 5, 0)
-        diagnostics_grid.addWidget(self.voice_raw_speech_value, 5, 1)
-        diagnostics_grid.addWidget(QLabel("Interpreted"), 6, 0)
-        diagnostics_grid.addWidget(self.voice_interpreted_value, 6, 1)
-        diagnostics_grid.addWidget(QLabel("Confidence"), 7, 0)
-        diagnostics_grid.addWidget(self.voice_repair_confidence_value, 7, 1)
-        diagnostics_grid.addWidget(QLabel("Strategy"), 8, 0)
-        diagnostics_grid.addWidget(self.voice_repair_strategy_value, 8, 1)
-        assistant_layout.addWidget(diagnostics_panel, stretch=1)
+        metrics_column = QVBoxLayout()
+        metrics_column.setSpacing(12)
+
+        stack_panel = QFrame()
+        stack_panel.setObjectName("diagnosticsPanel")
+        stack_grid = QGridLayout(stack_panel)
+        stack_grid.setContentsMargins(12, 10, 12, 10)
+        stack_grid.setHorizontalSpacing(12)
+        stack_grid.setVerticalSpacing(6)
+        stack_title = QLabel("Voice stack")
+        stack_title.setObjectName("panelTitle")
+        stack_grid.addWidget(stack_title, 0, 0, 1, 2)
+        stack_grid.addWidget(QLabel("STT provider"), 1, 0)
+        stack_grid.addWidget(self.voice_provider_value, 1, 1)
+        stack_grid.addWidget(QLabel("STT model"), 2, 0)
+        stack_grid.addWidget(self.voice_stt_model_value, 2, 1)
+        stack_grid.addWidget(QLabel("STT device"), 3, 0)
+        stack_grid.addWidget(self.voice_stt_device_value, 3, 1)
+        stack_grid.addWidget(QLabel("Wake provider"), 4, 0)
+        stack_grid.addWidget(self.voice_wake_provider_value, 4, 1)
+        stack_grid.addWidget(QLabel("TTS provider"), 5, 0)
+        stack_grid.addWidget(self.voice_tts_provider_value, 5, 1)
+        stack_grid.addWidget(QLabel("Voice mode"), 6, 0)
+        stack_grid.addWidget(self.voice_response_mode_value, 6, 1)
+        stack_grid.addWidget(QLabel("Wake ack"), 7, 0)
+        stack_grid.addWidget(self.voice_wake_ack_value, 7, 1)
+        stack_grid.addWidget(QLabel("Speak responses"), 8, 0)
+        stack_grid.addWidget(self.voice_response_speech_value, 8, 1)
+        metrics_column.addWidget(stack_panel)
+
+        timing_panel = QFrame()
+        timing_panel.setObjectName("diagnosticsPanel")
+        timing_grid = QGridLayout(timing_panel)
+        timing_grid.setContentsMargins(12, 10, 12, 10)
+        timing_grid.setHorizontalSpacing(12)
+        timing_grid.setVerticalSpacing(6)
+        timing_title = QLabel("Turn timing")
+        timing_title.setObjectName("panelTitle")
+        timing_grid.addWidget(timing_title, 0, 0, 1, 2)
+        timing_grid.addWidget(QLabel("Wake capture"), 1, 0)
+        timing_grid.addWidget(self.voice_timing_wake_capture_value, 1, 1)
+        timing_grid.addWidget(QLabel("Wake transcribe"), 2, 0)
+        timing_grid.addWidget(self.voice_timing_wake_transcribe_value, 2, 1)
+        timing_grid.addWidget(QLabel("Command capture"), 3, 0)
+        timing_grid.addWidget(self.voice_timing_command_capture_value, 3, 1)
+        timing_grid.addWidget(QLabel("Command transcribe"), 4, 0)
+        timing_grid.addWidget(self.voice_timing_command_transcribe_value, 4, 1)
+        timing_grid.addWidget(QLabel("OpenAI"), 5, 0)
+        timing_grid.addWidget(self.voice_timing_openai_value, 5, 1)
+        timing_grid.addWidget(QLabel("TTS"), 6, 0)
+        timing_grid.addWidget(self.voice_timing_tts_value, 6, 1)
+        timing_grid.addWidget(QLabel("Total turn"), 7, 0)
+        timing_grid.addWidget(self.voice_timing_total_value, 7, 1)
+        timing_grid.addWidget(QLabel("Slow stages"), 8, 0)
+        timing_grid.addWidget(self.voice_timing_slow_value, 8, 1)
+        metrics_column.addWidget(timing_panel)
+        metrics_column.addStretch(1)
+        assistant_layout.addLayout(metrics_column, stretch=1)
 
         self.tabs = QTabWidget()
         self.tabs.setObjectName("mainTabs")
@@ -575,13 +639,16 @@ class JarvisMainWindow(QMainWindow):
         self.setStyleSheet(
             """
             #shell {
-                background: rgba(10, 18, 32, 238);
-                border: 1px solid rgba(86, 204, 242, 95);
+                background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 1,
+                    stop: 0 rgba(5, 12, 24, 244),
+                    stop: 0.55 rgba(9, 17, 34, 242),
+                    stop: 1 rgba(16, 20, 38, 240));
+                border: 1px solid rgba(86, 204, 242, 110);
                 border-radius: 18px;
             }
             #title {
                 color: #e5fbff;
-                font-size: 30px;
+                font-size: 32px;
                 font-weight: 700;
                 letter-spacing: 0px;
             }
@@ -617,14 +684,14 @@ class JarvisMainWindow(QMainWindow):
                 border-radius: 12px;
             }
             #assistantPanel {
-                background: rgba(3, 12, 24, 180);
-                border: 1px solid rgba(34, 211, 238, 110);
-                border-radius: 14px;
+                background: rgba(2, 8, 18, 185);
+                border: 1px solid rgba(34, 211, 238, 130);
+                border-radius: 16px;
             }
             #diagnosticsPanel {
-                background: rgba(15, 23, 42, 150);
-                border: 1px solid rgba(71, 85, 105, 130);
-                border-radius: 12px;
+                background: rgba(7, 14, 28, 185);
+                border: 1px solid rgba(71, 85, 105, 150);
+                border-radius: 14px;
             }
             #panelTitle {
                 color: #93c5fd;
@@ -633,12 +700,12 @@ class JarvisMainWindow(QMainWindow):
             }
             #stateValue {
                 color: #e5fbff;
-                font-size: 28px;
+                font-size: 34px;
                 font-weight: 800;
             }
             #stateDetail {
                 color: #a5f3fc;
-                font-size: 13px;
+                font-size: 14px;
                 font-weight: 600;
             }
             #voiceLoopValue {
@@ -727,6 +794,36 @@ class JarvisMainWindow(QMainWindow):
             }
             #secondaryButton:hover {
                 background: rgba(34, 211, 238, 55);
+            }
+            #primaryButton {
+                color: #02131b;
+                background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 1,
+                    stop: 0 #7dd3fc,
+                    stop: 1 #22d3ee);
+                border: 0;
+                border-radius: 14px;
+                padding: 12px 16px;
+                font-weight: 800;
+            }
+            #primaryButton:hover {
+                background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 1,
+                    stop: 0 #a5f3fc,
+                    stop: 1 #67e8f9);
+            }
+            #dangerButton {
+                color: #fff7f7;
+                background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 1,
+                    stop: 0 #ef4444,
+                    stop: 1 #b91c1c);
+                border: 0;
+                border-radius: 14px;
+                padding: 12px 16px;
+                font-weight: 800;
+            }
+            #dangerButton:hover {
+                background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 1,
+                    stop: 0 #f87171,
+                    stop: 1 #ef4444);
             }
             """
         )
@@ -1404,7 +1501,7 @@ class JarvisMainWindow(QMainWindow):
         self.voice_loop_last_response_value.setText("None")
         self.voice_loop_thread = threading.Thread(target=self._run_voice_loop_worker, daemon=True)
         self._set_voice_loop_running(True)
-        self.voice_loop_event_timer.start(250)
+        self.voice_loop_event_timer.start(100)
         self.voice_loop_thread.start()
 
     def stop_voice_loop(self) -> None:
@@ -1467,6 +1564,10 @@ class JarvisMainWindow(QMainWindow):
             return
         if status.startswith(SPEECH_REPAIR_PREFIX):
             self._update_speech_repair(status)
+            self._append_message("Diagnostics", status)
+            return
+        if status.startswith("Timing summary:"):
+            self._update_turn_timing(status)
             self._append_message("Diagnostics", status)
             return
         if status.startswith("Did you mean:"):
@@ -1637,12 +1738,32 @@ class JarvisMainWindow(QMainWindow):
                 self.voice_repair_confidence_value.setText(confidence)
         self.voice_repair_strategy_value.setText(values.get("strategy", "--"))
 
+    def _update_turn_timing(self, status: str) -> None:
+        values = self._parse_diagnostics(status.removeprefix("Timing summary:"))
+        self.voice_timing_wake_capture_value.setText(self._format_ms(values.get("wake_capture_ms")))
+        self.voice_timing_wake_transcribe_value.setText(self._format_ms(values.get("wake_transcribe_ms")))
+        self.voice_timing_command_capture_value.setText(self._format_ms(values.get("command_capture_ms")))
+        self.voice_timing_command_transcribe_value.setText(self._format_ms(values.get("command_transcribe_ms")))
+        self.voice_timing_openai_value.setText(self._format_ms(values.get("openai_ms")))
+        self.voice_timing_tts_value.setText(self._format_ms(values.get("tts_ms")))
+        self.voice_timing_total_value.setText(self._format_ms(values.get("total_turn_ms")))
+        self.voice_timing_slow_value.setText(values.get("slow_stages", "--"))
+
     def _update_rms_labels(self, values: dict[str, str]) -> None:
         average_rms = values.get("average_rms", "--")
         max_rms = values.get("max_rms", "--")
         self.voice_rms_value.setText(f"{average_rms} / {max_rms}")
         if vad_crossed := values.get("vad_crossed"):
             self.voice_vad_value.setText(vad_crossed)
+
+    @staticmethod
+    def _format_ms(value: str | None) -> str:
+        if not value:
+            return "--"
+        try:
+            return f"{float(value):.0f} ms"
+        except ValueError:
+            return value
 
     @staticmethod
     def _parse_diagnostics(payload: str) -> dict[str, str]:

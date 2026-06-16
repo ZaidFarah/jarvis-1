@@ -179,6 +179,16 @@ class SpeechRepairer:
                 REPAIR_STRATEGY_COMMON_INTENT,
                 "repaired likely Nottingham weather transcription",
             )
+        if "whether" in normalized and _looks_like_weather_command(normalized):
+            repaired = re.sub(r"\bwhether\b", "weather", cleaned, flags=re.I)
+            return SpeechRepairResult(
+                raw,
+                cleaned,
+                clean_command_text(repaired),
+                0.86,
+                REPAIR_STRATEGY_COMMON_INTENT,
+                "repaired likely weather homophone",
+            )
         return None
 
     def _repair_with_openai(self, raw: str, cleaned: str) -> SpeechRepairResult | None:
@@ -262,6 +272,16 @@ def _extract_weather_city(command: str) -> str | None:
         return None
     city = " ".join(match.group(1).strip(" ?.!,").split())
     return city or None
+
+
+def _looks_like_weather_command(normalized: str) -> bool:
+    if not normalized:
+        return False
+    if normalized.startswith(("whats the whether", "what is the whether", "tell me the whether")):
+        return True
+    if "whether in" in normalized or "whether for" in normalized:
+        return True
+    return any(word in normalized.split() for word in ("forecast", "temperature", "rain"))
 
 
 def _normalize_for_match(value: str) -> str:

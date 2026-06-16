@@ -39,6 +39,7 @@ class FasterWhisperSpeechToTextProvider:
         self.compute_type = compute_type
         self._model_class = model_class
         self._import_error = import_error
+        self._model: object | None = None
 
         if self._model_class is None and self._import_error is None:
             try:
@@ -66,19 +67,37 @@ class FasterWhisperSpeechToTextProvider:
             raise RuntimeError(f"numpy is required for Faster Whisper transcription: {exc}") from exc
 
         audio = np.asarray(list(samples), dtype=np.float32)
-        model = self._model_class(self.model_name, device=self.device, compute_type=self.compute_type)
-        segments, info = model.transcribe(audio, language="en")
-        text = " ".join(segment.text.strip() for segment in segments if segment.text.strip())
+        model = self._load_model()
+        try:
+            segments, info = model.transcribe(
+                audio,
+                language="en",
+                beam_size=1,
+                condition_on_previous_text=False,
+                vad_filter=False,
+            )
+        except TypeError:
+            segments, info = model.transcribe(audio, language="en")
+
+        segment_list = list(segments)
+        text = " ".join(segment.text.strip() for segment in segment_list if segment.text.strip())
         duration = float(getattr(info, "duration", 0.0) or 0.0)
         language = getattr(info, "language", None)
         probability = getattr(info, "language_probability", None)
-        confidence = float(probability) if probability is not None else None
+        confidence = _transcription_confidence(segment_list, probability)
         return TranscriptionResult(
             text=text,
             confidence=confidence,
             duration_seconds=duration,
             language=str(language) if language else None,
         )
+
+    def _load_model(self) -> object:
+        if self._model is None:
+            if self._model_class is None:
+                raise RuntimeError("faster-whisper model class is unavailable.")
+            self._model = self._model_class(self.model_name, device=self.device, compute_type=self.compute_type)
+        return self._model
 
 
 def create_speech_to_text_provider(settings: AppSettings):
@@ -92,3 +111,26 @@ def create_speech_to_text_provider(settings: AppSettings):
     if provider == "interface_only":
         return InterfaceOnlySpeechToTextProvider()
     raise ValueError(f"Unsupported STT provider: {settings.speech_to_text_provider}")
+
+
+def _transcription_confidence(segments: Sequence[object], language_probability: object | None) -> float | None:
+    if language_probability is not None:
+        try:
+            return max(0.0, min(1.0, float(language_probability)))
+        except (TypeError, ValueError):
+            pass
+
+    scored_segments: list[float] = []
+    for segment in segments:
+        value = getattr(segment, "avg_logprob", None)
+        if value is None:
+            continue
+        try:
+            scored_segments.append(float(value))
+        except (TypeError, ValueError):
+            continue
+    if not scored_segments:
+        return None
+
+    average_logprob = sum(scored_segments) / len(scored_segments)
+    return max(0.0, min(1.0, (average_logprob + 1.5) / 1.5))

@@ -482,11 +482,10 @@ def ensure_tts_log_sink(settings: AppSettings) -> Path:
     _TTS_LOG_SINK_ID = logger.add(
         log_file,
         level="DEBUG",
-        rotation="1 MB",
-        retention="7 days",
         encoding="utf-8",
         backtrace=False,
         diagnose=False,
+        enqueue=True,
         filter=lambda record: bool(record["extra"].get("tts")),
     )
     _TTS_LOG_FILE = log_file

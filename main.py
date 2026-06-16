@@ -671,7 +671,7 @@ def _voice_loop_status_callback(status: str) -> None:
         "Speaking",
         VOICE_LOOP_STOPPED_MESSAGE,
     }
-    visible_prefixes = ("Last recognized command:", "Last Jarvis response:", "Voice loop summary:")
+    visible_prefixes = ("Last recognized command:", "Last Jarvis response:", "Voice loop summary:", "Timing summary:")
     if status in visible_statuses or status.startswith(visible_prefixes):
         print(status, flush=True)
 

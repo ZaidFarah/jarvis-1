@@ -4,6 +4,7 @@ import importlib
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from math import ceil
 from pathlib import Path
 from typing import Any
 
@@ -12,7 +13,12 @@ from loguru import logger
 from assistant.core import AssistantCore, AssistantResponse
 from config.settings import AppSettings
 from services.logging_service import add_managed_file_sink
-from voice.command_capture import AudioCaptureMetrics, calculate_audio_capture_metrics
+from voice.command_capture import (
+    AudioCaptureMetrics,
+    calculate_audio_capture_metrics,
+    calculate_command_confidence,
+    calculate_rms,
+)
 from voice.command_validation import CommandValidationResult, validate_cleaned_command
 from voice.speech_repair import (
     OpenAIRepairer,
@@ -68,8 +74,52 @@ class CommandCaptureResult:
     validation: CommandValidationResult
     speech_repair: SpeechRepairResult | None = None
     audio_metrics: AudioCaptureMetrics | None = None
+    command_transcribe_ms: float = 0.0
+    transcript_confidence: float | None = None
+    command_score: float = 0.0
     no_follow_up: bool = False
     stop_requested: bool = False
+
+
+@dataclass
+class VoiceLoopTiming:
+    wake_capture_ms: float = 0.0
+    wake_transcribe_ms: float = 0.0
+    command_capture_ms: float = 0.0
+    command_transcribe_ms: float = 0.0
+    openai_ms: float = 0.0
+    tts_ms: float = 0.0
+    total_turn_ms: float = 0.0
+
+    def format_summary(self) -> str:
+        parts = [
+            f"wake_capture_ms={self.wake_capture_ms:.1f}",
+            f"wake_transcribe_ms={self.wake_transcribe_ms:.1f}",
+            f"command_capture_ms={self.command_capture_ms:.1f}",
+            f"command_transcribe_ms={self.command_transcribe_ms:.1f}",
+            f"openai_ms={self.openai_ms:.1f}",
+            f"tts_ms={self.tts_ms:.1f}",
+            f"total_turn_ms={self.total_turn_ms:.1f}",
+        ]
+        slow_stages = self.slow_stages()
+        if slow_stages:
+            parts.append(f"slow_stages={','.join(slow_stages)}")
+        return "Timing summary: " + " ".join(parts)
+
+    def slow_stages(self) -> list[str]:
+        return [
+            name
+            for name, value in (
+                ("wake_capture_ms", self.wake_capture_ms),
+                ("wake_transcribe_ms", self.wake_transcribe_ms),
+                ("command_capture_ms", self.command_capture_ms),
+                ("command_transcribe_ms", self.command_transcribe_ms),
+                ("openai_ms", self.openai_ms),
+                ("tts_ms", self.tts_ms),
+                ("total_turn_ms", self.total_turn_ms),
+            )
+            if value >= 1200.0
+        ]
 
 
 @dataclass
@@ -105,6 +155,7 @@ class VoiceLoopCycleReport:
     command_validation: CommandValidationResult
     speech_repair: SpeechRepairResult | None
     command_audio_metrics: AudioCaptureMetrics | None
+    timing: VoiceLoopTiming | None
     assistant_response: AssistantResponse | None
     tts_result: TextToSpeechResult | None
     statuses: list[str]
@@ -189,6 +240,8 @@ class VoiceLoopRunner:
         return reports
 
     def run_once(self) -> VoiceLoopCycleReport:
+        turn_started = time.perf_counter()
+        timing = VoiceLoopTiming()
         statuses: list[str] = []
         errors: list[str] = []
         wake_transcription = ""
@@ -212,6 +265,7 @@ class VoiceLoopRunner:
             self.summary.errors += 1
             errors.append(message)
             self._status("Sleeping", statuses)
+            self._finish_timing(timing, turn_started)
             return self._report(
                 wake_transcription,
                 empty_detection,
@@ -221,24 +275,29 @@ class VoiceLoopRunner:
                 tts_result,
                 statuses,
                 errors,
+                timing=timing,
                 stop_requested=True,
             )
 
         self.summary.wake_attempts += 1
         self._status("Sleeping", statuses)
         wake_samples: list[float] = []
+        wake_capture_started = time.perf_counter()
 
         try:
             self._status("Listening for wake phrase", statuses)
             if self.wake_provider_resolution.effective_provider == "openwakeword" and self.wake_provider is not None:
                 wake_samples, wake_detection = self._detect_wake_with_openwakeword()
+                timing.wake_capture_ms = (time.perf_counter() - wake_capture_started) * 1000.0
                 self.voice_loop_logger.info(
                     "OpenWakeWord wake detection={} score={}",
                     wake_detection.detected,
                     f"{wake_detection.score:.3f}",
                 )
                 if not wake_detection.detected and self.wake_provider_resolution.fallback_enabled:
+                    wake_transcribe_started = time.perf_counter()
                     wake_transcription = self.provider.transcribe(wake_samples, self.settings.voice_sample_rate).text.strip()
+                    timing.wake_transcribe_ms = (time.perf_counter() - wake_transcribe_started) * 1000.0
                     wake_detection = detector.detect(wake_transcription)
                     self.voice_loop_logger.info(
                         "Wake fallback transcription={} detected={} score={}",
@@ -247,8 +306,12 @@ class VoiceLoopRunner:
                         f"{wake_detection.score:.3f}",
                     )
             else:
+                wake_capture_started = time.perf_counter()
                 wake_samples = self.recorder(self.settings.wake_listen_seconds)
+                timing.wake_capture_ms = (time.perf_counter() - wake_capture_started) * 1000.0
+                wake_transcribe_started = time.perf_counter()
                 wake_transcription = self.provider.transcribe(wake_samples, self.settings.voice_sample_rate).text.strip()
+                timing.wake_transcribe_ms = (time.perf_counter() - wake_transcribe_started) * 1000.0
                 wake_detection = detector.detect(wake_transcription)
                 self.voice_loop_logger.info(
                     "Wake transcription={} detected={} score={}",
@@ -263,6 +326,7 @@ class VoiceLoopRunner:
             self.summary.errors += 1
             errors.append(message)
             self._status("Sleeping", statuses)
+            self._finish_timing(timing, turn_started)
             return self._report(
                 wake_transcription,
                 empty_detection,
@@ -272,10 +336,12 @@ class VoiceLoopRunner:
                 tts_result,
                 statuses,
                 errors,
+                timing=timing,
             )
 
         if not wake_detection.detected:
             self._status("Sleeping", statuses)
+            self._finish_timing(timing, turn_started)
             return self._report(
                 wake_transcription,
                 wake_detection,
@@ -285,19 +351,21 @@ class VoiceLoopRunner:
                 tts_result,
                 statuses,
                 errors,
+                timing=timing,
             )
 
         self.summary.successful_wakes += 1
         self._status("Wake detected", statuses)
         self._status(COMMAND_PROMPT, statuses)
-        if self.settings.voice_loop_speak_status:
-            self._speak_message(COMMAND_PROMPT, errors)
+        if self.settings.voice_loop_speak_wake_ack:
+            self._speak_text(COMMAND_PROMPT, errors, sleep_after=False)
 
         if self.settings.voice_command_start_delay_seconds > 0:
             self.sleeper(self.settings.voice_command_start_delay_seconds)
         self.beeper()
 
         try:
+            command_capture_started = time.perf_counter()
             command_capture = self._capture_valid_command(
                 statuses,
                 errors,
@@ -309,11 +377,14 @@ class VoiceLoopRunner:
                 retry_start_delay_seconds=self.settings.voice_command_start_delay_seconds,
                 retry_beep=True,
             )
+            timing.command_capture_ms = (time.perf_counter() - command_capture_started) * 1000.0
+            timing.command_transcribe_ms = command_capture.command_transcribe_ms
         except Exception as exc:
             message = f"Command stage failed: {type(exc).__name__}: {exc}"
             self.voice_loop_logger.exception(message)
             self.summary.errors += 1
             errors.append(message)
+            self._finish_timing(timing, turn_started)
             return self._return_to_sleep_report(
                 wake_transcription,
                 wake_detection,
@@ -323,6 +394,7 @@ class VoiceLoopRunner:
                 tts_result,
                 statuses,
                 errors,
+                timing=timing,
             )
 
         raw_command_transcription = command_capture.raw_transcription
@@ -330,6 +402,7 @@ class VoiceLoopRunner:
         speech_repair = command_capture.speech_repair
         command_audio_metrics = command_capture.audio_metrics
         if not command_capture.validation.accepted:
+            self._finish_timing(timing, turn_started)
             return self._return_to_sleep_report(
                 wake_transcription,
                 wake_detection,
@@ -339,6 +412,7 @@ class VoiceLoopRunner:
                 tts_result,
                 statuses,
                 errors,
+                timing=timing,
                 speech_repair=speech_repair,
                 command_audio_metrics=command_audio_metrics,
                 stop_requested=command_capture.stop_requested,
@@ -352,6 +426,7 @@ class VoiceLoopRunner:
             if is_stop_command(cleaned_command):
                 self.voice_loop_logger.info("Stop command detected: {}", cleaned_command)
                 self._status(STOP_COMMAND_DETECTED_MESSAGE, statuses)
+                self._finish_timing(timing, turn_started)
                 return self._report(
                     wake_transcription,
                     wake_detection,
@@ -361,6 +436,7 @@ class VoiceLoopRunner:
                     tts_result,
                     statuses,
                     errors,
+                    timing=timing,
                     speech_repair=speech_repair,
                     command_audio_metrics=command_audio_metrics,
                     stop_requested=True,
@@ -368,12 +444,15 @@ class VoiceLoopRunner:
 
             self._status("Thinking", statuses)
             try:
+                openai_started = time.perf_counter()
                 assistant_response = self._handle_voice_command(cleaned_command)
+                timing.openai_ms = (time.perf_counter() - openai_started) * 1000.0
             except Exception as exc:
                 message = f"Assistant command failed: {type(exc).__name__}: {exc}"
                 self.voice_loop_logger.exception(message)
                 self.summary.errors += 1
                 errors.append(message)
+                self._finish_timing(timing, turn_started)
                 return self._return_to_sleep_report(
                     wake_transcription,
                     wake_detection,
@@ -383,6 +462,7 @@ class VoiceLoopRunner:
                     tts_result,
                     statuses,
                     errors,
+                    timing=timing,
                     speech_repair=speech_repair,
                     command_audio_metrics=command_audio_metrics,
                 )
@@ -391,8 +471,11 @@ class VoiceLoopRunner:
             self.voice_loop_logger.info("Assistant response={}", assistant_response.text)
 
             if assistant_response.accepted:
-                self._status("Speaking", statuses)
-                tts_result = self._speak_text(assistant_response.text, errors, sleep_after=False)
+                if self.settings.voice_loop_speak_responses:
+                    self._status("Speaking", statuses)
+                    tts_started = time.perf_counter()
+                    tts_result = self._speak_text(assistant_response.text, errors, sleep_after=False)
+                    timing.tts_ms = (time.perf_counter() - tts_started) * 1000.0
                 self._remember_voice_command(cleaned_command)
             else:
                 break
@@ -401,6 +484,7 @@ class VoiceLoopRunner:
                 break
 
             try:
+                follow_up_capture_started = time.perf_counter()
                 follow_up_capture = self._capture_valid_command(
                     statuses,
                     errors,
@@ -428,9 +512,11 @@ class VoiceLoopRunner:
             cleaned_command = follow_up_capture.cleaned_command
             speech_repair = follow_up_capture.speech_repair
             command_audio_metrics = follow_up_capture.audio_metrics
+            timing.command_capture_ms = (time.perf_counter() - follow_up_capture_started) * 1000.0
+            timing.command_transcribe_ms = follow_up_capture.command_transcribe_ms
             follow_up_used = True
 
-        return self._return_to_sleep_report(
+        report = self._return_to_sleep_report(
             wake_transcription,
             wake_detection,
             raw_command_transcription,
@@ -439,10 +525,14 @@ class VoiceLoopRunner:
             tts_result,
             statuses,
             errors,
+            timing=timing,
             speech_repair=speech_repair,
             command_audio_metrics=command_audio_metrics,
             stop_requested=stop_requested,
         )
+        timing.total_turn_ms = (time.perf_counter() - turn_started) * 1000.0
+        self._emit(timing.format_summary())
+        return report
 
     def _capture_command(
         self,
@@ -450,16 +540,21 @@ class VoiceLoopRunner:
         *,
         listen_prompt: str = LISTENING_FOR_COMMAND_PROMPT,
         record_seconds: float | None = None,
-    ) -> tuple[str, str, CommandValidationResult, AudioCaptureMetrics, SpeechRepairResult]:
+    ) -> CommandCaptureResult:
         self._status(listen_prompt, statuses)
         command_samples = self.recorder(record_seconds or self.settings.voice_command_record_seconds)
         audio_metrics = calculate_audio_capture_metrics(
             command_samples,
             self.settings.voice_sample_rate,
             self.settings.voice_vad_threshold,
+            vad_window_ms=self.settings.voice_vad_window_ms,
+            noise_multiplier=self.settings.voice_vad_noise_multiplier,
         )
-        self._log_capture_audio_diagnostics(audio_metrics, record_seconds or self.settings.voice_command_record_seconds)
-        raw_command_transcription = self.provider.transcribe(command_samples, self.settings.voice_sample_rate).text.strip()
+        transcribe_started = time.perf_counter()
+        transcription = self.provider.transcribe(command_samples, self.settings.voice_sample_rate)
+        raw_command_transcription = transcription.text.strip()
+        transcript_confidence = getattr(transcription, "confidence", None)
+        command_transcribe_ms = (time.perf_counter() - transcribe_started) * 1000.0
         cleaned_transcription = remove_wake_phrase_prefix(
             raw_command_transcription,
             wake_phrase=self.settings.wake_phrase,
@@ -475,20 +570,44 @@ class VoiceLoopRunner:
             cleaned_command,
             min_words=self.settings.voice_command_min_words,
             reject_phrases=self.settings.voice_command_reject_phrase_list,
-            incomplete_phrases=self.settings.voice_command_incomplete_phrase_list,
+                incomplete_phrases=self.settings.voice_command_incomplete_phrase_list,
+        )
+        command_score = calculate_command_confidence(
+            cleaned_command,
+            command_validation,
+            speech_repair=speech_repair,
+            transcript_confidence=transcript_confidence,
+        )
+        self._log_capture_audio_diagnostics(
+            audio_metrics,
+            record_seconds or self.settings.voice_command_record_seconds,
+            transcript_confidence=transcript_confidence,
+            command_score=command_score,
         )
         self._log_speech_repair_diagnostics(speech_repair)
         self.voice_loop_logger.info(
-            "Command transcription={} cleaned={} repaired={} confidence={} strategy={} accepted={} reason={}",
+            "Command transcription={} transcript_confidence={} cleaned={} repaired={} confidence={} strategy={} "
+            "command_score={} accepted={} reason={}",
             raw_command_transcription or "<empty>",
+            _format_optional_float(transcript_confidence),
             speech_repair.cleaned_transcript or "<empty>",
             speech_repair.repaired_transcript or "<empty>",
             f"{speech_repair.confidence:.2f}",
             speech_repair.strategy,
+            f"{command_score:.2f}",
             command_validation.accepted,
             command_validation.rejection_reason or "<none>",
         )
-        return raw_command_transcription, cleaned_command, command_validation, audio_metrics, speech_repair
+        return CommandCaptureResult(
+            raw_transcription=raw_command_transcription,
+            cleaned_command=cleaned_command,
+            validation=command_validation,
+            speech_repair=speech_repair,
+            audio_metrics=audio_metrics,
+            command_transcribe_ms=command_transcribe_ms,
+            transcript_confidence=transcript_confidence,
+            command_score=command_score,
+        )
 
     def _capture_valid_command(
         self,
@@ -508,11 +627,19 @@ class VoiceLoopRunner:
         base_max_retries = self.settings.voice_command_max_retries if self.settings.voice_command_retry_on_reject else 0
         attempt = 0
         while True:
-            raw_transcription, cleaned_command, validation, audio_metrics, speech_repair = self._capture_command(
+            capture = self._capture_command(
                 statuses,
                 listen_prompt=listen_prompt,
                 record_seconds=record_seconds,
             )
+            raw_transcription = capture.raw_transcription
+            cleaned_command = capture.cleaned_command
+            validation = capture.validation
+            audio_metrics = capture.audio_metrics
+            speech_repair = capture.speech_repair
+            command_transcribe_ms = capture.command_transcribe_ms
+            transcript_confidence = capture.transcript_confidence
+            command_score = capture.command_score
 
             if empty_transcript_is_no_follow_up and not raw_transcription and not cleaned_command:
                 self.voice_loop_logger.info("No follow-up command heard.")
@@ -522,6 +649,9 @@ class VoiceLoopRunner:
                     validation=validation,
                     speech_repair=speech_repair,
                     audio_metrics=audio_metrics,
+                    command_transcribe_ms=command_transcribe_ms,
+                    transcript_confidence=transcript_confidence,
+                    command_score=command_score,
                     no_follow_up=True,
                 )
 
@@ -533,6 +663,9 @@ class VoiceLoopRunner:
                     validation=validation,
                     speech_repair=speech_repair,
                     audio_metrics=audio_metrics,
+                    command_transcribe_ms=command_transcribe_ms,
+                    transcript_confidence=transcript_confidence,
+                    command_score=command_score,
                     no_follow_up=True,
                 )
 
@@ -550,6 +683,9 @@ class VoiceLoopRunner:
                     validation=validation,
                     speech_repair=speech_repair,
                     audio_metrics=audio_metrics,
+                    command_transcribe_ms=command_transcribe_ms,
+                    transcript_confidence=transcript_confidence,
+                    command_score=command_score,
                 )
 
             rejection_reason = validation.rejection_reason or "invalid command"
@@ -587,6 +723,9 @@ class VoiceLoopRunner:
                 validation=validation,
                 speech_repair=speech_repair,
                 audio_metrics=audio_metrics,
+                command_transcribe_ms=command_transcribe_ms,
+                transcript_confidence=transcript_confidence,
+                command_score=command_score,
                 stop_requested=stop_requested,
             )
 
@@ -600,6 +739,7 @@ class VoiceLoopRunner:
         tts_result: TextToSpeechResult | None,
         statuses: list[str],
         errors: list[str],
+        timing: VoiceLoopTiming | None = None,
         speech_repair: SpeechRepairResult | None = None,
         command_audio_metrics: AudioCaptureMetrics | None = None,
         stop_requested: bool = False,
@@ -616,6 +756,7 @@ class VoiceLoopRunner:
             tts_result,
             statuses,
             errors,
+            timing=timing,
             speech_repair=speech_repair,
             command_audio_metrics=command_audio_metrics,
             stop_requested=stop_requested,
@@ -631,6 +772,10 @@ class VoiceLoopRunner:
         self.voice_loop_logger.info(message)
         if self.status_callback is not None:
             self.status_callback(message)
+
+    def _finish_timing(self, timing: VoiceLoopTiming, turn_started: float) -> None:
+        timing.total_turn_ms = (time.perf_counter() - turn_started) * 1000.0
+        self._emit(timing.format_summary())
 
     def _handle_voice_command(self, command: str) -> AssistantResponse:
         handle_voice_command = getattr(self.assistant, "handle_voice_command", None)
@@ -665,6 +810,7 @@ class VoiceLoopRunner:
         tts_result: TextToSpeechResult | None,
         statuses: list[str],
         errors: list[str],
+        timing: VoiceLoopTiming | None = None,
         speech_repair: SpeechRepairResult | None = None,
         command_audio_metrics: AudioCaptureMetrics | None = None,
         stop_requested: bool = False,
@@ -692,6 +838,7 @@ class VoiceLoopRunner:
             command_validation=command_validation,
             speech_repair=speech_repair,
             command_audio_metrics=command_audio_metrics,
+            timing=timing,
             assistant_response=assistant_response,
             tts_result=tts_result,
             statuses=statuses,
@@ -728,6 +875,19 @@ class VoiceLoopRunner:
 
     def _record_microphone(self, duration_seconds: float) -> list[float]:
         sd = self._require_sounddevice()
+        if self.settings.voice_vad_enabled and duration_seconds >= 1.0:
+            try:
+                return self._record_microphone_until_silence(sd, duration_seconds)
+            except Exception as exc:
+                self.voice_loop_logger.debug(
+                    "Adaptive microphone capture failed; falling back to fixed recording: {}: {}",
+                    type(exc).__name__,
+                    exc,
+                )
+
+        return self._record_microphone_fixed(sd, duration_seconds)
+
+    def _record_microphone_fixed(self, sd: Any, duration_seconds: float) -> list[float]:
         sample_rate = self.settings.voice_sample_rate
         channels = self.settings.voice_channels
         frames = int(sample_rate * duration_seconds)
@@ -736,6 +896,53 @@ class VoiceLoopRunner:
         recording = sd.rec(frames, samplerate=sample_rate, channels=channels, dtype="float32")
         sd.wait()
         return self._flatten_samples(recording)
+
+    def _record_microphone_until_silence(self, sd: Any, duration_seconds: float) -> list[float]:
+        sample_rate = self.settings.voice_sample_rate
+        channels = self.settings.voice_channels
+        window_ms = self.settings.voice_vad_window_ms
+        chunk_frames = max(1, int(sample_rate * window_ms / 1000.0))
+        max_frames = max(1, int(sample_rate * duration_seconds))
+        silence_chunks_needed = max(1, ceil(self.settings.voice_vad_silence_ms / window_ms))
+        min_chunks_after_trigger = max(1, ceil(450 / window_ms))
+        samples: list[float] = []
+        triggered = False
+        chunks_after_trigger = 0
+        trailing_silence_chunks = 0
+
+        sd.check_input_settings(samplerate=sample_rate, channels=channels)
+        with sd.InputStream(samplerate=sample_rate, channels=channels, dtype="float32") as stream:
+            while len(samples) < max_frames and not self._stop_requested:
+                frames_to_read = min(chunk_frames, max_frames - len(samples))
+                recording, _overflowed = stream.read(frames_to_read)
+                chunk = self._flatten_samples(recording)
+                if not chunk:
+                    break
+
+                samples.extend(chunk)
+                metrics = calculate_audio_capture_metrics(
+                    samples,
+                    sample_rate,
+                    self.settings.voice_vad_threshold,
+                    vad_window_ms=window_ms,
+                    noise_multiplier=self.settings.voice_vad_noise_multiplier,
+                )
+                chunk_rms = calculate_rms(chunk)
+                if chunk_rms >= metrics.effective_vad_threshold:
+                    triggered = True
+                    trailing_silence_chunks = 0
+                elif triggered:
+                    trailing_silence_chunks += 1
+
+                if triggered:
+                    chunks_after_trigger += 1
+                    if (
+                        chunks_after_trigger >= min_chunks_after_trigger
+                        and trailing_silence_chunks >= silence_chunks_needed
+                    ):
+                        break
+
+        return samples
 
     @staticmethod
     def _require_sounddevice() -> Any:
@@ -828,6 +1035,7 @@ class VoiceLoopRunner:
         )
         self._emit(
             f"{SPEECH_REPAIR_PREFIX} raw={speech_repair.raw_transcript or '<empty>'} | "
+            f"cleaned={speech_repair.cleaned_transcript or '<empty>'} | "
             f"repaired={speech_repair.repaired_transcript or '<empty>'} | "
             f"confidence={speech_repair.confidence:.2f} | "
             f"strategy={speech_repair.strategy} | "
@@ -839,39 +1047,66 @@ class VoiceLoopRunner:
             samples,
             self.settings.voice_sample_rate,
             self.settings.voice_vad_threshold,
+            vad_window_ms=self.settings.voice_vad_window_ms,
+            noise_multiplier=self.settings.voice_vad_noise_multiplier,
         )
         self.voice_loop_logger.info(
-            "Wake diagnostics provider={} score={} threshold={} average_rms={} max_rms={} vad_crossed={}",
+            "Wake diagnostics provider={} score={} threshold={} average_rms={} max_rms={} noise_floor={} "
+            "effective_vad_threshold={} vad_trigger_seconds={} vad_crossed={}",
             self.wake_provider_resolution.effective_provider,
             f"{wake_detection.score:.3f}",
             f"{wake_detection.threshold:.3f}",
             f"{metrics.average_rms:.6f}",
             f"{metrics.max_rms:.6f}",
+            f"{metrics.noise_floor:.6f}",
+            f"{metrics.effective_vad_threshold:.6f}",
+            _format_optional_seconds(metrics.vad_trigger_seconds),
             metrics.vad_threshold_crossed,
         )
         self._emit(
             f"{WAKE_DIAGNOSTICS_PREFIX} provider={self.wake_provider_resolution.effective_provider} "
             f"score={wake_detection.score:.3f} threshold={wake_detection.threshold:.3f} "
             f"average_rms={metrics.average_rms:.6f} max_rms={metrics.max_rms:.6f} "
+            f"noise_floor={metrics.noise_floor:.6f} effective_vad_threshold={metrics.effective_vad_threshold:.6f} "
+            f"vad_trigger_seconds={_format_optional_seconds(metrics.vad_trigger_seconds)} "
             f"vad_crossed={_yes_no(metrics.vad_threshold_crossed)}"
         )
 
-    def _log_capture_audio_diagnostics(self, metrics: AudioCaptureMetrics, record_seconds: float) -> None:
+    def _log_capture_audio_diagnostics(
+        self,
+        metrics: AudioCaptureMetrics,
+        record_seconds: float,
+        *,
+        transcript_confidence: float | None = None,
+        command_score: float | None = None,
+    ) -> None:
         self.voice_loop_logger.info(
             "Command audio diagnostics provider={} sample_rate={} record_seconds={} average_rms={} max_rms={} "
-            "vad_threshold={} vad_crossed={}",
+            "noise_floor={} vad_threshold={} effective_vad_threshold={} vad_trigger_seconds={} "
+            "speech_window_ratio={} transcript_confidence={} command_score={} vad_crossed={}",
             self.provider.name,
             self.settings.voice_sample_rate,
             f"{record_seconds:.2f}",
             f"{metrics.average_rms:.6f}",
             f"{metrics.max_rms:.6f}",
+            f"{metrics.noise_floor:.6f}",
             f"{metrics.vad_threshold:.6f}",
+            f"{metrics.effective_vad_threshold:.6f}",
+            _format_optional_seconds(metrics.vad_trigger_seconds),
+            f"{metrics.speech_window_ratio:.2f}",
+            _format_optional_float(transcript_confidence),
+            _format_optional_float(command_score),
             metrics.vad_threshold_crossed,
         )
         self._emit(
             f"{CAPTURE_DIAGNOSTICS_PREFIX} provider={self.provider.name} "
             f"sample_rate={self.settings.voice_sample_rate} record_seconds={record_seconds:.2f} "
             f"average_rms={metrics.average_rms:.6f} max_rms={metrics.max_rms:.6f} "
+            f"noise_floor={metrics.noise_floor:.6f} effective_vad_threshold={metrics.effective_vad_threshold:.6f} "
+            f"vad_trigger_seconds={_format_optional_seconds(metrics.vad_trigger_seconds)} "
+            f"speech_window_ratio={metrics.speech_window_ratio:.2f} "
+            f"transcript_confidence={_format_optional_float(transcript_confidence)} "
+            f"command_score={_format_optional_float(command_score)} "
             f"vad_crossed={_yes_no(metrics.vad_threshold_crossed)}"
         )
 
@@ -887,3 +1122,15 @@ def _is_incomplete_transcript(validation: CommandValidationResult) -> bool:
 
 def _yes_no(value: bool) -> str:
     return "yes" if value else "no"
+
+
+def _format_optional_seconds(value: float | None) -> str:
+    if value is None:
+        return "none"
+    return f"{value:.2f}"
+
+
+def _format_optional_float(value: float | None) -> str:
+    if value is None:
+        return "unknown"
+    return f"{value:.2f}"

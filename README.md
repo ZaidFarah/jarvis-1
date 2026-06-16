@@ -174,6 +174,14 @@ The GUI now uses a tabbed dark interface with quick actions for voice, tools, re
 - Low-confidence repairs ask for confirmation with `Did you mean: <repaired command>?` before continuing.
 - GUI diagnostics show `Speech`, `Interpreted`, repair confidence, and repair strategy.
 
+## Voice Speed Polish
+
+- The live voice loop now uses shorter default capture windows and starts command capture immediately after wake detection.
+- Wake acknowledgement speech is off by default, so `Yes sir?` no longer adds delay unless explicitly enabled.
+- Live assistant responses can be displayed instantly in the GUI with `VOICE_LOOP_SPEAK_RESPONSES=false`.
+- The voice loop logs wake, command, OpenAI, TTS, and total-turn timings for turn-by-turn latency checks.
+- The GUI shows a larger assistant dashboard with a voice-stack card, a timing card, and a more prominent start/stop control block.
+
 ## Phase 10 Scope
 
 - In-memory short-term conversation history for the current session only.
@@ -292,6 +300,9 @@ Voice diagnostic settings:
 VOICE_SAMPLE_RATE=16000
 VOICE_RECORD_SECONDS=5
 VOICE_VAD_THRESHOLD=0.0015
+VOICE_VAD_WINDOW_MS=80
+VOICE_VAD_NOISE_MULTIPLIER=3.0
+VOICE_VAD_SILENCE_MS=650
 ```
 
 Detailed audio diagnostic logs are saved to:
@@ -463,7 +474,7 @@ py main.py --voice-command-test --speak
 py main.py --command-capture-test
 ```
 
-This records one command sample without requiring wake detection. It prints the provider, sample rate, record seconds, average RMS, max RMS, VAD threshold, whether the threshold was crossed, raw transcript, cleaned/repaired command, repair confidence, repair strategy, accepted status, rejection reason when rejected, and the diagnostic log path.
+This records one command sample without requiring wake detection. It prints the provider, sample rate, record seconds, average RMS, max RMS, noise floor, configured and effective VAD thresholds, VAD trigger point, raw transcript, transcript confidence when available, clean transcript, repaired command, wake score, command score, repair confidence, repair strategy, accepted status, rejection reason when rejected, and the diagnostic log path.
 
 Use this when wake detection works but command capture produces bad transcripts such as `You`, `uh`, or punctuation-only text.
 
@@ -485,20 +496,20 @@ The voice loop keeps Jarvis running until stopped:
 2. Uses the selected wake provider.
 3. When OpenWakeWord is active, listens in short chunks before any wake transcription.
 4. Falls back to Whisper fuzzy wake detection when OpenWakeWord is unavailable.
-5. Prompts with `Yes sir?`, optionally beeps, and waits briefly before recording the command.
-6. Records one command clip.
+5. Starts command capture immediately after wake detection; the wake acknowledgement speech is off by default.
+6. Records one command clip using the shorter default command window.
 7. Repairs the cleaned transcript using rules, context, common intents, and optional OpenAI repair.
 8. Validates the repaired command text.
 9. Asks for confirmation before using a low-confidence repair.
 10. Stops cleanly if the command is `stop listening`, `go to sleep`, `sleep jarvis`, `jarvis sleep`, `exit jarvis`, `shutdown jarvis`, `that is all`, or `thank you jarvis`.
 11. Rejects bad short transcripts locally with `I didn’t catch that, please repeat.` and retries command capture once by default.
 12. Sends accepted repaired commands to `AssistantCore`.
-13. Speaks accepted responses using the configured TTS provider.
+13. Speaks accepted responses only when `VOICE_LOOP_SPEAK_RESPONSES=true`.
 14. Enters one configurable `Listening for follow-up...` window after a successful response.
 15. Sends valid follow-up commands to `AssistantCore` without requiring the wake phrase again.
 16. Rejects invalid or incomplete non-empty follow-ups locally, retries follow-up capture once, and returns to sleep if the retry is invalid or no follow-up is heard.
 17. Speaks the configured standby message only after follow-up mode is finished and Jarvis is returning to sleep, when standby speech is enabled.
-18. Prints a summary on exit with wake attempts, successful wakes, commands handled, empty commands, and errors.
+18. Prints a summary on exit with wake attempts, successful wakes, commands handled, empty commands, errors, and the latest turn timing summary.
 
 For GUI visibility, the loop emits explicit events for rejected commands, retrying command capture, follow-up listening, accepted commands and follow-ups, assistant responses, return-to-sleep state, wake diagnostics, command capture RMS/VAD diagnostics, and speech repair diagnostics.
 
@@ -511,14 +522,21 @@ logs/voice_loop.log
 Voice loop polish settings:
 
 ```dotenv
-VOICE_FOLLOW_UP_TIMEOUT_SECONDS=15
+VOICE_COMMAND_START_DELAY_SECONDS=0
+VOICE_COMMAND_RECORD_SECONDS=5
+VOICE_VAD_WINDOW_MS=80
+VOICE_VAD_NOISE_MULTIPLIER=3.0
+VOICE_VAD_SILENCE_MS=650
+VOICE_LOOP_SPEAK_WAKE_ACK=false
+VOICE_LOOP_SPEAK_RESPONSES=true
+VOICE_FOLLOW_UP_TIMEOUT_SECONDS=10
 VOICE_RESPONSE_MODE=concise
 VOICE_CONCISE_INSTRUCTION=Answer voice commands in one or two short sentences unless the user asks for detail.
 VOICE_LOOP_SPEAK_STANDBY=false
 VOICE_LOOP_STANDBY_MESSAGE=Standing by.
 ```
 
-Set `VOICE_RESPONSE_MODE=normal` to use the standard chat prompt for voice responses. Set `VOICE_LOOP_SPEAK_STANDBY=false` to keep the visual `Standing by.` state without speaking it.
+Set `VOICE_RESPONSE_MODE=normal` to use the standard chat prompt for voice responses. Set `VOICE_LOOP_SPEAK_WAKE_ACK=false` to keep the wake acknowledgement visual only. Set `VOICE_LOOP_SPEAK_RESPONSES=false` to display responses instantly in the GUI without waiting for speech. Set `VOICE_LOOP_SPEAK_STANDBY=false` to keep the visual `Standing by.` state without speaking it.
 
 ## OpenAI Check
 

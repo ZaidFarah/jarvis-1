@@ -120,6 +120,24 @@ class AppSettings(BaseSettings):
         le=1.0,
         validation_alias=AliasChoices("VOICE_VAD_THRESHOLD", "JARVIS_VOICE_VAD_THRESHOLD"),
     )
+    voice_vad_window_ms: int = Field(
+        default=80,
+        ge=20,
+        le=250,
+        validation_alias=AliasChoices("VOICE_VAD_WINDOW_MS", "JARVIS_VOICE_VAD_WINDOW_MS"),
+    )
+    voice_vad_noise_multiplier: float = Field(
+        default=3.0,
+        ge=1.0,
+        le=10.0,
+        validation_alias=AliasChoices("VOICE_VAD_NOISE_MULTIPLIER", "JARVIS_VOICE_VAD_NOISE_MULTIPLIER"),
+    )
+    voice_vad_silence_ms: int = Field(
+        default=650,
+        ge=120,
+        le=2500,
+        validation_alias=AliasChoices("VOICE_VAD_SILENCE_MS", "JARVIS_VOICE_VAD_SILENCE_MS"),
+    )
     speech_to_text_provider: str = Field(
         default="faster_whisper",
         validation_alias=AliasChoices("STT_PROVIDER", "JARVIS_STT_PROVIDER", "JARVIS_SPEECH_TO_TEXT_PROVIDER"),
@@ -215,7 +233,7 @@ class AppSettings(BaseSettings):
         ),
     )
     voice_command_start_delay_seconds: float = Field(
-        default=1.0,
+        default=0.0,
         ge=0.0,
         le=5.0,
         validation_alias=AliasChoices(
@@ -224,7 +242,7 @@ class AppSettings(BaseSettings):
         ),
     )
     voice_command_record_seconds: float = Field(
-        default=7.0,
+        default=5.0,
         ge=0.25,
         le=30.0,
         validation_alias=AliasChoices("VOICE_COMMAND_RECORD_SECONDS", "JARVIS_VOICE_COMMAND_RECORD_SECONDS"),
@@ -319,8 +337,16 @@ class AppSettings(BaseSettings):
         default=True,
         validation_alias=AliasChoices("VOICE_LOOP_SPEAK_STATUS", "JARVIS_VOICE_LOOP_SPEAK_STATUS"),
     )
+    voice_loop_speak_wake_ack: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("VOICE_LOOP_SPEAK_WAKE_ACK", "JARVIS_VOICE_LOOP_SPEAK_WAKE_ACK"),
+    )
+    voice_loop_speak_responses: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("VOICE_LOOP_SPEAK_RESPONSES", "JARVIS_VOICE_LOOP_SPEAK_RESPONSES"),
+    )
     voice_follow_up_timeout_seconds: float = Field(
-        default=15.0,
+        default=10.0,
         ge=1.0,
         le=30.0,
         validation_alias=AliasChoices(

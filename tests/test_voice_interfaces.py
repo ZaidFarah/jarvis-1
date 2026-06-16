@@ -93,6 +93,46 @@ def test_faster_whisper_provider_uses_injected_model() -> None:
     assert result.language == "en"
 
 
+def test_faster_whisper_provider_reuses_loaded_model() -> None:
+    created = 0
+    calls: list[dict[str, object]] = []
+
+    class FakeSegment:
+        text = " status report "
+        avg_logprob = -0.15
+
+    class FakeInfo:
+        duration = 0.8
+        language = "en"
+        language_probability = None
+
+    class FakeModel:
+        def __init__(self, model_name: str, device: str, compute_type: str) -> None:
+            nonlocal created
+            del model_name, device, compute_type
+            created += 1
+
+        def transcribe(self, audio, **kwargs):
+            calls.append(kwargs)
+            return [FakeSegment()], FakeInfo()
+
+    provider = FasterWhisperSpeechToTextProvider(
+        model_name="base.en",
+        device="cpu",
+        compute_type="int8",
+        model_class=FakeModel,
+    )
+
+    first = provider.transcribe([0.1], sample_rate=16000)
+    second = provider.transcribe([0.2], sample_rate=16000)
+
+    assert created == 1
+    assert first.text == "status report"
+    assert second.text == "status report"
+    assert calls[0]["beam_size"] == 1
+    assert first.confidence is not None
+
+
 def test_pyttsx3_provider_exposes_availability_without_speaking() -> None:
     provider = Pyttsx3TextToSpeechProvider()
 

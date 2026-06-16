@@ -12,6 +12,9 @@ def test_voice_settings_defaults_are_lightweight() -> None:
     assert settings.voice_microphone_test_seconds == 5.0
     assert settings.voice_vad_enabled is True
     assert settings.voice_vad_threshold == 0.0015
+    assert settings.voice_vad_window_ms == 80
+    assert settings.voice_vad_noise_multiplier == 3.0
+    assert settings.voice_vad_silence_ms == 650
     assert settings.speech_to_text_provider == "faster_whisper"
     assert settings.whisper_model == "base.en"
     assert settings.whisper_device == "cpu"
@@ -34,8 +37,8 @@ def test_voice_settings_defaults_are_lightweight() -> None:
     assert settings.openwakeword_listen_chunk_ms == 80
     assert settings.openwakeword_test_seconds == 10.0
     assert settings.openwakeword_fallback_to_whisper is True
-    assert settings.voice_command_start_delay_seconds == 1.0
-    assert settings.voice_command_record_seconds == 7.0
+    assert settings.voice_command_start_delay_seconds == 0.0
+    assert settings.voice_command_record_seconds == 5.0
     assert settings.voice_command_min_words == 2
     assert settings.voice_command_reject_phrase_list == ["you", "uh", "um", "hmm", "yeah", "okay"]
     assert settings.voice_command_incomplete_phrase_list == [
@@ -72,7 +75,9 @@ def test_voice_settings_defaults_are_lightweight() -> None:
     assert settings.voice_loop_max_empty_commands == 3
     assert settings.voice_loop_wake_cooldown_seconds == 1.5
     assert settings.voice_loop_speak_status is True
-    assert settings.voice_follow_up_timeout_seconds == 15.0
+    assert settings.voice_loop_speak_wake_ack is False
+    assert settings.voice_loop_speak_responses is True
+    assert settings.voice_follow_up_timeout_seconds == 10.0
     assert settings.voice_response_mode == "concise"
     assert settings.voice_concise_instruction == "Answer voice commands in one or two short sentences unless the user asks for detail."
     assert settings.voice_loop_speak_standby is False
@@ -97,12 +102,18 @@ def test_voice_settings_read_environment(monkeypatch) -> None:
     monkeypatch.setenv("VOICE_SAMPLE_RATE", "22050")
     monkeypatch.setenv("VOICE_RECORD_SECONDS", "1.5")
     monkeypatch.setenv("VOICE_VAD_THRESHOLD", "0.02")
+    monkeypatch.setenv("VOICE_VAD_WINDOW_MS", "60")
+    monkeypatch.setenv("VOICE_VAD_NOISE_MULTIPLIER", "2.5")
+    monkeypatch.setenv("VOICE_VAD_SILENCE_MS", "500")
 
     settings = AppSettings(_env_file=None)
 
     assert settings.voice_sample_rate == 22050
     assert settings.voice_record_seconds == 1.5
     assert settings.voice_vad_threshold == 0.02
+    assert settings.voice_vad_window_ms == 60
+    assert settings.voice_vad_noise_multiplier == 2.5
+    assert settings.voice_vad_silence_ms == 500
 
 
 def test_voice_settings_keep_previous_jarvis_prefixed_names(monkeypatch) -> None:
@@ -184,6 +195,8 @@ def test_wake_settings_read_environment(monkeypatch) -> None:
     monkeypatch.setenv("VOICE_LOOP_MAX_EMPTY_COMMANDS", "5")
     monkeypatch.setenv("VOICE_LOOP_WAKE_COOLDOWN_SECONDS", "2.5")
     monkeypatch.setenv("VOICE_LOOP_SPEAK_STATUS", "false")
+    monkeypatch.setenv("VOICE_LOOP_SPEAK_WAKE_ACK", "true")
+    monkeypatch.setenv("VOICE_LOOP_SPEAK_RESPONSES", "false")
     monkeypatch.setenv("VOICE_FOLLOW_UP_TIMEOUT_SECONDS", "6.5")
     monkeypatch.setenv("VOICE_RESPONSE_MODE", "normal")
     monkeypatch.setenv("VOICE_CONCISE_INSTRUCTION", "  Keep voice answers short.  ")
@@ -220,6 +233,8 @@ def test_wake_settings_read_environment(monkeypatch) -> None:
     assert settings.voice_loop_max_empty_commands == 5
     assert settings.voice_loop_wake_cooldown_seconds == 2.5
     assert settings.voice_loop_speak_status is False
+    assert settings.voice_loop_speak_wake_ack is True
+    assert settings.voice_loop_speak_responses is False
     assert settings.voice_follow_up_timeout_seconds == 6.5
     assert settings.voice_response_mode == "normal"
     assert settings.voice_concise_instruction == "Keep voice answers short."

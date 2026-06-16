@@ -35,7 +35,8 @@ class FakeSoundDevice:
         assert samplerate == 16000
         assert channels == 1
         assert dtype == "float32"
-        return [0.05 for _ in range(frames)]
+        quiet_frames = max(1, frames // 2)
+        return [0.0 for _ in range(quiet_frames)] + [0.05 for _ in range(frames - quiet_frames)]
 
     def wait(self) -> None:
         return None
@@ -60,9 +61,15 @@ def test_command_capture_runner_reports_validation_and_audio_levels(tmp_path: Pa
     assert report.record_seconds == 0.25
     assert report.average_rms > 0
     assert report.max_rms > 0
+    assert report.noise_floor == 0.0
+    assert report.effective_vad_threshold > 0
+    assert report.vad_trigger_seconds is not None
     assert report.vad_threshold_crossed is True
     assert report.raw_transcript == "you"
+    assert report.cleaned_transcript == "you"
     assert report.cleaned_command == "you"
+    assert report.wake_score == 0.0
+    assert report.command_score < 0.5
     assert report.speech_repair is not None
     assert report.speech_repair.strategy == "skipped"
     assert report.accepted is False
@@ -74,8 +81,14 @@ def test_command_capture_runner_reports_validation_and_audio_levels(tmp_path: Pa
     assert "record seconds: 0.25" in text
     assert "average RMS:" in text
     assert "max RMS:" in text
+    assert "noise floor:" in text
+    assert "effective VAD threshold:" in text
+    assert "VAD trigger point:" in text
     assert "VAD threshold crossed: yes" in text
     assert "raw transcript: you" in text
+    assert "clean transcript: you" in text
+    assert "wake score: 0.000" in text
+    assert "command score:" in text
     assert "cleaned command: you" in text
     assert "repair strategy: skipped" in text
     assert "accepted: no" in text
@@ -84,11 +97,17 @@ def test_command_capture_runner_reports_validation_and_audio_levels(tmp_path: Pa
 
 
 def test_audio_capture_metrics_helper_reports_rms_and_vad() -> None:
-    metrics = calculate_audio_capture_metrics([0.0, 0.2, -0.2, 0.0], sample_rate=16000, vad_threshold=0.05)
+    metrics = calculate_audio_capture_metrics(
+        [0.0] * 1600 + [0.2, -0.2] * 800,
+        sample_rate=16000,
+        vad_threshold=0.05,
+    )
 
     assert metrics.average_rms > 0
     assert metrics.max_rms > 0
     assert metrics.vad_threshold == 0.05
+    assert metrics.noise_floor == 0.0
+    assert metrics.effective_vad_threshold <= metrics.vad_threshold
     assert metrics.vad_threshold_crossed is True
 
 
@@ -108,6 +127,7 @@ def test_command_capture_runner_reports_speech_repair(tmp_path: Path) -> None:
     text = format_command_capture_report(report)
 
     assert report.raw_transcript == "Did it noting him today? What's the"
+    assert report.cleaned_transcript == "Did it noting him today? What's the"
     assert report.cleaned_command == "what's the weather in Nottingham today"
     assert report.speech_repair is not None
     assert report.speech_repair.confidence == 0.92
@@ -133,6 +153,13 @@ def test_command_capture_cli_command_formats_report(tmp_path: Path, monkeypatch,
         cleaned_command="status report",
         validation=validate_cleaned_command("status report", reject_phrases=settings.voice_command_reject_phrase_list),
         log_file=tmp_path / "logs" / "command_capture.log",
+        noise_floor=0.002,
+        effective_vad_threshold=0.003,
+        vad_trigger_seconds=0.16,
+        transcript_confidence=0.91,
+        cleaned_transcript="status report",
+        wake_score=0.0,
+        command_score=0.88,
     )
     monkeypatch.setattr("main.load_settings", lambda: settings)
     monkeypatch.setattr("main.run_command_capture_test", lambda settings: report)
@@ -143,4 +170,7 @@ def test_command_capture_cli_command_formats_report(tmp_path: Path, monkeypatch,
     assert exit_code == 0
     assert "Jarvis Command Capture Test" in output
     assert "raw transcript: status report" in output
+    assert "noise floor: 0.002000" in output
+    assert "VAD trigger point: 0.16s" in output
+    assert "command score: 0.88" in output
     assert "accepted: yes" in output
