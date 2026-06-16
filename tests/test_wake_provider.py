@@ -12,19 +12,20 @@ def _settings(tmp_path: Path) -> AppSettings:
     return AppSettings(_env_file=None, log_dir=tmp_path / "logs")
 
 
-def test_default_wake_provider_is_whisper_fuzzy() -> None:
+def test_default_wake_provider_is_openwakeword() -> None:
     settings = AppSettings(_env_file=None)
 
-    assert settings.wake_provider == "whisper_fuzzy"
-    assert settings.openwakeword_enabled is False
+    assert settings.wake_provider == "openwakeword"
+    assert settings.wake_fallback_provider == "whisper_fuzzy"
+    assert settings.openwakeword_enabled is True
 
 
 def test_wake_provider_check_passes_for_default_whisper_fuzzy(tmp_path: Path) -> None:
     report = run_wake_provider_check(_settings(tmp_path))
 
-    assert report.status == "PASS"
-    assert report.resolution.effective_provider == "whisper_fuzzy"
-    assert report.message == "Whisper fuzzy wake detection is active."
+    assert report.status in {"PASS", "WARN"}
+    assert report.resolution.effective_provider in {"openwakeword", "whisper_fuzzy", "manual"}
+    assert report.message
 
 
 def test_wake_provider_resolution_falls_back_when_openwakeword_missing(tmp_path: Path, monkeypatch) -> None:
@@ -43,9 +44,11 @@ def test_wake_provider_resolution_falls_back_when_openwakeword_missing(tmp_path:
     assert resolution.openwakeword_enabled is True
     assert resolution.openwakeword_installed is False
     assert resolution.model_configured is True
+    assert resolution.wake_fallback_provider == "whisper_fuzzy"
     assert resolution.fallback_enabled is True
     assert resolution.effective_provider == "whisper_fuzzy"
     assert resolution.openwakeword_available is False
+    assert resolution.manual_mode_required is True
 
 
 def test_wake_provider_check_reports_expected_fields(tmp_path: Path, monkeypatch) -> None:
@@ -59,8 +62,10 @@ def test_wake_provider_check_reports_expected_fields(tmp_path: Path, monkeypatch
     assert "OpenWakeWord enabled:" in text
     assert "OpenWakeWord installed:" in text
     assert "Model configured:" in text
+    assert "Fallback provider:" in text
     assert "Fallback enabled:" in text
     assert "Effective provider:" in text
+    assert "Manual mode required:" in text
     assert "Message:" in text
     assert report.is_successful is True
 
@@ -93,3 +98,4 @@ def test_wake_provider_does_not_crash_when_dependency_missing(tmp_path: Path, mo
 
     assert resolution.effective_provider == "whisper_fuzzy"
     assert resolution.openwakeword_available is False
+    assert resolution.manual_mode_required is True

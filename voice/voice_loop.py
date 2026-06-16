@@ -285,8 +285,29 @@ class VoiceLoopRunner:
         wake_capture_started = time.perf_counter()
 
         try:
-            self._status("Listening for wake phrase", statuses)
-            if self.wake_provider_resolution.effective_provider == "openwakeword" and self.wake_provider is not None:
+            if not self.wake_provider_resolution.manual_mode_required:
+                self._status("Listening for wake phrase", statuses)
+            if self.wake_provider_resolution.manual_mode_required:
+                warning = self.wake_provider_resolution.fallback_reason or (
+                    "OpenWakeWord is unavailable; switching to manual command mode."
+                )
+                self.voice_loop_logger.warning(warning)
+                self._emit(warning)
+                self._status("Wake unavailable; manual command mode", statuses)
+                wake_detection = self._manual_wake_detection()
+                self.summary.successful_wakes += 1
+                self._status("Wake detected", statuses)
+                self._status(COMMAND_PROMPT, statuses)
+                if self.settings.voice_loop_speak_wake_ack:
+                    self._speak_text(COMMAND_PROMPT, errors, sleep_after=False)
+                if self.settings.voice_command_start_delay_seconds > 0:
+                    self.sleeper(self.settings.voice_command_start_delay_seconds)
+                self.beeper()
+                wake_capture_started = time.perf_counter()
+                timing.wake_capture_ms = 0.0
+                timing.wake_transcribe_ms = 0.0
+                self._log_wake_diagnostics([], wake_detection)
+            elif self.wake_provider_resolution.effective_provider == "openwakeword" and self.wake_provider is not None:
                 wake_samples, wake_detection = self._detect_wake_with_openwakeword()
                 timing.wake_capture_ms = (time.perf_counter() - wake_capture_started) * 1000.0
                 self.voice_loop_logger.info(
@@ -305,6 +326,7 @@ class VoiceLoopRunner:
                         wake_detection.detected,
                         f"{wake_detection.score:.3f}",
                     )
+                self._log_wake_diagnostics(wake_samples, wake_detection)
             else:
                 wake_capture_started = time.perf_counter()
                 wake_samples = self.recorder(self.settings.wake_listen_seconds)
@@ -319,7 +341,7 @@ class VoiceLoopRunner:
                     wake_detection.detected,
                     f"{wake_detection.score:.3f}",
                 )
-            self._log_wake_diagnostics(wake_samples, wake_detection)
+                self._log_wake_diagnostics(wake_samples, wake_detection)
         except Exception as exc:
             message = f"Wake phrase stage failed: {type(exc).__name__}: {exc}"
             self.voice_loop_logger.exception(message)
@@ -817,7 +839,10 @@ class VoiceLoopRunner:
     ) -> VoiceLoopCycleReport:
         wake_provider_name = self.wake_provider_resolution.effective_provider
         wake_provider_available = self.wake_provider_resolution.openwakeword_available
-        if wake_provider_name != "openwakeword":
+        if self.wake_provider_resolution.manual_mode_required:
+            wake_provider_name = "manual"
+            wake_provider_available = False
+        elif wake_provider_name != "openwakeword":
             wake_provider_available = True
         command_validation = validate_cleaned_command(
             cleaned_command,
@@ -872,6 +897,16 @@ class VoiceLoopRunner:
                 break
 
         return buffered_samples, wake_detection
+
+    def _manual_wake_detection(self) -> WakeDetectionResult:
+        return WakeDetectionResult(
+            detected=True,
+            transcript="",
+            matched_phrase=None,
+            score=0.0,
+            threshold=self.settings.wake_match_threshold,
+            match_type="manual",
+        )
 
     def _record_microphone(self, duration_seconds: float) -> list[float]:
         sd = self._require_sounddevice()

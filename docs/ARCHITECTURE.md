@@ -72,16 +72,16 @@ No ElevenLabs, voice cloning, real-time OpenAI voice conversation, permissions s
 
 `gui/main_window.py` contains the PySide6 floating Jarvis shell:
 
-- dark frameless assistant-style window
-- animated orb and large current-state panel
+- dark frameless assistant-style window with a glassmorphism surface
+- premium dark red HUD theme with Segoe UI Variable first and Segoe UI fallback
+- three-column layout with left voice status and controls, a large central circular core, and right transcript / command / response / provider panels
+- central animated orb with concentric rings, ticks, crosshair lines, rotating arcs, and state-sensitive crimson glow and sweep motion
+- top system bar with brand, live state indicators, and window controls
+- compact command input and control strip at the bottom
 - system tray icon
-- manual command input
-- microphone test button
-- start and stop voice loop controls
 - current loop status, last command, and last response fields
-- live loop event handling for rejected command, retrying capture, follow-up listening, accepted command and follow-up, assistant response, sleeping state, wake score, provider, RMS, VAD diagnostics, raw speech, interpreted speech, repair confidence, repair strategy, and turn timings
-- separate transcript and response panels
-- status states: Sleeping, Listening, Thinking, Speaking, Follow-up, Error
+- live loop event handling for rejected command, retrying capture, follow-up listening, accepted command and follow-up, assistant response, sleeping state, wake score, provider, RMS, VAD diagnostics, raw speech, interpreted speech, repair confidence, repair strategy, confidence bars, and turn timings
+- status states: Sleeping, Listening, Wake detected, Transcribing, Thinking, Speaking, Follow-up, Error
 - diagnostics controls for startup check, startup enable, and startup disable
 
 The window can be hidden to the tray and safely exited from the tray menu.

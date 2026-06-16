@@ -174,9 +174,11 @@ def test_voice_loop_openwakeword_path_does_not_transcribe_wake_clip_first() -> N
         openwakeword_enabled=True,
         openwakeword_installed=True,
         model_configured=True,
+        wake_fallback_provider="whisper_fuzzy",
         fallback_enabled=True,
         effective_provider="openwakeword",
         openwakeword_available=True,
+        manual_mode_required=False,
     )
     durations: list[float] = []
 
@@ -253,7 +255,7 @@ def test_voice_loop_falls_back_to_whisper_when_openwakeword_is_unavailable() -> 
     )
     settings.voice_loop_speak_status = False
     assistant = SpyAssistant()
-    provider = FakeProvider(["hey jarvis", "status report"])
+    provider = FakeProvider(["status report", ""])
 
     report = VoiceLoopRunner(
         settings=settings,
@@ -264,11 +266,11 @@ def test_voice_loop_falls_back_to_whisper_when_openwakeword_is_unavailable() -> 
         beeper=no_beep,
     ).run_once()
 
-    assert report.wake_provider_name == "whisper_fuzzy"
-    assert report.wake_provider_available is True
-    assert report.wake_transcription == "hey jarvis"
+    assert report.wake_provider_name == "manual"
+    assert report.wake_provider_available is False
+    assert report.wake_transcription == ""
     assert report.wake_detected is True
-    assert provider.calls == 3
+    assert provider.calls == 2
 
 
 def test_voice_loop_stop_command_does_not_call_assistant() -> None:

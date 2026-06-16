@@ -45,10 +45,11 @@ The GUI now uses a tabbed dark interface with quick actions for voice, tools, re
 - Wake phrase configuration.
 - Wake phrase aliases.
 - Fuzzy wake phrase matching with `difflib.SequenceMatcher`.
-- Whisper fuzzy wake detection as the default live wake provider.
-- OpenWakeWord remains available as an optional diagnostic/configured provider, with Whisper fuzzy fallback.
+- OpenWakeWord is the preferred live wake provider when it is installed and a model is available.
+- Whisper fuzzy wake detection remains available as a fallback, but the live loop will switch to manual command mode when OpenWakeWord is unavailable.
 - Wake detection utility class.
 - One-shot `py main.py --wake-test` diagnostic command.
+- Fast `py main.py --wake-debug` and repeated `py main.py --wake-jarvis-test` diagnostics.
 - Wake diagnostic logging to `logs/wake_diagnostics.log`.
 
 ## Phase 5 Scope
@@ -114,6 +115,12 @@ The GUI now uses a tabbed dark interface with quick actions for voice, tools, re
 - Ctrl+C exits the CLI loop cleanly.
 - GUI and tray actions: `Start Voice Loop` and `Stop Voice Loop`.
 - Voice loop logs are saved to `logs/voice_loop.log`.
+
+## GUI
+
+The main window is a premium dark red glassmorphism dashboard with a three-column HUD layout, a large animated circular core, angular control buttons, confidence meters, turn timing, provider indicators, and a compact command bar at the bottom. It uses a Segoe UI Variable-first font stack with Segoe UI fallback, and it is built entirely from PySide6 widgets, gradients, borders, and animations so it remains lightweight on Windows and does not require external artwork.
+
+Screenshot placeholder note: this repo does not bundle generated screenshots. Add them later under `docs/` or `assets/` only if you want to publish a demo image set.
 
 ## Phase 9.5 Scope
 
@@ -338,19 +345,22 @@ logs/stt_diagnostics.log
 
 ```powershell
 py main.py --wake-test
+py main.py --wake-debug
 ```
 
-The command records one short microphone clip, transcribes it with Faster Whisper, and checks whether the transcript matches the configured wake phrase or aliases.
+The command records one short microphone clip, transcribes it with Faster Whisper, and checks whether the transcript matches the configured wake phrase or aliases. Wake detection now prefers OpenWakeWord when available and falls back to manual command mode if it is not installed or the model is missing.
 
 Wake settings:
 
 ```dotenv
 WAKE_PHRASE=hey jarvis
-WAKE_ALIASES=hey jarvis,hi jarvis,wake up jarvis,jarvis wake up,okay jarvis,yo jarvis
+WAKE_ALIASES=jarvis,hey jarvis,hi jarvis,okay jarvis,wake up jarvis,yo jarvis,jarvis please,service,jervis,travis,charities,office,jar of this,out of this,turn this
+WAKE_THRESHOLD=0.72
 WAKE_MATCH_THRESHOLD=0.72
-WAKE_LISTEN_SECONDS=5
-WAKE_PROVIDER=whisper_fuzzy
-OPENWAKEWORD_ENABLED=false
+WAKE_LISTEN_SECONDS=2.0
+WAKE_PROVIDER=openwakeword
+WAKE_FALLBACK_PROVIDER=whisper_fuzzy
+OPENWAKEWORD_ENABLED=true
 OPENWAKEWORD_MODEL=hey_jarvis
 OPENWAKEWORD_THRESHOLD=0.5
 OPENWAKEWORD_LISTEN_CHUNK_MS=80
@@ -362,6 +372,12 @@ Detailed wake diagnostics are saved to:
 
 ```text
 logs/wake_diagnostics.log
+```
+
+Repeat the single-word wake test with:
+
+```powershell
+py main.py --wake-jarvis-test --repeat 3
 ```
 
 ## OpenWakeWord Test

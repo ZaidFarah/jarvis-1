@@ -27,6 +27,9 @@ def run_wake_provider_check(settings: AppSettings | None = None) -> WakeProvider
     if resolution.effective_provider == "openwakeword":
         status = "PASS"
         message = "OpenWakeWord is the effective wake provider."
+    elif resolution.manual_mode_required:
+        status = "WARN"
+        message = "OpenWakeWord is unavailable; manual command mode is active."
     elif resolution.selected_provider == "whisper_fuzzy":
         status = "PASS"
         message = "Whisper fuzzy wake detection is active."
@@ -46,8 +49,10 @@ def format_wake_provider_check_report(report: WakeProviderCheckReport) -> str:
         f"OpenWakeWord enabled: {_yes_no(resolution.openwakeword_enabled)}",
         f"OpenWakeWord installed: {_yes_no(resolution.openwakeword_installed)}",
         f"Model configured: {_yes_no(resolution.model_configured)}",
+        f"Fallback provider: {resolution.wake_fallback_provider}",
         f"Fallback enabled: {_yes_no(resolution.fallback_enabled)}",
         f"Effective provider: {resolution.effective_provider}",
+        f"Manual mode required: {_yes_no(resolution.manual_mode_required)}",
         f"Status: {report.status}",
         f"Message: {report.message}",
     ]

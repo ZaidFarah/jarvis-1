@@ -159,27 +159,39 @@ class AppSettings(BaseSettings):
         validation_alias=AliasChoices("WAKE_PHRASE", "JARVIS_WAKE_PHRASE"),
     )
     wake_aliases: str = Field(
-        default="hey jarvis,hi jarvis,wake up jarvis,jarvis wake up,okay jarvis,yo jarvis",
+        default=(
+            "jarvis,hey jarvis,hi jarvis,okay jarvis,wake up jarvis,yo jarvis,"
+            "jarvis please,service,jervis,travis,charities,office,jar of this,out of this,turn this"
+        ),
         validation_alias=AliasChoices("WAKE_ALIASES", "JARVIS_WAKE_ALIASES"),
     )
     wake_match_threshold: float = Field(
         default=0.72,
         ge=0.0,
         le=1.0,
-        validation_alias=AliasChoices("WAKE_MATCH_THRESHOLD", "JARVIS_WAKE_MATCH_THRESHOLD"),
+        validation_alias=AliasChoices(
+            "WAKE_MATCH_THRESHOLD",
+            "WAKE_THRESHOLD",
+            "JARVIS_WAKE_MATCH_THRESHOLD",
+            "JARVIS_WAKE_THRESHOLD",
+        ),
     )
     wake_listen_seconds: float = Field(
-        default=5.0,
+        default=2.0,
         ge=0.25,
         le=10.0,
         validation_alias=AliasChoices("WAKE_LISTEN_SECONDS", "JARVIS_WAKE_LISTEN_SECONDS"),
     )
     wake_provider: str = Field(
-        default="whisper_fuzzy",
+        default="openwakeword",
         validation_alias=AliasChoices("WAKE_PROVIDER", "JARVIS_WAKE_PROVIDER"),
     )
+    wake_fallback_provider: str = Field(
+        default="whisper_fuzzy",
+        validation_alias=AliasChoices("WAKE_FALLBACK_PROVIDER", "JARVIS_WAKE_FALLBACK_PROVIDER"),
+    )
     openwakeword_enabled: bool = Field(
-        default=False,
+        default=True,
         validation_alias=AliasChoices("OPENWAKEWORD_ENABLED", "JARVIS_OPENWAKEWORD_ENABLED"),
     )
     openwakeword_model: str = Field(
@@ -758,6 +770,15 @@ class AppSettings(BaseSettings):
         allowed = {"openwakeword", "whisper_fuzzy"}
         if cleaned not in allowed:
             raise ValueError(f"Unsupported wake provider: {value}")
+        return cleaned
+
+    @field_validator("wake_fallback_provider")
+    @classmethod
+    def normalize_wake_fallback_provider(cls, value: str) -> str:
+        cleaned = value.strip().lower().replace("-", "_")
+        allowed = {"manual", "whisper_fuzzy"}
+        if cleaned not in allowed:
+            raise ValueError(f"Unsupported wake fallback provider: {value}")
         return cleaned
 
     @field_validator("log_dir")

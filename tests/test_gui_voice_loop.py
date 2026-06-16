@@ -69,6 +69,10 @@ def test_voice_loop_gui_state_updates_controls_and_status_fields() -> None:
     assert window.voice_interpreted_value.text() == "--"
     assert window.voice_repair_confidence_value.text() == "--"
     assert window.voice_repair_strategy_value.text() == "--"
+    assert window.voice_wake_score_bar.value() == 0
+    assert window.voice_transcript_confidence_bar.value() == 0
+    assert window.voice_command_score_bar.value() == 0
+    assert window.voice_repair_confidence_bar.value() == 0
     assert window.voice_timing_wake_capture_value.text() == "--"
     assert window.voice_timing_total_value.text() == "--"
     assert window.agent_enabled_value.text() in {"Enabled", "Disabled"}
@@ -231,7 +235,12 @@ def test_voice_loop_gui_updates_live_diagnostics_without_state_regression() -> N
     )
     window._handle_voice_loop_status(
         f"{CAPTURE_DIAGNOSTICS_PREFIX} provider=fake_stt sample_rate=16000 record_seconds=15.00 "
-        "average_rms=0.015000 max_rms=0.040000 vad_crossed=yes"
+        "average_rms=0.015000 max_rms=0.040000 vad_crossed=yes transcript_confidence=0.85 command_score=0.67"
+    )
+    window._handle_voice_loop_status(
+        f"{SPEECH_REPAIR_PREFIX} raw=Did it noting him today? What's the | "
+        "repaired=what's the weather in Nottingham today | confidence=0.92 | "
+        "strategy=rule | reason=matched repair rule"
     )
     window._handle_voice_loop_status(
         "Timing summary: wake_capture_ms=12.3 wake_transcribe_ms=34.5 command_capture_ms=56.7 "
@@ -243,6 +252,11 @@ def test_voice_loop_gui_updates_live_diagnostics_without_state_regression() -> N
     assert window.voice_wake_score_value.text() == "0.810 / 0.720"
     assert window.voice_rms_value.text() == "0.015000 / 0.040000"
     assert window.voice_vad_value.text() == "yes"
+    assert window.voice_command_score_value.text() == "0.67"
+    assert window.voice_wake_score_bar.value() == 81
+    assert window.voice_transcript_confidence_bar.value() == 85
+    assert window.voice_command_score_bar.value() == 67
+    assert window.voice_repair_confidence_bar.value() == 92
     assert window.voice_timing_wake_capture_value.text() == "12 ms"
     assert window.voice_timing_wake_transcribe_value.text() == "34 ms"
     assert window.voice_timing_command_capture_value.text() == "57 ms"

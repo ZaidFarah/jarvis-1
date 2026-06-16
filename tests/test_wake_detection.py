@@ -6,7 +6,22 @@ from voice.wake import WakeDetector, remove_wake_phrase_prefix
 def make_detector(threshold: float = 0.72) -> WakeDetector:
     return WakeDetector(
         wake_phrase="hey jarvis",
-        aliases=["hi jarvis", "wake up jarvis", "jarvis wake up", "okay jarvis", "yo jarvis"],
+        aliases=[
+            "jarvis",
+            "hi jarvis",
+            "wake up jarvis",
+            "okay jarvis",
+            "yo jarvis",
+            "jarvis please",
+            "service",
+            "jervis",
+            "travis",
+            "charities",
+            "office",
+            "jar of this",
+            "out of this",
+            "turn this",
+        ],
         threshold=threshold,
     )
 
@@ -46,6 +61,13 @@ def test_wake_matching_rejects_similar_non_wake_words() -> None:
 
 def test_non_match() -> None:
     result = make_detector().detect("what time is it")
+
+    assert result.detected is False
+    assert result.match_type == "none"
+
+
+def test_wake_detection_requires_prefix_not_embedded_phrase() -> None:
+    result = make_detector().detect("i don't know if you can see us")
 
     assert result.detected is False
     assert result.match_type == "none"
@@ -117,3 +139,9 @@ def test_fuzzy_wake_phrase_removal_handles_common_jarvis_mishearing() -> None:
     )
 
     assert cleaned == "status report"
+
+
+def test_common_whisper_mistakes_match_as_wake_aliases() -> None:
+    assert make_detector().detect("service").detected is True
+    assert make_detector().detect("jar of this").detected is True
+    assert make_detector().detect("out of this").detected is True

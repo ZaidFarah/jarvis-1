@@ -82,7 +82,7 @@ from voice.voice_loop import (
     VOICE_LOOP_STARTED_MESSAGE,
     VOICE_LOOP_STOPPED_MESSAGE,
 )
-from voice.wake_diagnostics import WakeDiagnostics, format_wake_report
+from voice.wake_diagnostics import WakeDiagnostics, format_wake_jarvis_test_report, format_wake_report
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -259,6 +259,21 @@ def main(argv: list[str] | None = None) -> int:
         configure_logging(settings, console=False)
         report = WakeDiagnostics(settings).run_wake_test()
         print(format_wake_report(report))
+        return 0 if report.is_successful else 1
+
+    if "--wake-debug" in args:
+        settings = load_settings()
+        configure_logging(settings, console=False)
+        report = WakeDiagnostics(settings).run_wake_test()
+        print(format_wake_report(report))
+        return 0 if report.is_successful else 1
+
+    if "--wake-jarvis-test" in args:
+        settings = load_settings()
+        configure_logging(settings, console=False)
+        repeat_count = _integer_after_flag(args, "--repeat", default=3)
+        report = WakeDiagnostics(settings).run_wake_jarvis_test(repeat_count)
+        print(format_wake_jarvis_test_report(report))
         return 0 if report.is_successful else 1
 
     if "--wake-provider-check" in args:

@@ -4,8 +4,8 @@ import threading
 from enum import Enum
 from queue import Empty, Queue
 
-from PySide6.QtCore import QPoint, Qt, QTimer
-from PySide6.QtGui import QAction, QColor, QIcon, QLinearGradient, QMouseEvent, QPainter, QPixmap, QRadialGradient
+from PySide6.QtCore import QPoint, QRectF, Qt, QTimer
+from PySide6.QtGui import QAction, QColor, QFont, QFontMetrics, QIcon, QLinearGradient, QMouseEvent, QPainter, QPainterPath, QPen, QPixmap, QRadialGradient
 from PySide6.QtWidgets import (
     QApplication,
     QFrame,
@@ -18,7 +18,10 @@ from PySide6.QtWidgets import (
     QMenu,
     QDialog,
     QPushButton,
+    QProgressBar,
     QSizePolicy,
+    QStyle,
+    QStyleOptionButton,
     QSystemTrayIcon,
     QTabWidget,
     QTextEdit,
@@ -75,14 +78,123 @@ class AssistantStatus(str, Enum):
 
 
 STATUS_COLORS = {
-    AssistantStatus.SLEEPING: "#5f7d95",
-    AssistantStatus.LISTENING: "#37d6ff",
-    AssistantStatus.THINKING: "#a78bfa",
-    AssistantStatus.SPEAKING: "#6ee7b7",
-    AssistantStatus.FOLLOW_UP: "#22c55e",
-    AssistantStatus.WAKE_DETECTED: "#facc15",
-    AssistantStatus.ERROR: "#fb7185",
+    AssistantStatus.SLEEPING: "#4a2525",
+    AssistantStatus.LISTENING: "#d14f4f",
+    AssistantStatus.THINKING: "#8a2633",
+    AssistantStatus.SPEAKING: "#b73a3a",
+    AssistantStatus.FOLLOW_UP: "#9d3030",
+    AssistantStatus.WAKE_DETECTED: "#ef4444",
+    AssistantStatus.ERROR: "#ff5a5a",
 }
+
+
+class HUDButton(QPushButton):
+    def __init__(self, text: str, variant: str = "secondary") -> None:
+        super().__init__(text)
+        self.variant = variant
+        self._hovered = False
+        self._pressed = False
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setMinimumHeight(46)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.setFlat(True)
+
+    def enterEvent(self, event) -> None:  # noqa: N802 - Qt override
+        self._hovered = True
+        self.update()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:  # noqa: N802 - Qt override
+        self._hovered = False
+        self.update()
+        super().leaveEvent(event)
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802 - Qt override
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._pressed = True
+            self.update()
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802 - Qt override
+        self._pressed = False
+        self.update()
+        super().mouseReleaseEvent(event)
+
+    def paintEvent(self, event) -> None:  # noqa: N802 - Qt override
+        del event
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        rect = self.rect().adjusted(1, 1, -1, -1)
+        path = QPainterPath()
+        cut = 8.0
+        path.moveTo(rect.left() + cut, rect.top())
+        path.lineTo(rect.right() - cut, rect.top())
+        path.lineTo(rect.right(), rect.top() + cut)
+        path.lineTo(rect.right(), rect.bottom() - cut)
+        path.lineTo(rect.right() - cut, rect.bottom())
+        path.lineTo(rect.left() + cut, rect.bottom())
+        path.lineTo(rect.left(), rect.bottom() - cut)
+        path.lineTo(rect.left(), rect.top() + cut)
+        path.closeSubpath()
+
+        variants = {
+            "primary": ("#1a0707", "#4f1010", "#ff4545"),
+            "danger": ("#220808", "#6b1515", "#ff5656"),
+            "ghost": ("#120505", "#431010", "#ff3232"),
+            "secondary": ("#140606", "#541313", "#ff3e3e"),
+        }
+        start, end, border = variants.get(self.variant, variants["secondary"])
+        if self._pressed:
+            start = "#2a0a0a"
+            end = "#6a1616"
+        elif self._hovered:
+            start = "#1f0909"
+            end = "#621313"
+
+        gradient = QLinearGradient(rect.topLeft(), rect.bottomRight())
+        gradient.setColorAt(0.0, QColor(start))
+        gradient.setColorAt(0.55, QColor(end))
+        gradient.setColorAt(1.0, QColor("#080101"))
+
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(gradient)
+        painter.drawPath(path)
+
+        glow_alpha = 120 if self._hovered or self._pressed else 55
+        glow_pen = QPen(QColor(255, 74, 74, glow_alpha), 3.0)
+        painter.setPen(glow_pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawPath(path)
+
+        border_pen = QPen(QColor(border), 1.4)
+        painter.setPen(border_pen)
+        painter.drawPath(path)
+
+        accent_rect = QRectF(rect.left() + 10, rect.top() + 9, 22, rect.height() - 18)
+        accent_gradient = QLinearGradient(accent_rect.topLeft(), accent_rect.bottomRight())
+        accent_gradient.setColorAt(0.0, QColor("#ff4a4a"))
+        accent_gradient.setColorAt(1.0, QColor("#8f1d1d"))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(accent_gradient)
+        painter.drawRoundedRect(accent_rect, 4, 4)
+        painter.setBrush(QColor(255, 235, 235, 210))
+        painter.drawEllipse(QRectF(accent_rect.center().x() - 2.5, accent_rect.center().y() - 2.5, 5, 5))
+
+        painter.setPen(QColor("#f5eeee"))
+        font = QFont(self.font())
+        font.setWeight(QFont.Weight.DemiBold)
+        font.setLetterSpacing(QFont.SpacingType.PercentageSpacing, 102)
+        painter.setFont(font)
+        fm = QFontMetrics(font)
+        text = self.text().upper()
+        available = rect.adjusted(42, 0, -14, 0)
+        painter.drawText(
+            available.adjusted(2, 0, 0, 0),
+            Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
+            fm.elidedText(text, Qt.TextElideMode.ElideRight, available.width()),
+        )
 
 
 class OrbWidget(QWidget):
@@ -90,18 +202,30 @@ class OrbWidget(QWidget):
         super().__init__()
         self._status = AssistantStatus.SLEEPING
         self._pulse = 0
-        self.setFixedSize(170, 170)
+        self._sweep = 0
+        self._density = 1.0
+        self.setFixedSize(410, 410)
 
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._tick)
-        self._timer.start(60)
+        self._timer.start(33)
 
     def set_status(self, status: AssistantStatus) -> None:
         self._status = status
+        self._density = {
+            AssistantStatus.SLEEPING: 0.65,
+            AssistantStatus.LISTENING: 1.15,
+            AssistantStatus.THINKING: 0.95,
+            AssistantStatus.SPEAKING: 1.2,
+            AssistantStatus.FOLLOW_UP: 1.05,
+            AssistantStatus.WAKE_DETECTED: 1.3,
+            AssistantStatus.ERROR: 0.8,
+        }[status]
         self.update()
 
     def _tick(self) -> None:
-        self._pulse = (self._pulse + 1) % 80
+        self._pulse = (self._pulse + 1) % 120
+        self._sweep = (self._sweep + int(3 * self._density)) % 360
         self.update()
 
     def paintEvent(self, event) -> None:  # noqa: N802 - Qt override
@@ -110,29 +234,124 @@ class OrbWidget(QWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
         color = QColor(STATUS_COLORS[self._status])
-        pulse_size = 10 + abs(40 - self._pulse) / 4
+        rect = self.rect().adjusted(10, 10, -10, -10)
+        center = rect.center()
+        pulse_size = 8 + abs(60 - self._pulse) / 7
+        intensity = {
+            AssistantStatus.SLEEPING: 42,
+            AssistantStatus.LISTENING: 172,
+            AssistantStatus.THINKING: 160,
+            AssistantStatus.SPEAKING: 188,
+            AssistantStatus.FOLLOW_UP: 165,
+            AssistantStatus.WAKE_DETECTED: 220,
+            AssistantStatus.ERROR: 235,
+        }[self._status]
 
-        glow = QRadialGradient(self.rect().center(), 84)
-        glow.setColorAt(0.0, QColor(color.red(), color.green(), color.blue(), 130))
-        glow.setColorAt(0.65, QColor(color.red(), color.green(), color.blue(), 45))
-        glow.setColorAt(1.0, QColor(0, 0, 0, 0))
-        painter.setBrush(glow)
+        outer_glow = QRadialGradient(center, 188)
+        outer_glow.setColorAt(0.0, QColor(color.red(), color.green(), color.blue(), intensity))
+        outer_glow.setColorAt(0.33, QColor(color.red(), color.green(), color.blue(), 70))
+        outer_glow.setColorAt(0.68, QColor(color.red(), color.green(), color.blue(), 24))
+        outer_glow.setColorAt(1.0, QColor(0, 0, 0, 0))
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.drawEllipse(self.rect().adjusted(int(pulse_size), int(pulse_size), -int(pulse_size), -int(pulse_size)))
+        painter.setBrush(outer_glow)
+        painter.drawEllipse(rect.adjusted(-pulse_size, -pulse_size, pulse_size, pulse_size))
 
-        body = QRadialGradient(self.rect().center(), 56)
-        body.setColorAt(0.0, QColor("#e0f7ff"))
-        body.setColorAt(0.35, color)
-        body.setColorAt(1.0, QColor("#07111d"))
-        painter.setBrush(body)
-        painter.drawEllipse(self.rect().adjusted(38, 38, -38, -38))
+        backdrop = QRadialGradient(center, 170)
+        backdrop.setColorAt(0.0, QColor("#230707"))
+        backdrop.setColorAt(0.48, QColor("#100202"))
+        backdrop.setColorAt(1.0, QColor("#020000"))
+        painter.setBrush(backdrop)
+        painter.setPen(QPen(QColor("#5a1010"), 1))
+        painter.drawEllipse(rect.adjusted(42, 42, -42, -42))
 
-        ring = QLinearGradient(38, 38, 132, 132)
-        ring.setColorAt(0.0, QColor("#88f7ff"))
-        ring.setColorAt(1.0, QColor("#3b82f6"))
-        painter.setPen(color)
+        for radius, alpha in ((164, 90), (148, 72), (132, 54)):
+            painter.setPen(QPen(QColor(255, 74, 74, alpha), 1.1))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawEllipse(center, radius, radius)
+
+        sweep_pen = QPen(QColor("#ff4a4a"), 4)
+        sweep_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        painter.setPen(sweep_pen)
+        span = 64 + (self._pulse % 36) * 3
+        painter.drawArc(rect.adjusted(30, 30, -30, -30), (self._sweep - 26) * 16, span * 16)
+        painter.drawArc(rect.adjusted(30, 30, -30, -30), (self._sweep + 150) * 16, (span // 2) * 16)
+
+        tick_pen = QPen(QColor("#ff2a2a"), 1.2)
+        tick_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        painter.setPen(tick_pen)
+        import math
+
+        for angle in range(0, 360, 10):
+            outer = 182
+            inner = 164 if angle % 30 else 154
+            a = math.radians(angle - 90)
+            x1 = center.x() + math.cos(a) * outer
+            y1 = center.y() + math.sin(a) * outer
+            x2 = center.x() + math.cos(a) * inner
+            y2 = center.y() + math.sin(a) * inner
+            painter.drawLine(int(x1), int(y1), int(x2), int(y2))
+
+        cross_pen = QPen(QColor(255, 74, 74, 120), 1.0)
+        cross_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        painter.setPen(cross_pen)
+        painter.drawLine(center.x() - 182, center.y(), center.x() + 182, center.y())
+        painter.drawLine(center.x(), center.y() - 182, center.x(), center.y() + 182)
+
+        inner_glow = QRadialGradient(center, 100)
+        inner_glow.setColorAt(0.0, QColor("#fff6f6"))
+        inner_glow.setColorAt(0.24, QColor("#ffd0d0"))
+        inner_glow.setColorAt(0.55, QColor(color.red(), color.green(), color.blue(), 170))
+        inner_glow.setColorAt(1.0, QColor("#100000"))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(inner_glow)
+        painter.drawEllipse(rect.adjusted(86, 86, -86, -86))
+
+        core_ring = QPen(QColor("#8f1d1d"), 3.0)
+        painter.setPen(core_ring)
         painter.setBrush(Qt.BrushStyle.NoBrush)
-        painter.drawEllipse(self.rect().adjusted(30, 30, -30, -30))
+        painter.drawEllipse(rect.adjusted(118, 118, -118, -118))
+
+        core = QRadialGradient(center, 62)
+        core.setColorAt(0.0, QColor("#fff8f8"))
+        core.setColorAt(0.30, QColor("#f3c5c5"))
+        core.setColorAt(0.70, QColor(color.red(), color.green(), color.blue(), 220))
+        core.setColorAt(1.0, QColor("#170202"))
+        painter.setBrush(core)
+        painter.setPen(QPen(QColor("#ffdada"), 1))
+        painter.drawEllipse(rect.adjusted(140, 140, -140, -140))
+
+        arc_pen = QPen(QColor("#ff6969"), 1.5)
+        arc_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        painter.setPen(arc_pen)
+        painter.drawArc(rect.adjusted(146, 146, -146, -146), (self._sweep + 18) * 16, 20 * 16)
+        painter.drawArc(rect.adjusted(104, 104, -104, -104), (self._sweep - 86) * 16, 28 * 16)
+
+        text_font = QFont("Segoe UI Variable", 18)
+        text_font.setWeight(QFont.Weight.Bold)
+        text_font.setLetterSpacing(QFont.SpacingType.PercentageSpacing, 114)
+        painter.setFont(text_font)
+        painter.setPen(QColor("#fff2f2"))
+        painter.drawText(rect.adjusted(0, 20, 0, -10), Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter, "JARVIS")
+
+        state_font = QFont("Segoe UI Variable", 10)
+        state_font.setWeight(QFont.Weight.DemiBold)
+        state_font.setLetterSpacing(QFont.SpacingType.PercentageSpacing, 112)
+        painter.setFont(state_font)
+        painter.setPen(QColor("#ff4a4a"))
+        state_text = "ONLINE" if self._status != AssistantStatus.SLEEPING else "SLEEPING"
+        painter.drawText(rect.adjusted(0, 54, 0, -22), Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop, state_text)
+
+        wave_heights = [4, 7, 12, 8, 5, 10, 14, 9, 5]
+        if self._status in {AssistantStatus.THINKING, AssistantStatus.SPEAKING}:
+            wave_heights = [6, 12, 18, 24, 18, 12, 8, 14, 7]
+        elif self._status == AssistantStatus.SLEEPING:
+            wave_heights = [3, 4, 6, 4, 3, 5, 6, 4, 3]
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor("#ff4a4a"))
+        wave_y = center.y() + 42
+        wave_x = center.x() - 42
+        for index, height in enumerate(wave_heights):
+            painter.drawRoundedRect(QRectF(wave_x + index * 10, wave_y - height / 2, 5, height), 2, 2)
 
 
 class JarvisMainWindow(QMainWindow):
@@ -149,6 +368,7 @@ class JarvisMainWindow(QMainWindow):
             flags |= Qt.WindowType.WindowStaysOnTopHint
         self.setWindowFlags(flags)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setFont(QFont("Segoe UI Variable", 10))
         self.setMinimumSize(980, 840)
         self.resize(max(self.settings.window_width, 1040), max(self.settings.window_height, 880))
 
@@ -157,6 +377,10 @@ class JarvisMainWindow(QMainWindow):
         self.status_label = QLabel(self.status.value)
         self.mode_label = QLabel("Mode")
         self.mode_value = QLabel("Idle")
+        self.header_mode_value = QLabel("Idle")
+        self.header_provider_value = QLabel(self.settings.speech_to_text_provider.upper())
+        self.header_wake_value = QLabel(self.settings.wake_provider.upper())
+        self.header_health_value = QLabel("READY")
         self.current_mode = "Idle"
         self.tabs = QTabWidget()
         self.transcript = QTextEdit()
@@ -203,6 +427,10 @@ class JarvisMainWindow(QMainWindow):
         self.voice_interpreted_value = QLabel("--")
         self.voice_repair_confidence_value = QLabel("--")
         self.voice_repair_strategy_value = QLabel("--")
+        self.voice_wake_score_bar = QProgressBar()
+        self.voice_transcript_confidence_bar = QProgressBar()
+        self.voice_command_score_bar = QProgressBar()
+        self.voice_repair_confidence_bar = QProgressBar()
         self.voice_timing_wake_capture_value = QLabel("--")
         self.voice_timing_wake_transcribe_value = QLabel("--")
         self.voice_timing_command_capture_value = QLabel("--")
@@ -212,6 +440,7 @@ class JarvisMainWindow(QMainWindow):
         self.voice_timing_total_value = QLabel("--")
         self.voice_timing_slow_value = QLabel("--")
         self.voice_response_panel = QTextEdit()
+        self.voice_command_score_value = QLabel("--")
         self.agent_enabled_value = QLabel("Enabled" if settings.agent_enabled else "Disabled")
         self.reminders_check_value = QLabel("Idle")
         self.notification_result_value = QLabel("Idle")
@@ -273,6 +502,10 @@ class JarvisMainWindow(QMainWindow):
         self.status_label.setObjectName("statusPill")
         self.mode_label.setObjectName("modeLabel")
         self.mode_value.setObjectName("modeValue")
+        self.header_mode_value.setObjectName("headerBadge")
+        self.header_provider_value.setObjectName("headerBadge")
+        self.header_wake_value.setObjectName("headerBadge")
+        self.header_health_value.setObjectName("headerBadge")
         self.voice_loop_status_value.setObjectName("voiceLoopValue")
         self.voice_loop_last_command_value.setObjectName("voiceLoopValue")
         self.voice_loop_last_response_value.setObjectName("voiceLoopValue")
@@ -293,6 +526,7 @@ class JarvisMainWindow(QMainWindow):
         self.voice_interpreted_value.setObjectName("voiceLoopValue")
         self.voice_repair_confidence_value.setObjectName("voiceLoopValue")
         self.voice_repair_strategy_value.setObjectName("voiceLoopValue")
+        self.voice_command_score_value.setObjectName("voiceLoopValue")
         self.voice_timing_wake_capture_value.setObjectName("voiceLoopValue")
         self.voice_timing_wake_transcribe_value.setObjectName("voiceLoopValue")
         self.voice_timing_command_capture_value.setObjectName("voiceLoopValue")
@@ -311,6 +545,17 @@ class JarvisMainWindow(QMainWindow):
         self.file_access_result_value.setObjectName("voiceLoopValue")
         self.confirmation_result_value.setObjectName("voiceLoopValue")
         self.reminder_watch_status_value.setObjectName("voiceLoopValue")
+        for bar in (
+            self.voice_wake_score_bar,
+            self.voice_transcript_confidence_bar,
+            self.voice_command_score_bar,
+            self.voice_repair_confidence_bar,
+        ):
+            bar.setRange(0, 100)
+            bar.setValue(0)
+            bar.setTextVisible(True)
+            bar.setFormat("%v%")
+            bar.setObjectName("confidenceBar")
 
         minimize_button = QPushButton("-")
         minimize_button.setObjectName("windowButton")
@@ -319,511 +564,565 @@ class JarvisMainWindow(QMainWindow):
         close_button.setObjectName("windowButton")
         close_button.clicked.connect(self.close)
 
-        title_row = QHBoxLayout()
-        title_block = QVBoxLayout()
-        title_block.addWidget(title)
-        title_block.addWidget(subtitle)
-        title_row.addLayout(title_block)
-        title_row.addStretch(1)
-        title_row.addWidget(self.mode_label)
-        title_row.addWidget(self.mode_value)
-        title_row.addWidget(self.status_label)
-        title_row.addWidget(minimize_button)
-        title_row.addWidget(close_button)
+        top_bar = QFrame()
+        top_bar.setObjectName("topBar")
+        top_bar_layout = QHBoxLayout(top_bar)
+        top_bar_layout.setContentsMargins(18, 12, 18, 12)
+        top_bar_layout.setSpacing(14)
+
+        brand_block = QVBoxLayout()
+        brand_block.setSpacing(0)
+        title.setText("J A R V I S")
+        subtitle.setText("DESKTOP ASSISTANT")
+        brand_block.addWidget(title)
+        brand_block.addWidget(subtitle)
+        top_bar_layout.addLayout(brand_block, stretch=2)
+
+        def make_metric_card(label_text: str, value_widget: QLabel, pulse_text: str) -> QFrame:
+            card = QFrame()
+            card.setObjectName("topMetricCard")
+            card_layout = QVBoxLayout(card)
+            card_layout.setContentsMargins(14, 10, 14, 10)
+            card_layout.setSpacing(4)
+            label = QLabel(label_text.upper())
+            label.setObjectName("metricLabel")
+            value_widget.setObjectName("metricValue")
+            pulse = QLabel(pulse_text)
+            pulse.setObjectName("metricPulse")
+            card_layout.addWidget(label)
+            card_layout.addWidget(value_widget)
+            card_layout.addWidget(pulse)
+            return card
+
+        self.header_mode_value.setText("OPTIMAL")
+        self.header_provider_value.setText("14%")
+        self.header_wake_value.setText("37%")
+        self.header_health_value.setText("ACTIVE")
+        top_bar_layout.addWidget(make_metric_card("System Status", self.header_mode_value, "▁▂▃▄▅▆▇"))
+        top_bar_layout.addWidget(make_metric_card("CPU", self.header_provider_value, "▁▂▁▃▆▅▂"))
+        top_bar_layout.addWidget(make_metric_card("Memory", self.header_wake_value, "▁▃▆▅▃▁▂"))
+        top_bar_layout.addWidget(make_metric_card("Voice Engine", self.header_health_value, "▁▂▃▅▇▅▃"))
+
+        top_buttons = QHBoxLayout()
+        minimize_button = HUDButton("-", "ghost")
+        minimize_button.setObjectName("windowButton")
+        minimize_button.clicked.connect(self.hide)
+        close_button = HUDButton("x", "danger")
+        close_button.setObjectName("windowButton")
+        close_button.clicked.connect(self.close)
+        top_buttons.addWidget(minimize_button)
+        top_buttons.addWidget(close_button)
+        top_bar_layout.addLayout(top_buttons)
 
         self.transcript.setReadOnly(True)
         self.transcript.setObjectName("transcript")
-        self.transcript.setMinimumHeight(240)
-        self.transcript.setText("Jarvis voice transcript will appear here.")
+        self.transcript.setText("Waiting for you to speak...")
         self.voice_response_panel.setReadOnly(True)
         self.voice_response_panel.setObjectName("responsePanel")
-        self.voice_response_panel.setMinimumHeight(240)
         self.voice_response_panel.setText("Jarvis responses will appear here.")
 
         self.command_input.setPlaceholderText("Type a command...")
         self.command_input.setObjectName("commandInput")
-        self.mic_test_button.setObjectName("secondaryButton")
-        self.voice_command_button.setObjectName("secondaryButton")
-        self.start_voice_loop_button.setObjectName("primaryButton")
-        self.stop_voice_loop_button.setObjectName("dangerButton")
+
+        self.mic_test_button = HUDButton("Mic Test")
+        self.voice_command_button = HUDButton("Voice Test")
+        self.chat_test_button = HUDButton("Chat Test")
+        self.start_voice_loop_button = HUDButton("Start Voice", "primary")
+        self.stop_voice_loop_button = HUDButton("Stop Voice", "danger")
         self.stop_voice_loop_button.setEnabled(False)
-        self.check_reminders_button.setObjectName("secondaryButton")
-        self.notification_test_button.setObjectName("secondaryButton")
-        self.health_check_button.setObjectName("secondaryButton")
-        self.settings_button.setObjectName("secondaryButton")
-        self.log_viewer_button.setObjectName("secondaryButton")
-        self.backup_create_button.setObjectName("secondaryButton")
-        self.backup_list_button.setObjectName("secondaryButton")
-        self.startup_check_button.setObjectName("secondaryButton")
-        self.startup_enable_button.setObjectName("secondaryButton")
-        self.startup_disable_button.setObjectName("secondaryButton")
-        self.chat_test_button = QPushButton("Chat Test")
-        self.chat_test_button.setObjectName("secondaryButton")
-        self.weather_check_button = QPushButton("Weather Check")
-        self.weather_check_button.setObjectName("secondaryButton")
-        self.vision_check_button = QPushButton("Vision Check")
-        self.vision_check_button.setObjectName("secondaryButton")
-        self.launch_notepad_button.setObjectName("secondaryButton")
-        self.open_google_button.setObjectName("secondaryButton")
-        self.list_downloads_button.setObjectName("secondaryButton")
-        self.test_confirmation_button.setObjectName("secondaryButton")
-        self.start_reminder_watch_button.setObjectName("secondaryButton")
-        self.stop_reminder_watch_button.setObjectName("secondaryButton")
+        self.check_reminders_button = HUDButton("Check Reminders")
+        self.notification_test_button = HUDButton("Test Notification")
+        self.health_check_button = HUDButton("Run Health Check")
+        self.settings_button = HUDButton("Settings")
+        self.log_viewer_button = HUDButton("Log Viewer")
+        self.backup_create_button = HUDButton("Create Backup")
+        self.backup_list_button = HUDButton("List Backups")
+        self.startup_check_button = HUDButton("Startup Check")
+        self.startup_enable_button = HUDButton("Enable Startup")
+        self.startup_disable_button = HUDButton("Disable Startup")
+        self.weather_check_button = HUDButton("Weather Check")
+        self.vision_check_button = HUDButton("Vision Check")
+        self.launch_notepad_button = HUDButton("Launch Notepad")
+        self.open_google_button = HUDButton("Open Google")
+        self.list_downloads_button = HUDButton("List Downloads")
+        self.test_confirmation_button = HUDButton("Test Confirmation")
+        self.start_reminder_watch_button = HUDButton("Start Watch")
+        self.stop_reminder_watch_button = HUDButton("Stop Watch")
         self.stop_reminder_watch_button.setEnabled(False)
-        self.send_button.setObjectName("sendButton")
+        self.send_button = HUDButton("Send", "primary")
+        self.agent_test_button = HUDButton("Agent Test")
 
-        input_row = QHBoxLayout()
-        input_row.addWidget(self.command_input)
-        input_row.addWidget(self.mic_test_button)
-        input_row.addWidget(self.voice_command_button)
-        input_row.addWidget(self.chat_test_button)
-        input_row.addWidget(self.send_button)
+        left_panel = QFrame()
+        left_panel.setObjectName("sidePanel")
+        left_layout = QVBoxLayout(left_panel)
+        left_layout.setContentsMargins(16, 14, 16, 14)
+        left_layout.setSpacing(12)
 
-        assistant_panel = QFrame()
-        assistant_panel.setObjectName("assistantPanel")
-        assistant_layout = QHBoxLayout(assistant_panel)
-        assistant_layout.setContentsMargins(18, 16, 18, 16)
-        assistant_layout.setSpacing(18)
-        assistant_layout.addWidget(self.orb, alignment=Qt.AlignmentFlag.AlignVCenter)
-
-        state_block = QVBoxLayout()
-        state_title = QLabel("Current state")
-        state_title.setObjectName("panelTitle")
+        voice_status_card = QFrame()
+        voice_status_card.setObjectName("stackCard")
+        voice_status_layout = QVBoxLayout(voice_status_card)
+        voice_status_layout.setContentsMargins(14, 12, 14, 12)
+        voice_status_layout.setSpacing(8)
+        voice_title_row = QHBoxLayout()
+        voice_title = QLabel("VOICE STATUS")
+        voice_title.setObjectName("panelTitle")
+        voice_dot = QLabel("●")
+        voice_dot.setObjectName("statusDot")
+        voice_title_row.addWidget(voice_title)
+        voice_title_row.addStretch(1)
+        voice_title_row.addWidget(voice_dot)
+        voice_status_layout.addLayout(voice_title_row)
+        state_row = QHBoxLayout()
+        state_label = QLabel("CURRENT STATE")
+        state_label.setObjectName("smallHudLabel")
         self.voice_state_value.setText("Sleeping")
+        self.voice_state_value.setObjectName("stateValue")
+        state_row.addWidget(state_label)
+        state_row.addStretch(1)
+        voice_status_layout.addLayout(state_row)
+        voice_status_layout.addWidget(self.voice_state_value)
         self.voice_detail_value.setText("Waiting for wake phrase")
-        state_block.addWidget(state_title)
-        state_block.addWidget(self.voice_state_value)
-        state_block.addWidget(self.voice_detail_value)
-        loop_buttons = QHBoxLayout()
-        loop_buttons.addWidget(self.start_voice_loop_button)
-        loop_buttons.addWidget(self.stop_voice_loop_button)
-        loop_buttons.addStretch(1)
-        state_block.addLayout(loop_buttons)
-        assistant_layout.addLayout(state_block, stretch=2)
+        voice_status_layout.addWidget(self.voice_detail_value)
+        mode_row = QHBoxLayout()
+        mode_row.addWidget(self.mode_label)
+        mode_row.addWidget(self.mode_value)
+        mode_row.addStretch(1)
+        voice_status_layout.addLayout(mode_row)
+        voice_status_layout.addWidget(self.status_label)
+        voice_wave = QLabel("▁▂▃▄▅▆▇▆▅▄▃▂")
+        voice_wave.setObjectName("voiceWave")
+        voice_status_layout.addWidget(voice_wave)
+        voice_status_layout.addSpacing(4)
+        wake_row = QHBoxLayout()
+        wake_row.addWidget(QLabel("WAKE PHRASE"))
+        wake_row.addWidget(QLabel(self.settings.wake_phrase))
+        voice_status_layout.addLayout(wake_row)
+        provider_row = QHBoxLayout()
+        provider_row.addWidget(QLabel("WAKE PROVIDER"))
+        provider_row.addWidget(QLabel(self.settings.wake_provider.upper()))
+        voice_status_layout.addLayout(provider_row)
+        sensitivity_percent = int(round(float(getattr(self.settings, "wake_match_threshold", 0.72)) * 100))
+        sensitivity_row = QHBoxLayout()
+        sensitivity_label = QLabel("LISTENING SENSITIVITY")
+        sensitivity_value = QLabel(f"{sensitivity_percent}%")
+        sensitivity_row.addWidget(sensitivity_label)
+        sensitivity_row.addStretch(1)
+        sensitivity_row.addWidget(sensitivity_value)
+        voice_status_layout.addLayout(sensitivity_row)
+        sensitivity_bar = QProgressBar()
+        sensitivity_bar.setRange(0, 100)
+        sensitivity_bar.setValue(sensitivity_percent)
+        sensitivity_bar.setTextVisible(False)
+        sensitivity_bar.setObjectName("sensorBar")
+        voice_status_layout.addWidget(sensitivity_bar)
 
-        metrics_column = QVBoxLayout()
-        metrics_column.setSpacing(12)
+        voice_control_card = QFrame()
+        voice_control_card.setObjectName("stackCard")
+        control_layout = QVBoxLayout(voice_control_card)
+        control_layout.setContentsMargins(14, 12, 14, 12)
+        control_layout.setSpacing(8)
+        control_title = QLabel("VOICE CONTROLS")
+        control_title.setObjectName("panelTitle")
+        control_layout.addWidget(control_title)
+        control_layout.addWidget(self.start_voice_loop_button)
+        control_layout.addWidget(self.stop_voice_loop_button)
+        control_layout.addWidget(self.voice_command_button)
+        control_layout.addWidget(self.mic_test_button)
+        control_layout.addWidget(self.settings_button)
+        left_layout.addWidget(voice_status_card)
+        left_layout.addWidget(voice_control_card)
+        left_layout.addStretch(1)
 
-        stack_panel = QFrame()
-        stack_panel.setObjectName("diagnosticsPanel")
-        stack_grid = QGridLayout(stack_panel)
-        stack_grid.setContentsMargins(12, 10, 12, 10)
-        stack_grid.setHorizontalSpacing(12)
-        stack_grid.setVerticalSpacing(6)
-        stack_title = QLabel("Voice stack")
-        stack_title.setObjectName("panelTitle")
-        stack_grid.addWidget(stack_title, 0, 0, 1, 2)
-        stack_grid.addWidget(QLabel("STT provider"), 1, 0)
-        stack_grid.addWidget(self.voice_provider_value, 1, 1)
-        stack_grid.addWidget(QLabel("STT model"), 2, 0)
-        stack_grid.addWidget(self.voice_stt_model_value, 2, 1)
-        stack_grid.addWidget(QLabel("STT device"), 3, 0)
-        stack_grid.addWidget(self.voice_stt_device_value, 3, 1)
-        stack_grid.addWidget(QLabel("Wake provider"), 4, 0)
-        stack_grid.addWidget(self.voice_wake_provider_value, 4, 1)
-        stack_grid.addWidget(QLabel("TTS provider"), 5, 0)
-        stack_grid.addWidget(self.voice_tts_provider_value, 5, 1)
-        stack_grid.addWidget(QLabel("Voice mode"), 6, 0)
-        stack_grid.addWidget(self.voice_response_mode_value, 6, 1)
-        stack_grid.addWidget(QLabel("Wake ack"), 7, 0)
-        stack_grid.addWidget(self.voice_wake_ack_value, 7, 1)
-        stack_grid.addWidget(QLabel("Speak responses"), 8, 0)
-        stack_grid.addWidget(self.voice_response_speech_value, 8, 1)
-        metrics_column.addWidget(stack_panel)
+        center_panel = QFrame()
+        center_panel.setObjectName("centerPanel")
+        center_layout = QVBoxLayout(center_panel)
+        center_layout.setContentsMargins(16, 14, 16, 14)
+        center_layout.setSpacing(12)
+        orb_shell = QFrame()
+        orb_shell.setObjectName("orbShell")
+        orb_layout = QVBoxLayout(orb_shell)
+        orb_layout.setContentsMargins(12, 12, 12, 12)
+        orb_layout.setSpacing(0)
+        orb_layout.addWidget(self.orb, alignment=Qt.AlignmentFlag.AlignCenter)
+        center_layout.addWidget(orb_shell, stretch=5)
 
         timing_panel = QFrame()
-        timing_panel.setObjectName("diagnosticsPanel")
+        timing_panel.setObjectName("stackCard")
         timing_grid = QGridLayout(timing_panel)
-        timing_grid.setContentsMargins(12, 10, 12, 10)
-        timing_grid.setHorizontalSpacing(12)
+        timing_grid.setContentsMargins(14, 12, 14, 12)
+        timing_grid.setHorizontalSpacing(10)
         timing_grid.setVerticalSpacing(6)
-        timing_title = QLabel("Turn timing")
+        timing_title = QLabel("TIMING METRICS")
         timing_title.setObjectName("panelTitle")
-        timing_grid.addWidget(timing_title, 0, 0, 1, 2)
-        timing_grid.addWidget(QLabel("Wake capture"), 1, 0)
-        timing_grid.addWidget(self.voice_timing_wake_capture_value, 1, 1)
-        timing_grid.addWidget(QLabel("Wake transcribe"), 2, 0)
-        timing_grid.addWidget(self.voice_timing_wake_transcribe_value, 2, 1)
-        timing_grid.addWidget(QLabel("Command capture"), 3, 0)
-        timing_grid.addWidget(self.voice_timing_command_capture_value, 3, 1)
-        timing_grid.addWidget(QLabel("Command transcribe"), 4, 0)
-        timing_grid.addWidget(self.voice_timing_command_transcribe_value, 4, 1)
-        timing_grid.addWidget(QLabel("OpenAI"), 5, 0)
-        timing_grid.addWidget(self.voice_timing_openai_value, 5, 1)
-        timing_grid.addWidget(QLabel("TTS"), 6, 0)
-        timing_grid.addWidget(self.voice_timing_tts_value, 6, 1)
-        timing_grid.addWidget(QLabel("Total turn"), 7, 0)
-        timing_grid.addWidget(self.voice_timing_total_value, 7, 1)
-        timing_grid.addWidget(QLabel("Slow stages"), 8, 0)
-        timing_grid.addWidget(self.voice_timing_slow_value, 8, 1)
-        metrics_column.addWidget(timing_panel)
-        metrics_column.addStretch(1)
-        assistant_layout.addLayout(metrics_column, stretch=1)
+        timing_grid.addWidget(timing_title, 0, 0, 1, 4)
+        timing_metrics = [
+            ("WAKE CAPTURE", self.voice_timing_wake_capture_value),
+            ("WAKE TRANSCRIBE", self.voice_timing_wake_transcribe_value),
+            ("COMMAND CAPTURE", self.voice_timing_command_capture_value),
+            ("COMMAND TRANSCRIBE", self.voice_timing_command_transcribe_value),
+            ("OPENAI", self.voice_timing_openai_value),
+            ("TTS", self.voice_timing_tts_value),
+            ("TOTAL TIME", self.voice_timing_total_value),
+            ("SLOW STAGES", self.voice_timing_slow_value),
+        ]
+        for index, (label_text, value_widget) in enumerate(timing_metrics):
+            row = 1 + index // 4
+            col = (index % 4) * 1
+            cell = QFrame()
+            cell.setObjectName("timingCell")
+            cell_layout = QVBoxLayout(cell)
+            cell_layout.setContentsMargins(10, 8, 10, 8)
+            cell_layout.setSpacing(2)
+            label = QLabel(label_text)
+            label.setObjectName("smallHudLabel")
+            value_widget.setObjectName("voiceLoopValue")
+            cell_layout.addWidget(label)
+            cell_layout.addWidget(value_widget)
+            timing_grid.addWidget(cell, row, col)
+        center_layout.addWidget(timing_panel, stretch=1)
 
-        self.tabs = QTabWidget()
-        self.tabs.setObjectName("mainTabs")
+        right_panel = QFrame()
+        right_panel.setObjectName("sidePanel")
+        right_layout = QVBoxLayout(right_panel)
+        right_layout.setContentsMargins(16, 14, 16, 14)
+        right_layout.setSpacing(12)
 
-        voice_tab = QWidget()
-        voice_layout = QGridLayout(voice_tab)
-        voice_layout.setContentsMargins(12, 12, 12, 12)
-        voice_layout.setHorizontalSpacing(12)
-        voice_layout.setVerticalSpacing(10)
-        transcript_title = QLabel("What Jarvis heard")
+        transcript_card = QFrame()
+        transcript_card.setObjectName("stackCard")
+        transcript_layout = QVBoxLayout(transcript_card)
+        transcript_layout.setContentsMargins(14, 12, 14, 12)
+        transcript_layout.setSpacing(8)
+        transcript_title_row = QHBoxLayout()
+        transcript_title = QLabel("LIVE TRANSCRIPT")
         transcript_title.setObjectName("panelTitle")
-        response_title = QLabel("Jarvis response")
+        transcript_dot = QLabel("●")
+        transcript_dot.setObjectName("statusDot")
+        transcript_title_row.addWidget(transcript_title)
+        transcript_title_row.addStretch(1)
+        transcript_title_row.addWidget(transcript_dot)
+        transcript_layout.addLayout(transcript_title_row)
+        self.transcript.setReadOnly(True)
+        self.transcript.setObjectName("transcript")
+        self.transcript.setText("Waiting for you to speak...")
+        transcript_layout.addWidget(self.transcript)
+        right_layout.addWidget(transcript_card, stretch=3)
+
+        clean_card = QFrame()
+        clean_card.setObjectName("stackCard")
+        clean_layout = QVBoxLayout(clean_card)
+        clean_layout.setContentsMargins(14, 12, 14, 12)
+        clean_layout.setSpacing(8)
+        clean_title = QLabel("CLEAN COMMAND")
+        clean_title.setObjectName("panelTitle")
+        clean_layout.addWidget(clean_title)
+        self.voice_interpreted_value.setObjectName("cleanCommandValue")
+        clean_layout.addWidget(self.voice_interpreted_value)
+        self.voice_raw_speech_value.setObjectName("smallHudBody")
+        clean_layout.addWidget(self.voice_raw_speech_value)
+        right_layout.addWidget(clean_card)
+
+        response_card = QFrame()
+        response_card.setObjectName("stackCard")
+        response_layout = QVBoxLayout(response_card)
+        response_layout.setContentsMargins(14, 12, 14, 12)
+        response_layout.setSpacing(8)
+        response_title = QLabel("JARVIS RESPONSE")
         response_title.setObjectName("panelTitle")
-        voice_layout.addWidget(transcript_title, 0, 0)
-        voice_layout.addWidget(response_title, 0, 1)
-        voice_layout.addWidget(self.transcript, 1, 0)
-        voice_layout.addWidget(self.voice_response_panel, 1, 1)
-        voice_layout.setColumnStretch(0, 1)
-        voice_layout.setColumnStretch(1, 1)
-        voice_layout.setRowStretch(1, 1)
-        voice_layout.addLayout(input_row, 2, 0, 1, 2)
+        response_layout.addWidget(response_title)
+        self.voice_response_panel.setReadOnly(True)
+        self.voice_response_panel.setObjectName("responsePanel")
+        self.voice_response_panel.setText("Jarvis responses will appear here.")
+        response_layout.addWidget(self.voice_response_panel)
+        right_layout.addWidget(response_card, stretch=2)
 
-        tools_tab = QWidget()
-        tools_layout = QGridLayout(tools_tab)
-        tools_layout.setContentsMargins(12, 12, 12, 12)
-        tools_layout.setHorizontalSpacing(10)
-        tools_layout.setVerticalSpacing(10)
-        tools_layout.addWidget(self.launch_notepad_button, 0, 0)
-        tools_layout.addWidget(self.open_google_button, 0, 1)
-        tools_layout.addWidget(self.list_downloads_button, 0, 2)
-        tools_intro = QLabel("These quick actions call existing safe routes only.")
-        tools_intro.setObjectName("sectionNote")
-        tools_layout.addWidget(tools_intro, 1, 0, 1, 3)
+        confidence_card = QFrame()
+        confidence_card.setObjectName("stackCard")
+        confidence_layout = QGridLayout(confidence_card)
+        confidence_layout.setContentsMargins(14, 12, 14, 12)
+        confidence_layout.setHorizontalSpacing(10)
+        confidence_layout.setVerticalSpacing(8)
+        confidence_title = QLabel("CONFIDENCE")
+        confidence_title.setObjectName("panelTitle")
+        confidence_layout.addWidget(confidence_title, 0, 0, 1, 2)
+        confidence_rows = [
+            ("WAKE SCORE", self.voice_wake_score_value, self.voice_wake_score_bar),
+            ("TRANSCRIPT", None, self.voice_transcript_confidence_bar),
+            ("COMMAND SCORE", self.voice_command_score_value, self.voice_command_score_bar),
+            ("REPAIR", self.voice_repair_confidence_value, self.voice_repair_confidence_bar),
+        ]
+        for row_index, (label_text, value_widget, bar_widget) in enumerate(confidence_rows, start=1):
+            label = QLabel(label_text)
+            label.setObjectName("smallHudLabel")
+            confidence_layout.addWidget(label, row_index * 2 - 1, 0)
+            if value_widget is not None:
+                value_widget.setObjectName("voiceLoopValue")
+                confidence_layout.addWidget(value_widget, row_index * 2 - 1, 1)
+            confidence_layout.addWidget(bar_widget, row_index * 2, 0, 1, 2)
+        right_layout.addWidget(confidence_card)
 
-        reminders_tab = QWidget()
-        reminders_layout = QVBoxLayout(reminders_tab)
-        reminders_layout.setContentsMargins(12, 12, 12, 12)
-        reminders_layout.setSpacing(10)
-        reminders_intro = QLabel("Reminder actions stay permission-gated and confirmation-gated.")
-        reminders_intro.setObjectName("sectionNote")
-        reminders_layout.addWidget(reminders_intro)
-        reminders_layout.addWidget(self.check_reminders_button)
-        reminders_layout.addWidget(self.start_reminder_watch_button)
-        reminders_layout.addWidget(self.stop_reminder_watch_button)
-        reminders_status_row = QHBoxLayout()
-        reminders_status_row.addWidget(QLabel("Reminder check"))
-        reminders_status_row.addWidget(self.reminders_check_value, stretch=1)
-        reminders_layout.addLayout(reminders_status_row)
-        watch_status_row = QHBoxLayout()
-        watch_status_row.addWidget(QLabel("Reminder watch"))
-        watch_status_row.addWidget(self.reminder_watch_status_value, stretch=1)
-        reminders_layout.addLayout(watch_status_row)
-        reminders_layout.addStretch(1)
+        provider_card = QFrame()
+        provider_card.setObjectName("stackCard")
+        provider_layout = QGridLayout(provider_card)
+        provider_layout.setContentsMargins(14, 12, 14, 12)
+        provider_layout.setHorizontalSpacing(10)
+        provider_layout.setVerticalSpacing(6)
+        provider_title = QLabel("PROVIDER STATUS")
+        provider_title.setObjectName("panelTitle")
+        provider_layout.addWidget(provider_title, 0, 0, 1, 2)
+        provider_rows = [
+            ("STT ENGINE", self.voice_provider_value),
+            ("STT MODEL", self.voice_stt_model_value),
+            ("STT DEVICE", self.voice_stt_device_value),
+            ("WAKE PROVIDER", self.voice_wake_provider_value),
+            ("TTS ENGINE", self.voice_tts_provider_value),
+            ("VOICE MODE", self.voice_response_mode_value),
+        ]
+        for row_index, (label_text, value_widget) in enumerate(provider_rows, start=1):
+            label = QLabel(label_text)
+            label.setObjectName("smallHudLabel")
+            value_widget.setObjectName("voiceLoopValue")
+            provider_layout.addWidget(label, row_index, 0)
+            provider_layout.addWidget(value_widget, row_index, 1)
+        right_layout.addWidget(provider_card)
 
-        memory_tab = QWidget()
-        memory_layout = QVBoxLayout(memory_tab)
-        memory_layout.setContentsMargins(12, 12, 12, 12)
-        memory_layout.setSpacing(10)
-        memory_intro = QLabel("Use chat commands to manage short-term history and explicit memory.")
-        memory_intro.setObjectName("sectionNote")
-        memory_layout.addWidget(memory_intro)
-        self.memory_status_value = QLabel("Idle")
-        self.memory_status_value.setObjectName("voiceLoopValue")
-        memory_status_row = QHBoxLayout()
-        memory_status_row.addWidget(QLabel("Memory status"))
-        memory_status_row.addWidget(self.memory_status_value, stretch=1)
-        memory_layout.addLayout(memory_status_row)
-        memory_layout.addStretch(1)
+        command_bar = QFrame()
+        command_bar.setObjectName("commandBar")
+        command_bar_layout = QHBoxLayout(command_bar)
+        command_bar_layout.setContentsMargins(14, 12, 14, 12)
+        command_bar_layout.setSpacing(10)
+        self.command_input.setObjectName("commandInput")
+        command_bar_layout.addWidget(self.command_input, stretch=4)
+        command_bar_layout.addWidget(self.send_button)
+        command_bar_layout.addWidget(self.mic_test_button)
+        command_bar_layout.addWidget(self.voice_command_button)
+        command_bar_layout.addWidget(self.chat_test_button)
 
-        diagnostics_tab = QWidget()
-        diagnostics_layout = QGridLayout(diagnostics_tab)
-        diagnostics_layout.setContentsMargins(12, 12, 12, 12)
-        diagnostics_layout.setHorizontalSpacing(10)
-        diagnostics_layout.setVerticalSpacing(10)
-        self.agent_test_button = QPushButton("Agent Test")
-        self.agent_test_button.setObjectName("secondaryButton")
-        diagnostics_layout.addWidget(self.notification_test_button, 0, 0)
-        diagnostics_layout.addWidget(self.weather_check_button, 0, 1)
-        diagnostics_layout.addWidget(self.vision_check_button, 1, 0)
-        diagnostics_layout.addWidget(self.test_confirmation_button, 1, 1)
-        diagnostics_layout.addWidget(self.health_check_button, 2, 0)
-        diagnostics_layout.addWidget(self.agent_test_button, 2, 1)
-        diagnostics_layout.addWidget(self.startup_check_button, 3, 0)
-        diagnostics_layout.addWidget(self.startup_enable_button, 3, 1)
-        diagnostics_layout.addWidget(self.startup_disable_button, 4, 0)
-        diagnostics_layout.addWidget(self.startup_result_value, 4, 1)
-        diagnostics_layout.addWidget(self.settings_button, 5, 0)
-        diagnostics_layout.addWidget(self.log_viewer_button, 5, 1)
-        diagnostics_layout.addWidget(self.backup_create_button, 6, 0)
-        diagnostics_layout.addWidget(self.backup_list_button, 6, 1)
-        diagnostics_layout.addWidget(self.backup_result_value, 7, 0, 1, 2)
-        diagnostics_intro = QLabel("Diagnostics stay read-only and use existing safe routes.")
-        diagnostics_intro.setObjectName("sectionNote")
-        diagnostics_layout.addWidget(diagnostics_intro, 8, 0, 1, 2)
+        footer = QFrame()
+        footer.setObjectName("footerBar")
+        footer_layout = QHBoxLayout(footer)
+        footer_layout.setContentsMargins(14, 8, 14, 8)
+        footer_layout.setSpacing(10)
+        footer_version = QLabel(f"JARVIS v{self.settings.app_version}")
+        footer_version.setObjectName("footerLabel")
+        footer_status = QLabel("ALL SYSTEMS OPERATIONAL")
+        footer_status.setObjectName("footerStatus")
+        footer_layout.addWidget(footer_version)
+        footer_layout.addStretch(1)
+        footer_layout.addWidget(footer_status)
 
-        self.tabs.addTab(voice_tab, "Voice")
-        self.tabs.addTab(tools_tab, "Tools")
-        self.tabs.addTab(reminders_tab, "Reminders")
-        self.tabs.addTab(memory_tab, "Memory")
-        self.tabs.addTab(diagnostics_tab, "Diagnostics")
-
-        loop_info = QFrame()
-        loop_info.setObjectName("loopInfo")
-        loop_info_layout = QVBoxLayout(loop_info)
-        loop_info_layout.setContentsMargins(12, 10, 12, 10)
-        loop_info_layout.setSpacing(4)
-
-        loop_status_row = QHBoxLayout()
-        loop_status_row.addWidget(QLabel("Loop status"))
-        loop_status_row.addWidget(self.voice_loop_status_value, stretch=1)
-
-        loop_command_row = QHBoxLayout()
-        loop_command_row.addWidget(QLabel("Last command"))
-        loop_command_row.addWidget(self.voice_loop_last_command_value, stretch=1)
-
-        loop_response_row = QHBoxLayout()
-        loop_response_row.addWidget(QLabel("Last response"))
-        loop_response_row.addWidget(self.voice_loop_last_response_value, stretch=1)
-
-        reminders_row = QHBoxLayout()
-        reminders_row.addWidget(QLabel("Reminder check"))
-        reminders_row.addWidget(self.reminders_check_value, stretch=1)
-
-        notification_row = QHBoxLayout()
-        notification_row.addWidget(QLabel("Notification test"))
-        notification_row.addWidget(self.notification_result_value, stretch=1)
-
-        launch_row = QHBoxLayout()
-        launch_row.addWidget(QLabel("App launch"))
-        launch_row.addWidget(self.app_launch_result_value, stretch=1)
-
-        website_row = QHBoxLayout()
-        website_row.addWidget(QLabel("Website open"))
-        website_row.addWidget(self.website_result_value, stretch=1)
-
-        file_access_row = QHBoxLayout()
-        file_access_row.addWidget(QLabel("File access"))
-        file_access_row.addWidget(self.file_access_result_value, stretch=1)
-
-        confirmation_row = QHBoxLayout()
-        confirmation_row.addWidget(QLabel("Confirmation"))
-        confirmation_row.addWidget(self.confirmation_result_value, stretch=1)
-
-        agent_row = QHBoxLayout()
-        agent_row.addWidget(QLabel("Agent enabled"))
-        agent_row.addWidget(self.agent_enabled_value, stretch=1)
-
-        watch_row = QHBoxLayout()
-        watch_row.addWidget(QLabel("Reminder watch"))
-        watch_row.addWidget(self.reminder_watch_status_value, stretch=1)
-
-        loop_info_layout.addLayout(loop_status_row)
-        loop_info_layout.addLayout(loop_command_row)
-        loop_info_layout.addLayout(loop_response_row)
-        loop_info_layout.addLayout(reminders_row)
-        loop_info_layout.addLayout(notification_row)
-        loop_info_layout.addLayout(launch_row)
-        loop_info_layout.addLayout(website_row)
-        loop_info_layout.addLayout(file_access_row)
-        loop_info_layout.addLayout(confirmation_row)
-        loop_info_layout.addLayout(agent_row)
-        loop_info_layout.addLayout(watch_row)
+        content_row = QHBoxLayout()
+        content_row.setSpacing(14)
+        content_row.addWidget(left_panel, stretch=2)
+        content_row.addWidget(center_panel, stretch=3)
+        content_row.addWidget(right_panel, stretch=2)
 
         layout = QVBoxLayout(shell)
-        layout.setContentsMargins(24, 22, 24, 24)
-        layout.setSpacing(16)
-        layout.addLayout(title_row)
-        layout.addWidget(assistant_panel)
-        layout.addWidget(self.tabs)
-        layout.addWidget(loop_info)
+        layout.setContentsMargins(20, 18, 20, 18)
+        layout.setSpacing(14)
+        layout.addWidget(top_bar)
+        layout.addLayout(content_row)
+        layout.addWidget(command_bar)
+        layout.addWidget(footer)
 
         root = QWidget()
         root_layout = QVBoxLayout(root)
-        root_layout.setContentsMargins(16, 16, 16, 16)
+        root_layout.setContentsMargins(14, 14, 14, 14)
         root_layout.addWidget(shell)
         self.setCentralWidget(root)
+
+        self.tabs = QTabWidget()
+        self.tabs.setObjectName("mainTabs")
+        self.tabs.setVisible(False)
+
+        self.tabs.addTab(QWidget(), "Voice")
+        self.tabs.addTab(QWidget(), "Tools")
+        self.tabs.addTab(QWidget(), "Reminders")
+        self.tabs.addTab(QWidget(), "Memory")
+        self.tabs.addTab(QWidget(), "Diagnostics")
+        self.tabs.hide()
 
         self.setStyleSheet(
             """
             #shell {
                 background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 1,
-                    stop: 0 rgba(5, 12, 24, 244),
-                    stop: 0.55 rgba(9, 17, 34, 242),
-                    stop: 1 rgba(16, 20, 38, 240));
-                border: 1px solid rgba(86, 204, 242, 110);
-                border-radius: 18px;
+                    stop: 0 #030000,
+                    stop: 0.45 #080101,
+                    stop: 1 #120404);
+                border: 1px solid #5a1010;
+                border-radius: 16px;
+            }
+            #topBar, #sidePanel, #centerPanel, #stackCard, #orbShell, #commandBar, #footerBar {
+                background: rgba(8, 3, 3, 224);
+                border: 1px solid #5a1010;
+                border-radius: 8px;
             }
             #title {
-                color: #e5fbff;
-                font-size: 32px;
-                font-weight: 700;
+                color: #f5eeee;
+                font-size: 28px;
+                font-weight: 800;
                 letter-spacing: 0px;
             }
             #subtitle {
-                color: #8fb3c8;
-                font-size: 12px;
-            }
-            #modeLabel {
-                color: #9fb7c9;
-                font-size: 12px;
+                color: #aa8888;
+                font-size: 11px;
                 font-weight: 600;
             }
-            #modeValue {
-                color: #f0fbff;
-                background: rgba(15, 23, 42, 165);
-                border: 1px solid rgba(96, 165, 250, 90);
-                border-radius: 10px;
-                padding: 5px 10px;
-                min-width: 120px;
-                font-weight: 600;
+            #metricLabel, #smallHudLabel, #panelTitle, #footerLabel, #footerStatus {
+                letter-spacing: 0px;
             }
-            #statusPill {
-                color: #dff9ff;
-                background: rgba(37, 99, 235, 70);
-                border: 1px solid rgba(125, 211, 252, 120);
-                border-radius: 12px;
-                padding: 6px 10px;
-                font-weight: 600;
-            }
-            #loopInfo {
-                background: rgba(3, 7, 18, 95);
-                border: 1px solid rgba(71, 85, 105, 100);
-                border-radius: 12px;
-            }
-            #assistantPanel {
-                background: rgba(2, 8, 18, 185);
-                border: 1px solid rgba(34, 211, 238, 130);
-                border-radius: 16px;
-            }
-            #diagnosticsPanel {
-                background: rgba(7, 14, 28, 185);
-                border: 1px solid rgba(71, 85, 105, 150);
-                border-radius: 14px;
-            }
-            #panelTitle {
-                color: #93c5fd;
-                font-size: 12px;
+            #metricLabel {
+                color: #aa8888;
+                font-size: 10px;
                 font-weight: 700;
             }
+            #metricValue {
+                color: #f5eeee;
+                font-size: 16px;
+                font-weight: 800;
+            }
+            #metricPulse {
+                color: #ff4a4a;
+                font-size: 10px;
+            }
+            #statusDot {
+                color: #ff4a4a;
+                font-size: 11px;
+                font-weight: 700;
+            }
+            #panelTitle {
+                color: #ff4a4a;
+                font-size: 12px;
+                font-weight: 800;
+            }
+            #smallHudLabel {
+                color: #aa8888;
+                font-size: 10px;
+                font-weight: 700;
+            }
+            #voiceWave {
+                color: #ff4a4a;
+                font-size: 10px;
+            }
             #stateValue {
-                color: #e5fbff;
-                font-size: 34px;
+                color: #f5eeee;
+                font-size: 30px;
                 font-weight: 800;
             }
             #stateDetail {
-                color: #a5f3fc;
-                font-size: 14px;
+                color: #c5a2a2;
+                font-size: 13px;
                 font-weight: 600;
             }
-            #voiceLoopValue {
-                color: #dff9ff;
-                font-weight: 500;
-            }
-            #sectionNote {
-                color: #9fb7c9;
-                font-size: 12px;
-                padding-top: 4px;
-            }
-            #mainTabs::pane {
-                border: 1px solid rgba(71, 85, 105, 120);
-                border-radius: 12px;
-                background: rgba(3, 7, 18, 95);
-            }
-            #mainTabs QTabBar::tab {
-                color: #dff9ff;
-                background: rgba(15, 23, 42, 180);
-                border: 1px solid rgba(71, 85, 105, 100);
-                padding: 8px 14px;
-                margin-right: 4px;
-                border-top-left-radius: 10px;
-                border-top-right-radius: 10px;
-            }
-            #mainTabs QTabBar::tab:selected {
-                background: rgba(34, 211, 238, 40);
-                border-color: rgba(125, 211, 252, 150);
-            }
-            #windowButton {
-                color: #dff9ff;
-                background: rgba(148, 163, 184, 35);
-                border: 1px solid rgba(148, 163, 184, 70);
-                border-radius: 10px;
-                min-width: 28px;
-                min-height: 28px;
-            }
-            #windowButton:hover {
-                background: rgba(125, 211, 252, 55);
-            }
-            #transcript {
-                color: #e2eef7;
-                background: rgba(3, 7, 18, 125);
-                border: 1px solid rgba(71, 85, 105, 120);
-                border-radius: 12px;
-                padding: 12px;
-                font-size: 13px;
-            }
-            #responsePanel {
-                color: #f8fbff;
-                background: rgba(8, 17, 34, 150);
-                border: 1px solid rgba(56, 189, 248, 110);
-                border-radius: 12px;
-                padding: 12px;
-                font-size: 13px;
-            }
-            #commandInput {
-                color: #f8fbff;
-                background: rgba(15, 23, 42, 210);
-                border: 1px solid rgba(96, 165, 250, 110);
-                border-radius: 12px;
-                padding: 11px 12px;
-                font-size: 13px;
-            }
-            #commandInput:focus {
-                border: 1px solid rgba(34, 211, 238, 190);
-            }
-            #sendButton {
-                color: #031525;
-                background: #67e8f9;
-                border: 0;
-                border-radius: 12px;
-                padding: 11px 18px;
+            #modeLabel {
+                color: #aa8888;
+                font-size: 10px;
                 font-weight: 700;
             }
-            #sendButton:hover {
-                background: #a5f3fc;
+            #modeValue {
+                color: #f5eeee;
+                background: rgba(18, 4, 4, 160);
+                border: 1px solid #5a1010;
+                border-radius: 8px;
+                padding: 4px 10px;
+                font-size: 11px;
+                font-weight: 700;
             }
-            #secondaryButton {
-                color: #dff9ff;
-                background: rgba(15, 23, 42, 210);
-                border: 1px solid rgba(125, 211, 252, 100);
-                border-radius: 12px;
-                padding: 11px 14px;
+            #voiceLoopValue {
+                color: #f5eeee;
                 font-weight: 600;
             }
-            #secondaryButton:hover {
-                background: rgba(34, 211, 238, 55);
+            #cleanCommandValue {
+                color: #f5eeee;
+                font-size: 14px;
+                font-weight: 700;
             }
-            #primaryButton {
-                color: #02131b;
-                background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 1,
-                    stop: 0 #7dd3fc,
-                    stop: 1 #22d3ee);
+            #smallHudBody {
+                color: #aa8888;
+                font-size: 10px;
+                font-weight: 600;
+            }
+            #confidenceBar, #sensorBar {
+                background: #120404;
+                border: 1px solid #5a1010;
+                text-align: center;
+                color: #f5eeee;
+            }
+            #confidenceBar {
+                border-radius: 6px;
+                height: 14px;
+            }
+            #confidenceBar::chunk {
+                border-radius: 5px;
+                background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 0,
+                    stop: 0 #7f1d1d,
+                    stop: 1 #ff2a2a);
+            }
+            #sensorBar {
+                border-radius: 5px;
+                height: 10px;
+            }
+            #sensorBar::chunk {
+                border-radius: 4px;
+                background: #ff4a4a;
+            }
+            #transcript, #responsePanel, #commandInput {
+                color: #f5eeee;
+                background: #080303;
+                border: 1px solid #5a1010;
+                border-radius: 8px;
+                padding: 10px 12px;
+                font-size: 13px;
+            }
+            #transcript, #responsePanel {
+                min-height: 160px;
+            }
+            #commandInput:focus {
+                border: 1px solid #ff4a4a;
+                background: #120404;
+            }
+            #footerLabel {
+                color: #aa8888;
+                font-size: 10px;
+                font-weight: 700;
+            }
+            #footerStatus {
+                color: #f5eeee;
+                font-size: 10px;
+                font-weight: 700;
+            }
+            #statusPill {
+                color: #f5eeee;
+                background: rgba(92, 18, 18, 100);
+                border: 1px solid #8f1d1d;
+                border-radius: 12px;
+                padding: 6px 10px;
+                font-size: 12px;
+                font-weight: 700;
+            }
+            #mainTabs::pane {
+                border: 1px solid #5a1010;
+                background: #030000;
+            }
+            #mainTabs QTabBar::tab {
+                color: #aa8888;
+                background: #080303;
+                border: 1px solid #5a1010;
+                padding: 6px 10px;
+                margin-right: 3px;
+                border-top-left-radius: 8px;
+                border-top-right-radius: 8px;
+            }
+            #mainTabs QTabBar::tab:selected {
+                color: #f5eeee;
+                background: rgba(143, 29, 29, 70);
+                border-color: #ff2a2a;
+            }
+            #windowButton {
+                color: #f5eeee;
+                background: transparent;
                 border: 0;
-                border-radius: 14px;
-                padding: 12px 16px;
-                font-weight: 800;
-            }
-            #primaryButton:hover {
-                background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 1,
-                    stop: 0 #a5f3fc,
-                    stop: 1 #67e8f9);
-            }
-            #dangerButton {
-                color: #fff7f7;
-                background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 1,
-                    stop: 0 #ef4444,
-                    stop: 1 #b91c1c);
-                border: 0;
-                border-radius: 14px;
-                padding: 12px 16px;
-                font-weight: 800;
-            }
-            #dangerButton:hover {
-                background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 1,
-                    stop: 0 #f87171,
-                    stop: 1 #ef4444);
+                min-width: 34px;
+                min-height: 34px;
             }
             """
         )
@@ -1541,6 +1840,7 @@ class JarvisMainWindow(QMainWindow):
             VOICE_LOOP_STARTED_MESSAGE: AssistantStatus.SLEEPING,
             "Sleeping": AssistantStatus.SLEEPING,
             "Listening for wake phrase": AssistantStatus.LISTENING,
+            "Wake unavailable; manual command mode": AssistantStatus.SLEEPING,
             "Wake detected": AssistantStatus.WAKE_DETECTED,
             COMMAND_PROMPT: AssistantStatus.WAKE_DETECTED,
             LISTENING_FOR_COMMAND_PROMPT: AssistantStatus.LISTENING,
@@ -1688,6 +1988,7 @@ class JarvisMainWindow(QMainWindow):
     def set_status(self, status: AssistantStatus) -> None:
         self.status = status
         self.status_label.setText(status.value)
+        self.header_mode_value.setText(status.value.upper())
         self.voice_state_value.setText(status.value)
         detail_map = {
             AssistantStatus.SLEEPING: "Waiting for wake phrase",
@@ -1699,9 +2000,10 @@ class JarvisMainWindow(QMainWindow):
             AssistantStatus.ERROR: "Attention needed",
         }
         self.voice_detail_value.setText(detail_map[status])
+        self.header_health_value.setText("ERROR" if status == AssistantStatus.ERROR else "READY")
         color = STATUS_COLORS[status]
         self.status_label.setStyleSheet(
-            f"background: rgba(37, 99, 235, 70); border: 1px solid {color}; color: #dff9ff;"
+            f"background: rgba(82, 20, 20, 110); border: 1px solid {color}; color: #f7efef;"
         )
         self.orb.set_status(status)
 
@@ -1716,14 +2018,21 @@ class JarvisMainWindow(QMainWindow):
         threshold = values.get("threshold")
         if score and threshold:
             self.voice_wake_score_value.setText(f"{score} / {threshold}")
+            self._set_percent_bar(self.voice_wake_score_bar, score)
         elif score:
             self.voice_wake_score_value.setText(score)
+            self._set_percent_bar(self.voice_wake_score_bar, score)
         self._update_rms_labels(values)
 
     def _update_capture_diagnostics(self, status: str) -> None:
         values = self._parse_diagnostics(status.removeprefix(CAPTURE_DIAGNOSTICS_PREFIX))
         if provider := values.get("provider"):
             self.voice_provider_value.setText(provider)
+        if command_score := values.get("command_score"):
+            self.voice_command_score_value.setText(command_score)
+            self._set_percent_bar(self.voice_command_score_bar, command_score)
+        if transcript_confidence := values.get("transcript_confidence"):
+            self._set_percent_bar(self.voice_transcript_confidence_bar, transcript_confidence)
         self._update_rms_labels(values)
 
     def _update_speech_repair(self, status: str) -> None:
@@ -1736,6 +2045,7 @@ class JarvisMainWindow(QMainWindow):
                 self.voice_repair_confidence_value.setText(f"{float(confidence) * 100:.0f}%")
             except ValueError:
                 self.voice_repair_confidence_value.setText(confidence)
+            self._set_percent_bar(self.voice_repair_confidence_bar, confidence)
         self.voice_repair_strategy_value.setText(values.get("strategy", "--"))
 
     def _update_turn_timing(self, status: str) -> None:
@@ -1755,6 +2065,20 @@ class JarvisMainWindow(QMainWindow):
         self.voice_rms_value.setText(f"{average_rms} / {max_rms}")
         if vad_crossed := values.get("vad_crossed"):
             self.voice_vad_value.setText(vad_crossed)
+
+    @staticmethod
+    def _set_percent_bar(bar: QProgressBar, value: str | float | None) -> None:
+        if value is None:
+            bar.setValue(0)
+            return
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            bar.setValue(0)
+            return
+        if numeric <= 1.0:
+            numeric *= 100.0
+        bar.setValue(max(0, min(100, int(round(numeric)))))
 
     @staticmethod
     def _format_ms(value: str | None) -> str:

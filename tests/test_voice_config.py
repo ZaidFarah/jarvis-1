@@ -21,17 +21,27 @@ def test_voice_settings_defaults_are_lightweight() -> None:
     assert settings.whisper_compute_type == "int8"
     assert settings.wake_phrase == "hey jarvis"
     assert settings.wake_alias_list == [
+        "jarvis",
         "hey jarvis",
         "hi jarvis",
-        "wake up jarvis",
-        "jarvis wake up",
         "okay jarvis",
+        "wake up jarvis",
         "yo jarvis",
+        "jarvis please",
+        "service",
+        "jervis",
+        "travis",
+        "charities",
+        "office",
+        "jar of this",
+        "out of this",
+        "turn this",
     ]
     assert settings.wake_match_threshold == 0.72
-    assert settings.wake_listen_seconds == 5.0
-    assert settings.wake_provider == "whisper_fuzzy"
-    assert settings.openwakeword_enabled is False
+    assert settings.wake_listen_seconds == 2.0
+    assert settings.wake_provider == "openwakeword"
+    assert settings.wake_fallback_provider == "whisper_fuzzy"
+    assert settings.openwakeword_enabled is True
     assert settings.openwakeword_model == "hey_jarvis"
     assert settings.openwakeword_threshold == 0.5
     assert settings.openwakeword_listen_chunk_ms == 80
@@ -105,6 +115,8 @@ def test_voice_settings_read_environment(monkeypatch) -> None:
     monkeypatch.setenv("VOICE_VAD_WINDOW_MS", "60")
     monkeypatch.setenv("VOICE_VAD_NOISE_MULTIPLIER", "2.5")
     monkeypatch.setenv("VOICE_VAD_SILENCE_MS", "500")
+    monkeypatch.setenv("WAKE_THRESHOLD", "0.81")
+    monkeypatch.setenv("WAKE_FALLBACK_PROVIDER", "manual")
 
     settings = AppSettings(_env_file=None)
 
@@ -114,6 +126,8 @@ def test_voice_settings_read_environment(monkeypatch) -> None:
     assert settings.voice_vad_window_ms == 60
     assert settings.voice_vad_noise_multiplier == 2.5
     assert settings.voice_vad_silence_ms == 500
+    assert settings.wake_match_threshold == 0.81
+    assert settings.wake_fallback_provider == "manual"
 
 
 def test_voice_settings_keep_previous_jarvis_prefixed_names(monkeypatch) -> None:
@@ -172,6 +186,7 @@ def test_wake_settings_read_environment(monkeypatch) -> None:
     monkeypatch.setenv("WAKE_MATCH_THRESHOLD", "0.8")
     monkeypatch.setenv("WAKE_LISTEN_SECONDS", "4")
     monkeypatch.setenv("WAKE_PROVIDER", "whisper_fuzzy")
+    monkeypatch.setenv("WAKE_FALLBACK_PROVIDER", "manual")
     monkeypatch.setenv("OPENWAKEWORD_ENABLED", "true")
     monkeypatch.setenv("OPENWAKEWORD_MODEL", "hey.jarvis")
     monkeypatch.setenv("OPENWAKEWORD_THRESHOLD", "0.7")
@@ -210,6 +225,7 @@ def test_wake_settings_read_environment(monkeypatch) -> None:
     assert settings.wake_match_threshold == 0.8
     assert settings.wake_listen_seconds == 4.0
     assert settings.wake_provider == "whisper_fuzzy"
+    assert settings.wake_fallback_provider == "manual"
     assert settings.openwakeword_enabled is True
     assert settings.openwakeword_model == "hey.jarvis"
     assert settings.openwakeword_threshold == 0.7

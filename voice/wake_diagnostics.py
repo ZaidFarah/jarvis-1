@@ -8,9 +8,11 @@ from typing import Any
 from loguru import logger
 
 from config.settings import AppSettings
+from voice.command_capture import calculate_audio_capture_metrics
 from voice.stt import create_speech_to_text_provider
 from voice.vad import RmsVoiceActivityDetector
 from voice.wake import WakeDetectionResult, WakeDetector
+from voice.wake_provider import resolve_wake_provider
 
 
 _WAKE_LOG_SINK_ID: int | None = None
@@ -20,17 +22,33 @@ _WAKE_LOG_SINK_ID: int | None = None
 class WakeDiagnosticReport:
     provider_name: str
     provider_available: bool
+    wake_provider: str
     model_name: str
     sample_rate: int
     listen_seconds: float
     max_rms: float
-    vad_threshold: float
-    vad_threshold_crossed: bool
-    transcription: str
-    wake_phrase: str
-    aliases: list[str]
-    detection: WakeDetectionResult
-    log_file: Path
+    noise_floor: float = 0.0
+    effective_vad_threshold: float = 0.0
+    vad_trigger_seconds: float | None = None
+    vad_threshold: float = 0.0
+    vad_threshold_crossed: bool = False
+    transcription: str = ""
+    matched_alias: str | None = None
+    decision: str = "rejected"
+    score: float = 0.0
+    wake_phrase: str = ""
+    aliases: list[str] = field(default_factory=list)
+    detection: WakeDetectionResult = field(
+        default_factory=lambda: WakeDetectionResult(
+            detected=False,
+            transcript="",
+            matched_phrase=None,
+            score=0.0,
+            threshold=0.0,
+            match_type="none",
+        )
+    )
+    log_file: Path = Path(".")
     errors: list[str] = field(default_factory=list)
 
     @property
@@ -48,21 +66,52 @@ class WakeDiagnostics:
         self._ensure_wake_log_sink()
 
     def run_wake_test(self) -> WakeDiagnosticReport:
-        provider = create_speech_to_text_provider(self.settings)
-        detector = WakeDetector(
+        return self._run_once(
             wake_phrase=self.settings.wake_phrase,
             aliases=self.settings.wake_alias_list,
+            listen_seconds=self.settings.wake_listen_seconds,
+        )
+
+    def run_wake_jarvis_test(self, repeat_count: int = 3) -> "WakeJarvisTestReport":
+        reports: list[WakeDiagnosticReport] = []
+        errors: list[str] = []
+        for _ in range(max(1, repeat_count)):
+            report = self._run_once(
+                wake_phrase="jarvis",
+                aliases=["jarvis"],
+                listen_seconds=max(1.0, min(self.settings.wake_listen_seconds, 1.5)),
+            )
+            reports.append(report)
+            errors.extend(report.errors)
+
+        return WakeJarvisTestReport(
+            attempts=len(reports),
+            detections=sum(1 for report in reports if report.detection.detected),
+            reports=reports,
+            log_file=self.log_file,
+            errors=errors,
+        )
+
+    def _run_once(self, wake_phrase: str, aliases: list[str], listen_seconds: float) -> WakeDiagnosticReport:
+        provider = create_speech_to_text_provider(self.settings)
+        detector = WakeDetector(
+            wake_phrase=wake_phrase,
+            aliases=aliases,
             threshold=self.settings.wake_match_threshold,
         )
         errors: list[str] = []
         max_rms = 0.0
+        noise_floor = 0.0
+        effective_vad_threshold = 0.0
+        vad_trigger_seconds: float | None = None
         vad_crossed = False
         transcription = ""
+        wake_provider = resolve_wake_provider(self.settings).effective_provider
 
         self.wake_logger.info(
             "Running wake diagnostic phrase={} aliases={} threshold={}",
-            self.settings.wake_phrase,
-            self.settings.wake_alias_list,
+            wake_phrase,
+            aliases,
             self.settings.wake_match_threshold,
         )
 
@@ -71,18 +120,44 @@ class WakeDiagnostics:
             self.wake_logger.error(message)
             errors.append(message)
             detection = detector.detect("")
-            return self._report(provider.name, provider.available, max_rms, vad_crossed, transcription, detection, errors)
+            return self._report(
+                provider.name,
+                provider.available,
+                wake_provider,
+                listen_seconds,
+                max_rms,
+                noise_floor,
+                effective_vad_threshold,
+                vad_trigger_seconds,
+                vad_crossed,
+                transcription,
+                detection,
+                errors,
+            )
 
         try:
-            samples = self._record_microphone()
-            max_rms = self._calculate_max_rms(samples, self.settings.voice_sample_rate)
-            vad = RmsVoiceActivityDetector(self.settings.voice_vad_threshold)
-            vad_crossed = vad.analyze([max_rms], self.settings.voice_sample_rate).is_speech
+            samples = self._record_microphone(listen_seconds)
+            metrics = calculate_audio_capture_metrics(
+                samples,
+                self.settings.voice_sample_rate,
+                self.settings.voice_vad_threshold,
+                vad_window_ms=self.settings.voice_vad_window_ms,
+                noise_multiplier=self.settings.voice_vad_noise_multiplier,
+            )
+            max_rms = metrics.max_rms
+            noise_floor = metrics.noise_floor
+            effective_vad_threshold = metrics.effective_vad_threshold
+            vad_trigger_seconds = metrics.vad_trigger_seconds
+            vad_crossed = metrics.vad_threshold_crossed
             self.wake_logger.info(
-                "Recorded wake test audio samples={} max_rms={} threshold={} crossed={}",
+                "Recorded wake test audio samples={} max_rms={} noise_floor={} threshold={} effective_threshold={} "
+                "trigger_seconds={} crossed={}",
                 len(samples),
                 f"{max_rms:.6f}",
+                f"{noise_floor:.6f}",
                 self.settings.voice_vad_threshold,
+                f"{effective_vad_threshold:.6f}",
+                _format_seconds(vad_trigger_seconds),
                 vad_crossed,
             )
         except Exception as exc:
@@ -90,7 +165,20 @@ class WakeDiagnostics:
             self.wake_logger.exception(message)
             errors.append(message)
             detection = detector.detect("")
-            return self._report(provider.name, provider.available, max_rms, vad_crossed, transcription, detection, errors)
+            return self._report(
+                provider.name,
+                provider.available,
+                wake_provider,
+                listen_seconds,
+                max_rms,
+                noise_floor,
+                effective_vad_threshold,
+                vad_trigger_seconds,
+                vad_crossed,
+                transcription,
+                detection,
+                errors,
+            )
 
         try:
             result = provider.transcribe(samples, self.settings.voice_sample_rate)
@@ -103,19 +191,50 @@ class WakeDiagnostics:
                 detection.matched_phrase,
                 f"{detection.score:.3f}",
             )
-            return self._report(provider.name, provider.available, max_rms, vad_crossed, transcription, detection, errors)
+            return self._report(
+                provider.name,
+                provider.available,
+                wake_provider,
+                listen_seconds,
+                max_rms,
+                noise_floor,
+                effective_vad_threshold,
+                vad_trigger_seconds,
+                vad_crossed,
+                transcription,
+                detection,
+                errors,
+            )
         except Exception as exc:
             message = f"Wake transcription failed: {type(exc).__name__}: {exc}"
             self.wake_logger.exception(message)
             errors.append(message)
             detection = detector.detect(transcription)
-            return self._report(provider.name, provider.available, max_rms, vad_crossed, transcription, detection, errors)
+            return self._report(
+                provider.name,
+                provider.available,
+                wake_provider,
+                listen_seconds,
+                max_rms,
+                noise_floor,
+                effective_vad_threshold,
+                vad_trigger_seconds,
+                vad_crossed,
+                transcription,
+                detection,
+                errors,
+            )
 
     def _report(
         self,
         provider_name: str,
         provider_available: bool,
+        wake_provider: str,
+        listen_seconds: float,
         max_rms: float,
+        noise_floor: float,
+        effective_vad_threshold: float,
+        vad_trigger_seconds: float | None,
         vad_crossed: bool,
         transcription: str,
         detection: WakeDetectionResult,
@@ -124,13 +243,20 @@ class WakeDiagnostics:
         return WakeDiagnosticReport(
             provider_name=provider_name,
             provider_available=provider_available,
+            wake_provider=wake_provider,
             model_name=self.settings.whisper_model,
             sample_rate=self.settings.voice_sample_rate,
-            listen_seconds=self.settings.wake_listen_seconds,
+            listen_seconds=listen_seconds,
             max_rms=max_rms,
+            noise_floor=noise_floor,
+            effective_vad_threshold=effective_vad_threshold,
+            vad_trigger_seconds=vad_trigger_seconds,
             vad_threshold=self.settings.voice_vad_threshold,
             vad_threshold_crossed=vad_crossed,
             transcription=transcription,
+            matched_alias=detection.matched_phrase,
+            decision="detected" if detection.detected else "rejected",
+            score=detection.score,
             wake_phrase=self.settings.wake_phrase,
             aliases=self.settings.wake_alias_list,
             detection=detection,
@@ -138,11 +264,11 @@ class WakeDiagnostics:
             errors=errors,
         )
 
-    def _record_microphone(self) -> list[float]:
+    def _record_microphone(self, listen_seconds: float) -> list[float]:
         sd = self._require_sounddevice()
         sample_rate = self.settings.voice_sample_rate
         channels = self.settings.voice_channels
-        frames = int(sample_rate * self.settings.wake_listen_seconds)
+        frames = int(sample_rate * listen_seconds)
 
         sd.check_input_settings(samplerate=sample_rate, channels=channels)
         recording = sd.rec(frames, samplerate=sample_rate, channels=channels, dtype="float32")
@@ -169,19 +295,6 @@ class WakeDiagnostics:
                 flattened.append(float(sample))
         return flattened
 
-    @classmethod
-    def _calculate_max_rms(cls, samples: list[float], sample_rate: int) -> float:
-        if not samples:
-            return 0.0
-
-        window_size = max(1, int(sample_rate * 0.1))
-        max_rms = 0.0
-        for start in range(0, len(samples), window_size):
-            window = samples[start : start + window_size]
-            rms = (sum(sample * sample for sample in window) / len(window)) ** 0.5
-            max_rms = max(max_rms, rms)
-        return max_rms
-
     def _ensure_wake_log_sink(self) -> None:
         global _WAKE_LOG_SINK_ID
         if _WAKE_LOG_SINK_ID is not None:
@@ -200,6 +313,19 @@ class WakeDiagnostics:
         )
 
 
+@dataclass(frozen=True)
+class WakeJarvisTestReport:
+    attempts: int
+    detections: int
+    reports: list[WakeDiagnosticReport]
+    log_file: Path
+    errors: list[str] = field(default_factory=list)
+
+    @property
+    def is_successful(self) -> bool:
+        return not self.errors and self.attempts > 0
+
+
 def format_wake_report(report: WakeDiagnosticReport) -> str:
     detection = report.detection
     lines = [
@@ -207,6 +333,7 @@ def format_wake_report(report: WakeDiagnosticReport) -> str:
         "================",
         f"provider: {report.provider_name}",
         f"provider available: {_yes_no(report.provider_available)}",
+        f"wake provider: {report.wake_provider}",
         f"model: {report.model_name}",
         f"diagnostic log: {report.log_file}",
         "",
@@ -219,6 +346,9 @@ def format_wake_report(report: WakeDiagnosticReport) -> str:
         f"  sample rate: {report.sample_rate}",
         f"  listen seconds: {report.listen_seconds:.2f}s",
         f"  max RMS level: {report.max_rms:.6f}",
+        f"  noise floor: {report.noise_floor:.6f}",
+        f"  effective VAD threshold: {report.effective_vad_threshold:.6f}",
+        f"  VAD trigger seconds: {_format_seconds(report.vad_trigger_seconds)}",
         f"  VAD threshold: {report.vad_threshold:.6f}",
         f"  VAD threshold crossed: {_yes_no(report.vad_threshold_crossed)}",
         "",
@@ -228,8 +358,9 @@ def format_wake_report(report: WakeDiagnosticReport) -> str:
         "Wake detection:",
         f"  detected: {_yes_no(detection.detected)}",
         f"  match type: {detection.match_type}",
-        f"  matched phrase: {detection.matched_phrase if detection.detected else '<none>'}",
-        f"  score: {detection.score:.3f}",
+        f"  matched alias: {report.matched_alias if report.matched_alias else '<none>'}",
+        f"  score: {report.score:.3f}",
+        f"  decision: {report.decision}",
     ]
 
     if report.errors:
@@ -238,6 +369,40 @@ def format_wake_report(report: WakeDiagnosticReport) -> str:
         lines.extend(f"  - {error}" for error in report.errors)
 
     return "\n".join(lines)
+
+
+def format_wake_jarvis_test_report(report: WakeJarvisTestReport) -> str:
+    lines = [
+        "Jarvis Wake Jarvis Test",
+        "=======================",
+        f"attempts: {report.attempts}",
+        f"detections: {report.detections}",
+        f"diagnostic log: {report.log_file}",
+    ]
+    for index, item in enumerate(report.reports, start=1):
+        lines.extend(
+            [
+                "",
+                f"Attempt {index}:",
+                f"  provider: {item.provider_name}",
+                f"  wake provider: {item.wake_provider}",
+                f"  transcript: {item.transcription or '<empty>'}",
+                f"  matched alias: {item.matched_alias or '<none>'}",
+                f"  score: {item.score:.3f}",
+                f"  decision: {item.decision}",
+            ]
+        )
+    if report.errors:
+        lines.append("")
+        lines.append("Errors:")
+        lines.extend(f"  - {error}" for error in report.errors)
+    return "\n".join(lines)
+
+
+def _format_seconds(value: float | None) -> str:
+    if value is None:
+        return "none"
+    return f"{value:.2f}"
 
 
 def _yes_no(value: bool) -> str:

@@ -24,9 +24,11 @@ class WakeProviderResolution:
     openwakeword_enabled: bool
     openwakeword_installed: bool
     model_configured: bool
+    wake_fallback_provider: str
     fallback_enabled: bool
     effective_provider: str
     openwakeword_available: bool
+    manual_mode_required: bool
     fallback_reason: str | None = None
 
 
@@ -51,6 +53,7 @@ def is_openwakeword_installed() -> bool:
 
 def resolve_wake_provider(settings: AppSettings) -> WakeProviderResolution:
     selected_provider = _normalize_provider_name(settings.wake_provider)
+    wake_fallback_provider = _normalize_fallback_provider_name(settings.wake_fallback_provider)
     openwakeword_installed = is_openwakeword_installed()
     model_configured = bool(settings.openwakeword_model.strip())
     model_available = _is_model_available(settings.openwakeword_model.strip())
@@ -64,9 +67,11 @@ def resolve_wake_provider(settings: AppSettings) -> WakeProviderResolution:
             openwakeword_enabled=openwakeword_enabled,
             openwakeword_installed=openwakeword_installed,
             model_configured=model_configured,
+            wake_fallback_provider=wake_fallback_provider,
             fallback_enabled=fallback_enabled,
             effective_provider="openwakeword",
             openwakeword_available=True,
+            manual_mode_required=False,
         )
 
     fallback_reason = None
@@ -84,14 +89,25 @@ def resolve_wake_provider(settings: AppSettings) -> WakeProviderResolution:
         else:
             fallback_reason = "OpenWakeWord is unavailable."
 
+    effective_provider = selected_provider
+    manual_mode_required = False
+    if selected_provider == "openwakeword" and not openwakeword_available:
+        manual_mode_required = True
+        if wake_fallback_provider == "whisper_fuzzy":
+            effective_provider = "whisper_fuzzy"
+        else:
+            effective_provider = "manual"
+
     return WakeProviderResolution(
         selected_provider=selected_provider,
         openwakeword_enabled=openwakeword_enabled,
         openwakeword_installed=openwakeword_installed,
         model_configured=model_configured,
+        wake_fallback_provider=wake_fallback_provider,
         fallback_enabled=fallback_enabled,
-        effective_provider="whisper_fuzzy",
+        effective_provider=effective_provider,
         openwakeword_available=openwakeword_available,
+        manual_mode_required=manual_mode_required,
         fallback_reason=fallback_reason,
     )
 
@@ -305,5 +321,12 @@ def _is_model_available(model_name: str) -> bool:
 def _normalize_provider_name(value: str) -> str:
     cleaned = value.strip().lower().replace("-", "_")
     if cleaned in {"openwakeword", "whisper_fuzzy"}:
+        return cleaned
+    return "whisper_fuzzy"
+
+
+def _normalize_fallback_provider_name(value: str) -> str:
+    cleaned = value.strip().lower().replace("-", "_")
+    if cleaned in {"manual", "whisper_fuzzy"}:
         return cleaned
     return "whisper_fuzzy"

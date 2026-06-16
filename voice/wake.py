@@ -6,12 +6,16 @@ from difflib import SequenceMatcher
 
 
 _WAKE_TOKEN_CONFUSIONS = {
+    "service": "jarvis",
     "jervis": "jarvis",
     "jarves": "jarvis",
     "jarvus": "jarvis",
     "jarviss": "jarvis",
     "jarvish": "jarvis",
     "charvis": "jarvis",
+    "travis": "jarvis",
+    "charities": "jarvis",
+    "office": "jarvis",
 }
 
 
@@ -40,36 +44,50 @@ class WakeDetector:
             return WakeDetectionResult(False, transcript, None, 0.0, self.threshold, "none")
 
         for phrase in phrases:
-            if phrase and _contains_phrase(normalized, phrase):
+            if phrase and _starts_with_phrase(normalized, phrase):
                 return WakeDetectionResult(True, transcript, phrase, 1.0, self.threshold, "exact")
 
         phonetic_normalized = self._phonetic_normalize(normalized)
         if phonetic_normalized != normalized:
             for phrase in phrases:
                 phonetic_phrase = self._phonetic_normalize(phrase)
-                if phrase and _contains_phrase(phonetic_normalized, phonetic_phrase):
+                if phrase and _starts_with_phrase(phonetic_normalized, phonetic_phrase):
                     score = 0.94
-                    if score >= self.threshold:
+                    if score >= self.threshold or self._close_match_allowed(score, self.threshold, phrase, phonetic_phrase):
                         return WakeDetectionResult(True, transcript, phrase, score, self.threshold, "phonetic")
 
         best_phrase: str | None = None
         best_score = 0.0
+        best_match_type = "none"
         for phrase in phrases:
-            for candidate in self._candidates(normalized, phrase):
-                if not _has_anchor_token(candidate, phrase):
-                    continue
-                score = SequenceMatcher(None, candidate, phrase).ratio()
-                if score > best_score:
-                    best_score = score
-                    best_phrase = phrase
+            candidate = self._prefix_candidate(normalized, phrase)
+            if not candidate or not _has_anchor_token(candidate, phrase):
+                continue
+            score = SequenceMatcher(None, candidate, phrase).ratio()
+            phonetic_candidate = self._phonetic_normalize(candidate)
+            phonetic_phrase = self._phonetic_normalize(phrase)
+            phonetic_score = SequenceMatcher(None, phonetic_candidate, phonetic_phrase).ratio()
+            close_match = self._close_match_allowed(score, self.threshold, phrase, phonetic_phrase) or self._close_match_allowed(
+                phonetic_score,
+                self.threshold,
+                phrase,
+                phonetic_phrase,
+            )
+            if score > best_score:
+                best_score = score
+                best_phrase = phrase
+                best_match_type = "fuzzy" if score >= self.threshold else "none"
+            if best_phrase == phrase and best_score < self.threshold and close_match:
+                best_score = max(best_score, phonetic_score, score)
+                best_match_type = "phonetic"
 
         return WakeDetectionResult(
-            detected=best_score >= self.threshold,
+            detected=best_score >= self.threshold or best_match_type == "phonetic",
             transcript=transcript,
             matched_phrase=best_phrase,
             score=best_score,
             threshold=self.threshold,
-            match_type="fuzzy" if best_score >= self.threshold else "none",
+            match_type=best_match_type,
         )
 
     def _phrases(self) -> list[str]:
@@ -93,20 +111,32 @@ class WakeDetector:
         return " ".join(mapped)
 
     @staticmethod
-    def _candidates(transcript: str, phrase: str) -> list[str]:
+    def _prefix_candidate(transcript: str, phrase: str) -> str:
         transcript_words = transcript.split()
         phrase_words = phrase.split()
         phrase_len = len(phrase_words)
         if not transcript_words or not phrase_words:
-            return [transcript]
+            return ""
 
         min_len = max(1, phrase_len - 1)
-        max_len = min(len(transcript_words), phrase_len + 2)
-        candidates = [transcript]
+        max_len = min(len(transcript_words), phrase_len + 1)
+        best_candidate = ""
         for size in range(min_len, max_len + 1):
-            for start in range(0, len(transcript_words) - size + 1):
-                candidates.append(" ".join(transcript_words[start : start + size]))
-        return candidates
+            candidate = " ".join(transcript_words[:size])
+            if len(candidate) > len(best_candidate):
+                best_candidate = candidate
+        return best_candidate
+
+    @staticmethod
+    def _close_match_allowed(score: float, threshold: float, phrase: str, phonetic_phrase: str) -> bool:
+        if not phrase:
+            return False
+        phrase_len = len(phrase.split())
+        if phrase_len <= 0:
+            return False
+        if threshold > 0.85:
+            return False
+        return score >= 0.90 and score >= max(0.90, min(1.0, 1.0 - (phrase_len * 0.05))) and bool(phonetic_phrase)
 
 
 def remove_wake_phrase_prefix(command_text: str, wake_phrase: str, aliases: list[str]) -> str:
@@ -163,6 +193,16 @@ def _contains_phrase(transcript: str, phrase: str) -> bool:
         if transcript_words[start : start + phrase_len] == phrase_words:
             return True
     return False
+
+
+def _starts_with_phrase(transcript: str, phrase: str) -> bool:
+    transcript_words = transcript.split()
+    phrase_words = phrase.split()
+    if not transcript_words or not phrase_words:
+        return False
+    if len(transcript_words) < len(phrase_words):
+        return False
+    return transcript_words[: len(phrase_words)] == phrase_words
 
 
 def _has_anchor_token(candidate: str, phrase: str) -> bool:
