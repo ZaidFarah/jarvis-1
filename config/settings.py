@@ -103,6 +103,10 @@ class AppSettings(BaseSettings):
         le=2,
         validation_alias=AliasChoices("VOICE_CHANNELS", "JARVIS_VOICE_CHANNELS"),
     )
+    voice_input_device: str = Field(
+        default="",
+        validation_alias=AliasChoices("VOICE_INPUT_DEVICE", "JARVIS_VOICE_INPUT_DEVICE"),
+    )
     voice_record_seconds: float = Field(
         default=5.0,
         ge=0.25,
@@ -808,6 +812,11 @@ class AppSettings(BaseSettings):
         if not cleaned:
             raise ValueError("Provider name cannot be empty.")
         return cleaned
+
+    @field_validator("voice_input_device")
+    @classmethod
+    def normalize_voice_input_device(cls, value: str) -> str:
+        return value.strip()
 
     @field_validator("weather_provider")
     @classmethod

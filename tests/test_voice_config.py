@@ -8,6 +8,7 @@ def test_voice_settings_defaults_are_lightweight() -> None:
 
     assert settings.voice_sample_rate == 16000
     assert settings.voice_channels == 1
+    assert settings.voice_input_device == ""
     assert settings.voice_record_seconds == 5.0
     assert settings.voice_microphone_test_seconds == 5.0
     assert settings.voice_vad_enabled is True
@@ -110,6 +111,7 @@ def test_voice_settings_defaults_are_lightweight() -> None:
 
 def test_voice_settings_read_environment(monkeypatch) -> None:
     monkeypatch.setenv("VOICE_SAMPLE_RATE", "22050")
+    monkeypatch.setenv("VOICE_INPUT_DEVICE", "  USB Microphone  ")
     monkeypatch.setenv("VOICE_RECORD_SECONDS", "1.5")
     monkeypatch.setenv("VOICE_VAD_THRESHOLD", "0.02")
     monkeypatch.setenv("VOICE_VAD_WINDOW_MS", "60")
@@ -121,6 +123,7 @@ def test_voice_settings_read_environment(monkeypatch) -> None:
     settings = AppSettings(_env_file=None)
 
     assert settings.voice_sample_rate == 22050
+    assert settings.voice_input_device == "USB Microphone"
     assert settings.voice_record_seconds == 1.5
     assert settings.voice_vad_threshold == 0.02
     assert settings.voice_vad_window_ms == 60

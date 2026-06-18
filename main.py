@@ -30,6 +30,7 @@ from diagnostics.settings_check import format_settings_check_report, run_setting
 from diagnostics.signing import format_signing_check_report, run_signing_check
 from diagnostics.release_check import format_release_check_report, run_release_check
 from diagnostics.wake_provider import format_wake_provider_check_report, run_wake_provider_check
+from diagnostics.voice_health import VoiceHealthCheck, format_voice_health_report
 from config.settings import load_settings
 from jarvis_runtime.config_bootstrap import format_config_init_error, format_config_init_report, initialize_config
 from jarvis_runtime.release_package import format_release_package_check_report, run_release_package_check
@@ -111,6 +112,13 @@ def main(argv: list[str] | None = None) -> int:
         report = AudioDiagnostics(settings).run_full_check()
         print(format_audio_check_report(report))
         return 0 if report.is_successful else 1
+
+    if "--voice-health-check" in args:
+        settings = load_settings()
+        configure_logging(settings, console=False)
+        report = VoiceHealthCheck(settings).run()
+        print(format_voice_health_report(report))
+        return 0 if report.is_healthy else 1
 
     if "--health-check" in args:
         settings = load_settings()
