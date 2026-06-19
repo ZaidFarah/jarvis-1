@@ -74,6 +74,23 @@ def test_speech_repair_repairs_status_report_variants(transcript: str) -> None:
     assert result.strategy == REPAIR_STRATEGY_COMMON_INTENT
 
 
+@pytest.mark.parametrize(
+    "transcript",
+    [
+        "we cup out of his",
+        "wake up out of his",
+        "wake up jar of this",
+        "we got jarvis",
+    ],
+)
+def test_speech_repair_repairs_wake_phrase_variants(transcript: str) -> None:
+    result = SpeechRepairer(AppSettings(_env_file=None)).repair(transcript)
+
+    assert result.repaired_transcript == "wake up jarvis"
+    assert result.confidence == 0.96
+    assert result.strategy == REPAIR_STRATEGY_COMMON_INTENT
+
+
 def test_speech_repair_context_completes_recent_reminder() -> None:
     settings = AppSettings(_env_file=None)
 

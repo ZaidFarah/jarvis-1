@@ -510,7 +510,9 @@ python main.py --fast-voice
 
 The default `enter` activation waits for Enter, records immediately, stops after the configured trailing silence once speech has started, transcribes once, repairs and validates the command, routes it through `AssistantCore`, and prints the response before optional TTS. A hard capture limit prevents a missed VAD event from creating a long wait. Type `q` at the activation prompt to exit.
 
-Faster Whisper is created once per fast-mode runner and reused for every turn. With warm-up enabled, the configured model is loaded before the first capture so model loading is not part of first-command transcription latency. `WHISPER_MODEL=base.en` is the default; `small.en` is available when higher accuracy is worth the additional latency.
+Faster Whisper is created once per fast-mode runner and reused for every turn. With warm-up enabled, the configured model is loaded once when the interactive session starts, before the first command timer. The startup line reports this one-time cost; per-command `stt_warmup_ms` remains zero. `WHISPER_MODEL=base.en` is the default; `small.en` is available when higher accuracy is worth the additional latency.
+
+Interactive `--fast-voice` also opens one persistent microphone stream and reuses it across commands. The stream is started and stopped around each capture so audio spoken while waiting at the Enter prompt is not treated as a command. `--fast-command-test` intentionally retains a one-shot stream as a diagnostic fallback.
 
 Wake-only phrases such as `Wake up, Jarvis`, `Hey Jarvis`, and `Jarvis` are handled locally with `I'm listening.` They are not rejected and are not sent to OpenAI as empty commands.
 
@@ -542,7 +544,7 @@ Run a single full-path fast command test with:
 python main.py --fast-command-test
 ```
 
-The effective hard capture limit is the lower of the backwards-compatible `FAST_VOICE_RECORD_SECONDS` setting and `FAST_VOICE_MAX_SECONDS`. A short pre-roll retains audio immediately before VAD fires so the first word is not clipped. If VAD hears sound but STT produces no transcript, Jarvis responds locally instead of sending an empty command. Each result logs `capture_ms`, `audio_record_ms`, `audio_prepare_ms`, `stt_warmup_ms`, `vad_wait_ms`, `speech_ms`, `trailing_silence_ms`, `transcribe_ms`, `openai_ms`, `tts_ms`, and `total_ms`. `capture_ms` and `audio_record_ms` measure only blocking microphone reads; device/stream setup, conversion, VAD processing, and cleanup are reported separately as `audio_prepare_ms`. STT warm-up occurs before capture and is reported separately. Here `openai_ms` measures the existing `AssistantCore` response stage, which may complete locally without an OpenAI request. Detailed logs are written to `logs/fast_voice.log`.
+The effective hard capture limit is the lower of the backwards-compatible `FAST_VOICE_RECORD_SECONDS` setting and `FAST_VOICE_MAX_SECONDS`. A short pre-roll retains audio immediately before VAD fires so the first word is not clipped. If VAD hears sound but STT produces no transcript, Jarvis responds locally instead of sending an empty command. Each result logs `capture_ms`, `audio_record_ms`, `audio_prepare_ms`, `stt_warmup_ms`, `vad_wait_ms`, `speech_ms`, `trailing_silence_ms`, `transcribe_ms`, `openai_ms`, `tts_ms`, and `total_ms`. `capture_ms` and `audio_record_ms` measure only blocking microphone reads; per-command stream start/stop, conversion, and VAD processing are reported separately as `audio_prepare_ms`. Persistent device discovery and stream construction appear once as `audio_session_prepare_ms` on the startup line. Here `openai_ms` measures the existing `AssistantCore` response stage, which may complete locally without an OpenAI request. Detailed logs are written to `logs/fast_voice.log`.
 
 ## Voice Loop
 

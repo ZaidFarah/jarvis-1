@@ -6,6 +6,7 @@ import re
 import time
 from collections import deque
 from collections.abc import Callable, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
@@ -149,7 +150,9 @@ class FastVoiceRunner:
         self.log_file = self.settings.log_dir / "fast_voice.log"
         self.fast_logger = logger.bind(fast_voice=True)
         self._stt_warm_attempted = False
-        self._pending_stt_warmup_ms = 0.0
+        self._audio_stream: Any | None = None
+        self._audio_device_index: int | None = None
+        self._audio_device_name = ""
         add_managed_file_sink(
             self.log_file,
             level="DEBUG",
@@ -161,41 +164,57 @@ class FastVoiceRunner:
             self.output_func("Fast voice is disabled. Set FAST_VOICE_ENABLED=true to enable it.")
             return 1
 
+        stt_warmup_ms = 0.0
         if self.settings.fast_voice_warm_stt_on_start:
-            self._warm_stt()
+            stt_warmup_ms = self._warm_stt()
+
+        audio_session_ms = 0.0
+        if self.recorder is None:
+            try:
+                audio_session_ms = self._open_audio_session()
+            except Exception as exc:
+                self._close_audio_session()
+                self.output_func(
+                    f"Fast voice audio session failed: {type(exc).__name__}: {exc}"
+                )
+                return 1
 
         activation = self.settings.fast_voice_activation
         self.output_func(
             f"Jarvis fast voice ready | activation={activation} | "
-            f"TTS={'on' if self.settings.fast_voice_tts_enabled else 'off'}"
+            f"TTS={'on' if self.settings.fast_voice_tts_enabled else 'off'} | "
+            f"startup_stt_warmup_ms={stt_warmup_ms:.1f} | "
+            f"audio_session_prepare_ms={audio_session_ms:.1f}"
         )
-        completed = 0
-        while max_turns is None or completed < max_turns:
-            if activation == "enter":
-                action = self.input_func("Press Enter to speak, or type q to quit: ").strip().lower()
-                if action in {"q", "quit", "exit"}:
+        try:
+            completed = 0
+            while max_turns is None or completed < max_turns:
+                if activation == "enter":
+                    action = self.input_func("Press Enter to speak, or type q to quit: ").strip().lower()
+                    if action in {"q", "quit", "exit"}:
+                        return 0
+                elif activation == "clap":
+                    self.output_func("Waiting for a clap...")
+                    if not self._wait_for_clap():
+                        self.output_func("No clap detected before timeout.")
+                        return 1
+
+                report = self.run_once()
+                self.output_func(format_fast_voice_report(report))
+                completed += 1
+                if report.command.strip().lower() in FAST_VOICE_EXIT_WORDS:
                     return 0
-            elif activation == "clap":
-                self.output_func("Waiting for a clap...")
-                if not self._wait_for_clap():
-                    self.output_func("No clap detected before timeout.")
-                    return 1
+                if activation == "direct":
+                    return 0 if report.is_successful else 1
 
-            report = self.run_once()
-            self.output_func(format_fast_voice_report(report))
-            completed += 1
-            if report.command.strip().lower() in FAST_VOICE_EXIT_WORDS:
-                return 0
-            if activation == "direct":
-                return 0 if report.is_successful else 1
-
-        return 0
+            return 0
+        finally:
+            self._close_audio_session()
 
     def run_once(self) -> FastVoiceReport:
         if self.settings.fast_voice_warm_stt_on_start:
             self._warm_stt()
-        stt_warmup_ms = self._pending_stt_warmup_ms
-        self._pending_stt_warmup_ms = 0.0
+        stt_warmup_ms = 0.0
         total_started = self.clock()
         errors: list[str] = []
         input_device = "unavailable"
@@ -310,7 +329,14 @@ class FastVoiceRunner:
                 capture_result=capture_result,
             )
 
-        wake_only = is_wake_only_transcript(raw_transcript, self.settings)
+        repair = SpeechRepairer(self.settings).repair(
+            cleaned_transcript,
+            raw_transcript=raw_transcript,
+        )
+        wake_only = is_wake_only_transcript(raw_transcript, self.settings) or is_wake_only_transcript(
+            repair.repaired_transcript,
+            self.settings,
+        )
         if wake_only:
             assistant_response = AssistantResponse(
                 text=self.settings.fast_voice_wake_only_response,
@@ -347,10 +373,6 @@ class FastVoiceRunner:
                 capture_result=capture_result,
             )
 
-        repair = SpeechRepairer(self.settings).repair(
-            cleaned_transcript,
-            raw_transcript=raw_transcript,
-        )
         validation = self._validate(repair.repaired_transcript)
 
         if validation.accepted:
@@ -400,7 +422,16 @@ class FastVoiceRunner:
         capture_work_started = self.clock()
         audio_record_ms = 0.0
         sd = self.sounddevice_module or _require_sounddevice()
-        device_index, device_name = resolve_fast_input_device(sd, self.settings.voice_input_device)
+        if self._audio_stream is not None:
+            device_index = self._audio_device_index
+            device_name = self._audio_device_name
+            if device_index is None:
+                raise RuntimeError("Persistent audio session has no input device.")
+        else:
+            device_index, device_name = resolve_fast_input_device(
+                sd,
+                self.settings.voice_input_device,
+            )
         sample_rate = self.settings.voice_sample_rate
         channels = self.settings.voice_channels
         window_ms = min(self.settings.voice_vad_window_ms, 80)
@@ -433,13 +464,9 @@ class FastVoiceRunner:
         last_speech_frame: int | None = None
         trailing_silence_frames = 0
 
-        sd.check_input_settings(device=device_index, samplerate=sample_rate, channels=channels)
-        with sd.InputStream(
-            device=device_index,
-            samplerate=sample_rate,
-            channels=channels,
-            dtype="float32",
-        ) as stream:
+        if self._audio_stream is None:
+            sd.check_input_settings(device=device_index, samplerate=sample_rate, channels=channels)
+        with self._active_input_stream(sd, device_index, sample_rate, channels) as stream:
             while frames_read < max_frames:
                 frames_to_read = min(chunk_frames, max_frames - frames_read)
                 read_started = self.clock()
@@ -537,7 +564,6 @@ class FastVoiceRunner:
                 exc,
             )
         elapsed_ms = (self.clock() - started) * 1000.0
-        self._pending_stt_warmup_ms += elapsed_ms
         self.fast_logger.info(
             "Fast voice STT warm-up provider={} warmed={} elapsed_ms={:.1f}",
             self.provider.name,
@@ -546,9 +572,100 @@ class FastVoiceRunner:
         )
         return elapsed_ms
 
+    def _open_audio_session(self) -> float:
+        if self._audio_stream is not None or self.recorder is not None:
+            return 0.0
+        started = self.clock()
+        sd = self.sounddevice_module or _require_sounddevice()
+        device_index, device_name = resolve_fast_input_device(
+            sd,
+            self.settings.voice_input_device,
+        )
+        sd.check_input_settings(
+            device=device_index,
+            samplerate=self.settings.voice_sample_rate,
+            channels=self.settings.voice_channels,
+        )
+        self._audio_stream = sd.InputStream(
+            device=device_index,
+            samplerate=self.settings.voice_sample_rate,
+            channels=self.settings.voice_channels,
+            dtype="float32",
+        )
+        self._audio_device_index = device_index
+        self._audio_device_name = device_name
+        elapsed_ms = (self.clock() - started) * 1000.0
+        self.fast_logger.info(
+            "Persistent fast voice audio session opened device={} elapsed_ms={:.1f}",
+            device_name,
+            elapsed_ms,
+        )
+        return elapsed_ms
+
+    def _close_audio_session(self) -> None:
+        stream = self._audio_stream
+        self._audio_stream = None
+        self._audio_device_index = None
+        self._audio_device_name = ""
+        if stream is None:
+            return
+        if bool(getattr(stream, "active", False)):
+            self._safe_stop_audio_stream(stream)
+        try:
+            stream.close()
+        except Exception as exc:
+            self.fast_logger.warning(
+                "Persistent fast voice audio session close failed: {}: {}",
+                type(exc).__name__,
+                exc,
+            )
+
+    @contextmanager
+    def _active_input_stream(
+        self,
+        sd: Any,
+        device_index: int,
+        sample_rate: int,
+        channels: int,
+    ):
+        if self._audio_stream is None:
+            with sd.InputStream(
+                device=device_index,
+                samplerate=sample_rate,
+                channels=channels,
+                dtype="float32",
+            ) as stream:
+                yield stream
+            return
+
+        stream = self._audio_stream
+        stream.start()
+        try:
+            yield stream
+        finally:
+            self._safe_stop_audio_stream(stream)
+
+    def _safe_stop_audio_stream(self, stream: Any) -> None:
+        try:
+            stream.stop()
+        except Exception as exc:
+            self.fast_logger.warning(
+                "Persistent fast voice audio session stop failed: {}: {}",
+                type(exc).__name__,
+                exc,
+            )
+
     def _wait_for_clap(self) -> bool:
         sd = self.sounddevice_module or _require_sounddevice()
-        device_index, _device_name = resolve_fast_input_device(sd, self.settings.voice_input_device)
+        if self._audio_stream is not None:
+            device_index = self._audio_device_index
+            if device_index is None:
+                raise RuntimeError("Persistent audio session has no input device.")
+        else:
+            device_index, _device_name = resolve_fast_input_device(
+                sd,
+                self.settings.voice_input_device,
+            )
         sample_rate = self.settings.voice_sample_rate
         channels = self.settings.voice_channels
         chunk_ms = 50
@@ -556,13 +673,9 @@ class FastVoiceRunner:
         max_chunks = max(1, math.ceil(CLAP_WAIT_SECONDS * 1000 / chunk_ms))
         rms_threshold = max(CLAP_MIN_RMS, self.settings.voice_vad_threshold * 10.0)
 
-        sd.check_input_settings(device=device_index, samplerate=sample_rate, channels=channels)
-        with sd.InputStream(
-            device=device_index,
-            samplerate=sample_rate,
-            channels=channels,
-            dtype="float32",
-        ) as stream:
+        if self._audio_stream is None:
+            sd.check_input_settings(device=device_index, samplerate=sample_rate, channels=channels)
+        with self._active_input_stream(sd, device_index, sample_rate, channels) as stream:
             for _ in range(max_chunks):
                 recording, _overflowed = stream.read(chunk_frames)
                 chunk = _flatten_samples(recording)

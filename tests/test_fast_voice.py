@@ -187,8 +187,14 @@ class FakeInputStream:
     def __init__(self, levels: list[float]) -> None:
         self.levels = list(levels)
         self.read_count = 0
+        self.start_count = 0
+        self.stop_count = 0
+        self.close_count = 0
+        self.enter_count = 0
+        self.active = False
 
     def __enter__(self):
+        self.enter_count += 1
         return self
 
     def __exit__(self, exc_type, exc, traceback) -> None:
@@ -199,12 +205,26 @@ class FakeInputStream:
         value = self.levels.pop(0) if self.levels else 0.0
         return [value] * frames, False
 
+    def start(self) -> None:
+        self.start_count += 1
+        self.active = True
+
+    def stop(self) -> None:
+        self.stop_count += 1
+        self.active = False
+
+    def close(self) -> None:
+        self.close_count += 1
+        self.active = False
+
 
 class FakeSoundDevice:
     default = SimpleNamespace(device=(2, 4))
 
     def __init__(self, levels: list[float]) -> None:
         self.stream = FakeInputStream(levels)
+        self.input_stream_calls = 0
+        self.input_stream_kwargs: list[dict[str, object]] = []
 
     def query_devices(self):
         return [
@@ -220,6 +240,9 @@ class FakeSoundDevice:
 
     def InputStream(self, **kwargs):
         assert kwargs["device"] == 2
+        assert "start" not in kwargs
+        self.input_stream_calls += 1
+        self.input_stream_kwargs.append(dict(kwargs))
         return self.stream
 
 
@@ -372,8 +395,106 @@ def test_fast_voice_reuses_and_warms_stt_provider_once(tmp_path: Path) -> None:
     assert second.is_successful is True
     assert provider.warm_up_calls == 1
     assert provider.calls == 2
-    assert first.timing.stt_warmup_ms >= 0.0
+    assert first.timing.stt_warmup_ms == 0.0
     assert second.timing.stt_warmup_ms == 0.0
+
+
+def test_fast_voice_loop_reuses_one_persistent_audio_stream(tmp_path: Path) -> None:
+    settings = AppSettings(
+        _env_file=None,
+        log_dir=tmp_path / "logs",
+        voice_input_device="Microphone Array",
+        voice_vad_threshold=0.02,
+        fast_voice_activation="enter",
+        fast_voice_silence_ms=160,
+    )
+    levels = [0.01, 0.01, 0.01, 0.2, 0.2, 0.2, 0.01, 0.01] * 2
+    sd = FakeSoundDevice(levels)
+    provider = FakeProvider("status report")
+    output: list[str] = []
+    runner = FastVoiceRunner(
+        settings,
+        provider=provider,
+        assistant=SpyAssistant(),  # type: ignore[arg-type]
+        sounddevice_module=sd,
+        input_func=lambda _prompt: "",
+        output_func=output.append,
+    )
+
+    result = runner.run(max_turns=2)
+
+    assert result == 0
+    assert sd.input_stream_calls == 1
+    assert "start" not in sd.input_stream_kwargs[0]
+    assert sd.stream.start_count == 2
+    assert sd.stream.stop_count == 2
+    assert sd.stream.close_count == 1
+    assert provider.warm_up_calls == 1
+    assert provider.calls == 2
+    assert any("startup_stt_warmup_ms=" in line for line in output)
+    assert sum(
+        line.startswith("Jarvis Fast Voice Command") and "stt_warmup_ms=0.0" in line
+        for line in output
+    ) == 2
+
+
+def test_fast_command_capture_keeps_one_shot_stream_fallback(tmp_path: Path) -> None:
+    settings = AppSettings(
+        _env_file=None,
+        log_dir=tmp_path / "logs",
+        voice_input_device="Microphone Array",
+        voice_vad_threshold=0.02,
+        fast_voice_silence_ms=160,
+    )
+    sd = FakeSoundDevice([0.01, 0.01, 0.01, 0.2, 0.2, 0.2, 0.01, 0.01])
+    runner = FastVoiceRunner(
+        settings,
+        provider=FakeProvider("status report"),
+        assistant=SpyAssistant(),  # type: ignore[arg-type]
+        sounddevice_module=sd,
+        output_func=lambda _message: None,
+    )
+
+    report = runner.run_once()
+
+    assert report.is_successful is True
+    assert runner._audio_stream is None
+    assert sd.input_stream_calls == 1
+    assert sd.stream.enter_count == 1
+    assert sd.stream.start_count == 0
+    assert sd.stream.close_count == 0
+
+
+@pytest.mark.parametrize(
+    "transcript",
+    [
+        "We cup out of his.",
+        "Wake up out of his.",
+        "Wake up jar of this.",
+        "We got Jarvis.",
+    ],
+)
+def test_fast_voice_repaired_wake_phrase_stays_local(
+    transcript: str,
+    tmp_path: Path,
+) -> None:
+    settings = AppSettings(_env_file=None, log_dir=tmp_path / "logs")
+    assistant = SpyAssistant()
+    report = FastVoiceRunner(
+        settings,
+        provider=FakeProvider(transcript),
+        assistant=assistant,  # type: ignore[arg-type]
+        recorder=lambda: ([0.2] * 1600, "Microphone Array"),
+        output_func=lambda _message: None,
+    ).run_once()
+
+    assert report.wake_only is True
+    assert report.speech_repair is not None
+    assert report.speech_repair.repaired_transcript == "wake up jarvis"
+    assert report.assistant_response is not None
+    assert report.assistant_response.text == "I'm listening."
+    assert report.timing.openai_ms == 0.0
+    assert assistant.commands == []
 
 
 def test_fast_input_device_supports_name_and_index() -> None:

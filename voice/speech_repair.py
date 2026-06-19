@@ -151,7 +151,23 @@ class SpeechRepairer:
 
     def _repair_from_common_intents(self, raw: str, cleaned: str) -> SpeechRepairResult | None:
         normalized = _normalize_for_match(cleaned)
+        raw_normalized = _normalize_for_match(raw)
         city = self.settings.weather_default_city
+        wake_variants = {
+            "we cup out of his",
+            "wake up out of his",
+            "wake up jar of this",
+            "we got jarvis",
+        }
+        if normalized in wake_variants or raw_normalized in wake_variants:
+            return SpeechRepairResult(
+                raw,
+                cleaned,
+                "wake up jarvis",
+                0.96,
+                REPAIR_STRATEGY_COMMON_INTENT,
+                "repaired likely wake phrase transcription",
+            )
         if normalized in {"thats report", "status reports", "start us report", "stat us report"}:
             return SpeechRepairResult(
                 raw,
