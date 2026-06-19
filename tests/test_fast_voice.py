@@ -9,6 +9,7 @@ from assistant.core import AssistantResponse
 from config.settings import AppSettings
 from main import main
 from voice.fast_voice import (
+    FAST_GUI_REJECTED_RESPONSE,
     FastCaptureResult,
     FastVoiceRunner,
     format_fast_voice_report,
@@ -23,8 +24,9 @@ class FakeProvider:
     name = "fake_stt"
     available = True
 
-    def __init__(self, transcript: str) -> None:
+    def __init__(self, transcript: str, confidence: float | None = 0.95) -> None:
         self.transcript = transcript
+        self.confidence = confidence
         self.calls = 0
         self.warm_up_calls = 0
 
@@ -36,7 +38,7 @@ class FakeProvider:
         assert samples
         assert sample_rate == 16000
         self.calls += 1
-        return TranscriptionResult(text=self.transcript, confidence=0.95)
+        return TranscriptionResult(text=self.transcript, confidence=self.confidence)
 
 
 class SpyAssistant:
@@ -149,6 +151,98 @@ def test_fast_voice_vad_with_empty_transcript_returns_clear_local_response(tmp_p
     assert report.timing.openai_ms == 0.0
     assert assistant.commands == []
     assert "Jarvis: I heard sound but could not understand it." in output
+
+
+@pytest.mark.parametrize(
+    "transcript",
+    ["You", "Okay", "For me", "3 8 8 8 8 9", ""],
+)
+def test_gui_fast_voice_rejects_accidental_or_weak_transcripts(
+    transcript: str,
+    tmp_path: Path,
+) -> None:
+    settings = AppSettings(_env_file=None, log_dir=tmp_path / "logs")
+    assistant = SpyAssistant()
+    report = FastVoiceRunner(
+        settings,
+        provider=FakeProvider(transcript),
+        assistant=assistant,  # type: ignore[arg-type]
+        recorder=lambda: FastCaptureResult(
+            [0.2] * 1600,
+            "Microphone Array",
+            speech_ms=400.0,
+            vad_crossed=True,
+        ),
+        strict_command_validation=True,
+        output_func=lambda _message: None,
+    ).run_once()
+
+    assert report.command_accepted is False
+    assert report.assistant_response is not None
+    assert report.assistant_response.text == FAST_GUI_REJECTED_RESPONSE
+    assert report.assistant_response.source == "fast_voice_rejected"
+    assert report.timing.openai_ms == 0.0
+    assert assistant.commands == []
+
+
+def test_gui_fast_voice_rejects_low_confidence_transcript(tmp_path: Path) -> None:
+    assistant = SpyAssistant()
+    report = FastVoiceRunner(
+        AppSettings(_env_file=None, log_dir=tmp_path / "logs"),
+        provider=FakeProvider("status report", confidence=0.2),
+        assistant=assistant,  # type: ignore[arg-type]
+        recorder=lambda: ([0.2] * 1600, "Microphone Array"),
+        strict_command_validation=True,
+        output_func=lambda _message: None,
+    ).run_once()
+
+    assert report.command_accepted is False
+    assert report.transcript_confidence == 0.2
+    assert report.assistant_response is not None
+    assert report.assistant_response.text == FAST_GUI_REJECTED_RESPONSE
+    assert assistant.commands == []
+
+
+def test_gui_fast_voice_accepts_intentional_command_and_wake_only(tmp_path: Path) -> None:
+    settings = AppSettings(_env_file=None, log_dir=tmp_path / "logs")
+    assistant = SpyAssistant()
+    command_report = FastVoiceRunner(
+        settings,
+        provider=FakeProvider("status report"),
+        assistant=assistant,  # type: ignore[arg-type]
+        recorder=lambda: ([0.2] * 1600, "Microphone Array"),
+        strict_command_validation=True,
+        output_func=lambda _message: None,
+    ).run_once()
+    wake_report = FastVoiceRunner(
+        settings,
+        provider=FakeProvider("Jarvis"),
+        assistant=assistant,  # type: ignore[arg-type]
+        recorder=lambda: ([0.2] * 1600, "Microphone Array"),
+        strict_command_validation=True,
+        output_func=lambda _message: None,
+    ).run_once()
+
+    assert command_report.command_accepted is True
+    assert assistant.commands == ["status report"]
+    assert wake_report.wake_only is True
+    assert wake_report.command_accepted is True
+    assert wake_report.assistant_response is not None
+    assert wake_report.assistant_response.text == "I'm listening."
+
+
+def test_terminal_fast_voice_keeps_existing_validation_behavior(tmp_path: Path) -> None:
+    assistant = SpyAssistant()
+    report = FastVoiceRunner(
+        AppSettings(_env_file=None, log_dir=tmp_path / "logs"),
+        provider=FakeProvider("for me"),
+        assistant=assistant,  # type: ignore[arg-type]
+        recorder=lambda: ([0.2] * 1600, "Microphone Array"),
+        output_func=lambda _message: None,
+    ).run_once()
+
+    assert report.command_accepted is True
+    assert assistant.commands == ["for me"]
 
 
 def test_fast_voice_tts_is_controlled_by_fast_setting(tmp_path: Path) -> None:

@@ -35,6 +35,9 @@ CLAP_WAIT_SECONDS = 15.0
 CLAP_MIN_RMS = 0.04
 CLAP_MIN_PEAK = 0.15
 SHORT_COMMAND_SPEECH_MS = 1000.0
+FAST_GUI_REJECTED_RESPONSE = "I heard sound, but it did not sound like a command."
+FAST_GUI_MIN_TRANSCRIPT_CONFIDENCE = 0.35
+FAST_GUI_WEAK_COMMANDS = {"you", "okay", "for me"}
 
 @dataclass(frozen=True)
 class FastCaptureResult:
@@ -98,6 +101,7 @@ class FastVoiceReport:
     tts_result: TextToSpeechResult | None
     timing: FastVoiceTiming
     log_file: Path
+    transcript_confidence: float | None = None
     vad_crossed: bool = False
     wake_only: bool = False
     unintelligible_audio: bool = False
@@ -141,6 +145,7 @@ class FastVoiceRunner:
         clock: Callable[[], float] = time.perf_counter,
         status_callback: Callable[[str], None] | None = None,
         report_callback: Callable[[FastVoiceReport], None] | None = None,
+        strict_command_validation: bool = False,
     ) -> None:
         self.settings = settings
         self.assistant = assistant or AssistantCore(settings=settings)
@@ -153,6 +158,7 @@ class FastVoiceRunner:
         self.clock = clock
         self.status_callback = status_callback
         self.report_callback = report_callback
+        self.strict_command_validation = strict_command_validation
         self.log_file = self.settings.log_dir / "fast_voice.log"
         self.fast_logger = logger.bind(fast_voice=True)
         self._stt_warm_attempted = False
@@ -269,6 +275,7 @@ class FastVoiceRunner:
         errors: list[str] = []
         input_device = "unavailable"
         raw_transcript = ""
+        transcript_confidence: float | None = None
         cleaned_transcript = ""
         repair: SpeechRepairResult | None = None
         assistant_response: AssistantResponse | None = None
@@ -297,6 +304,7 @@ class FastVoiceRunner:
                 total_started,
                 errors,
                 stt_warmup_ms=stt_warmup_ms,
+                transcript_confidence=transcript_confidence,
                 capture_result=capture_result,
             )
 
@@ -337,6 +345,7 @@ class FastVoiceRunner:
                     self.settings.voice_sample_rate,
                 )
                 raw_transcript = transcription.text.strip()
+                transcript_confidence = transcription.confidence
             except Exception as exc:
                 self._notify_status("Error")
                 errors.append(f"Fast voice transcription failed: {type(exc).__name__}: {exc}")
@@ -348,10 +357,19 @@ class FastVoiceRunner:
             aliases=self.settings.wake_alias_list,
         )
         if capture_result.vad_crossed and not raw_transcript:
+            empty_response = (
+                FAST_GUI_REJECTED_RESPONSE
+                if self.strict_command_validation
+                else self.settings.fast_voice_empty_audio_response
+            )
             assistant_response = AssistantResponse(
-                text=self.settings.fast_voice_empty_audio_response,
-                accepted=True,
-                source="fast_voice_empty_audio",
+                text=empty_response,
+                accepted=not self.strict_command_validation,
+                source=(
+                    "fast_voice_rejected"
+                    if self.strict_command_validation
+                    else "fast_voice_empty_audio"
+                ),
             )
             self._notify_status("Responding")
             self.output_func(f"Jarvis: {assistant_response.text}")
@@ -380,6 +398,7 @@ class FastVoiceRunner:
                 total_started,
                 errors,
                 stt_warmup_ms=stt_warmup_ms,
+                transcript_confidence=transcript_confidence,
                 unintelligible_audio=True,
                 capture_result=capture_result,
             )
@@ -425,11 +444,45 @@ class FastVoiceRunner:
                 total_started,
                 errors,
                 stt_warmup_ms=stt_warmup_ms,
+                transcript_confidence=transcript_confidence,
                 wake_only=True,
                 capture_result=capture_result,
             )
 
         validation = self._validate(repair.repaired_transcript)
+        if self.strict_command_validation:
+            validation = validate_intentional_fast_command(
+                repair.repaired_transcript,
+                validation,
+                transcript_confidence=transcript_confidence,
+            )
+
+        if not validation.accepted and self.strict_command_validation:
+            assistant_response = AssistantResponse(
+                text=FAST_GUI_REJECTED_RESPONSE,
+                accepted=False,
+                source="fast_voice_rejected",
+            )
+            self._notify_status("Responding")
+            self.output_func(f"Jarvis: {assistant_response.text}")
+            return self._report(
+                input_device,
+                raw_transcript,
+                cleaned_transcript,
+                repair,
+                validation,
+                assistant_response,
+                tts_result,
+                capture_ms,
+                transcribe_ms,
+                openai_ms,
+                tts_ms,
+                total_started,
+                errors,
+                stt_warmup_ms=stt_warmup_ms,
+                transcript_confidence=transcript_confidence,
+                capture_result=capture_result,
+            )
 
         if validation.accepted:
             self._notify_status("Thinking")
@@ -480,6 +533,7 @@ class FastVoiceRunner:
             total_started,
             errors,
             stt_warmup_ms=stt_warmup_ms,
+            transcript_confidence=transcript_confidence,
             capture_result=capture_result,
         )
 
@@ -791,6 +845,7 @@ class FastVoiceRunner:
         errors: list[str],
         *,
         stt_warmup_ms: float = 0.0,
+        transcript_confidence: float | None = None,
         wake_only: bool = False,
         unintelligible_audio: bool = False,
         capture_result: FastCaptureResult | None = None,
@@ -829,6 +884,7 @@ class FastVoiceRunner:
             tts_result=tts_result,
             timing=timing,
             log_file=self.log_file,
+            transcript_confidence=transcript_confidence,
             vad_crossed=capture_result.vad_crossed,
             wake_only=wake_only,
             unintelligible_audio=unintelligible_audio,
@@ -897,6 +953,40 @@ def is_wake_only_transcript(transcript: str, settings: AppSettings) -> bool:
     return normalized in phrases
 
 
+def validate_intentional_fast_command(
+    command: str,
+    base_validation: CommandValidationResult,
+    *,
+    transcript_confidence: float | None,
+) -> CommandValidationResult:
+    if not base_validation.accepted:
+        return base_validation
+
+    normalized = _normalize_phrase(command)
+    words = normalized.split()
+    compact = "".join(words)
+    if normalized in FAST_GUI_WEAK_COMMANDS:
+        return CommandValidationResult(False, command, f"weak GUI command: {normalized}")
+    if len(words) < 2 or len(compact) < 5:
+        return CommandValidationResult(False, command, "GUI command is too short")
+
+    numeric_words = [word for word in words if word.isdigit()]
+    if numeric_words and len(numeric_words) >= max(2, len(words) // 2):
+        return CommandValidationResult(False, command, "random numeric sequence")
+    if not any(any(character.isalpha() for character in word) for word in words):
+        return CommandValidationResult(False, command, "command contains no words")
+    if (
+        transcript_confidence is not None
+        and transcript_confidence < FAST_GUI_MIN_TRANSCRIPT_CONFIDENCE
+    ):
+        return CommandValidationResult(
+            False,
+            command,
+            f"low transcript confidence: {transcript_confidence:.2f}",
+        )
+    return base_validation
+
+
 def format_fast_voice_report(report: FastVoiceReport) -> str:
     repair = report.speech_repair
     lines = [
@@ -907,6 +997,7 @@ def format_fast_voice_report(report: FastVoiceReport) -> str:
         f"STT provider: {report.provider_name}",
         f"provider available: {_yes_no(report.provider_available)}",
         f"raw transcript: {report.raw_transcript or '<empty>'}",
+        f"transcript confidence: {report.transcript_confidence if report.transcript_confidence is not None else '<unknown>'}",
         f"cleaned transcript: {report.cleaned_transcript or '<empty>'}",
         f"repaired command: {report.command or '<empty>'}",
         f"repair strategy: {repair.strategy if repair else '<none>'}",

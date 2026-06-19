@@ -80,7 +80,7 @@ def test_voice_loop_gui_state_updates_controls_and_status_fields() -> None:
     assert window.voice_timing_wake_capture_value.text() == "--"
     assert window.voice_timing_total_value.text() == "--"
     assert window.agent_enabled_value.text() in {"Enabled", "Disabled"}
-    assert window.start_voice_loop_button.text() == "Start Voice"
+    assert window.start_voice_loop_button.text() == "Start Listening"
     assert window.stop_voice_loop_button.text() == "Stop Voice"
     assert window.start_voice_loop_button.isEnabled() is True
     assert window.stop_voice_loop_button.isEnabled() is False
@@ -143,7 +143,7 @@ def test_voice_loop_gui_state_updates_controls_and_status_fields() -> None:
 
     tray_actions = [action.text() for action in window.tray_icon.contextMenu().actions()]
     assert "Show Jarvis" in tray_actions
-    assert "Start Voice Loop" in tray_actions
+    assert "Start Listening" in tray_actions
     assert "Stop Voice Loop" in tray_actions
     assert "Check Reminders" in tray_actions
     assert "Test Notification" in tray_actions
@@ -302,6 +302,7 @@ def test_fast_voice_gui_report_populates_existing_hud_panels() -> None:
     )
     report = SimpleNamespace(
         provider_name="faster_whisper",
+        transcript_confidence=0.91,
         raw_transcript="Hey Jarvis, status reports",
         cleaned_transcript="status reports",
         command="status report",
@@ -335,6 +336,7 @@ def test_fast_voice_gui_report_populates_existing_hud_panels() -> None:
     assert window.voice_response_panel.toPlainText() == "Systems nominal."
     assert window.voice_vad_value.text() == "yes"
     assert window.voice_wake_only_value.text() == "no"
+    assert window.voice_transcript_confidence_bar.value() == 91
     assert window.voice_timing_command_capture_value.text() == "1280 ms"
     assert window.voice_timing_command_transcribe_value.text() == "545 ms"
     assert window.voice_timing_openai_value.text() == "1387 ms"
@@ -353,7 +355,8 @@ def test_gui_start_voice_selects_fast_engine_and_stop_requests_shutdown(monkeypa
             self.kwargs = kwargs
             self.stop_requested = False
 
-        def run_continuous(self) -> int:
+        def run_continuous(self, *, max_turns: int | None = None) -> int:
+            self.max_turns = max_turns
             return 0
 
         def request_stop(self) -> None:
@@ -385,6 +388,10 @@ def test_gui_start_voice_selects_fast_engine_and_stop_requests_shutdown(monkeypa
     assert window.current_mode == "Fast Voice"
     assert window.start_voice_loop_button.isEnabled() is False
     assert window.stop_voice_loop_button.isEnabled() is True
+    assert window.fast_voice_runner.kwargs["strict_command_validation"] is True
+
+    window._run_fast_voice_worker()
+    assert window.fast_voice_runner.max_turns == 1
 
     runner = window.fast_voice_runner
     window.stop_voice_loop()

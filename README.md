@@ -120,7 +120,9 @@ The GUI now uses a tabbed dark interface with quick actions for voice, tools, re
 
 The main window is a premium dark red glassmorphism dashboard with a three-column HUD layout, a large animated circular core, angular control buttons, confidence meters, turn timing, provider indicators, and a compact command bar at the bottom. It uses a Segoe UI Variable-first font stack with Segoe UI fallback, and it is built entirely from PySide6 widgets, gradients, borders, and animations so it remains lightweight on Windows and does not require external artwork.
 
-The GUI Start Voice button uses the persistent fast voice engine by default. It shows Listening, Transcribing, Thinking, Responding, and Error states and updates the existing HUD panels with raw, cleaned, and repaired speech, response text, VAD/wake-only state, and timing. The legacy wake-based loop remains available through configuration:
+The GUI `Start Listening` button uses the persistent fast voice engine by default. Each click captures one intentional command and stops automatically. It rejects empty audio, weak filler phrases, random number sequences, and low-confidence speech without sending them to OpenAI; the HUD reports `I heard sound, but it did not sound like a command.` The terminal fast voice loop remains continuous and keeps its existing command validation behavior.
+
+The GUI shows Listening, Transcribing, Thinking, Responding, and Error states and updates the existing HUD panels with raw, cleaned, and repaired speech, response text, transcript confidence, VAD/wake-only state, and timing. The legacy wake-based loop remains available through configuration:
 
 ```dotenv
 GUI_VOICE_ENGINE=fast

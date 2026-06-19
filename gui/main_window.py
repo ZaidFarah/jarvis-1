@@ -647,7 +647,10 @@ class JarvisMainWindow(QMainWindow):
         self.mic_test_button = HUDButton("Mic Test")
         self.voice_command_button = HUDButton("Voice Test")
         self.chat_test_button = HUDButton("Chat Test")
-        self.start_voice_loop_button = HUDButton("Start Voice", "primary")
+        start_voice_text = (
+            "Start Listening" if self.settings.gui_voice_engine == "fast" else "Start Voice"
+        )
+        self.start_voice_loop_button = HUDButton(start_voice_text, "primary")
         self.stop_voice_loop_button = HUDButton("Stop Voice", "danger")
         self.stop_voice_loop_button.setEnabled(False)
         self.check_reminders_button = HUDButton("Check Reminders")
@@ -1205,7 +1208,10 @@ class JarvisMainWindow(QMainWindow):
         mic_test_action.triggered.connect(self.run_microphone_test)
         voice_command_action = QAction("Voice Command Test", self)
         voice_command_action.triggered.connect(self.run_voice_command_test)
-        self.start_voice_loop_action = QAction("Start Voice Loop", self)
+        start_voice_action_text = (
+            "Start Listening" if self.settings.gui_voice_engine == "fast" else "Start Voice Loop"
+        )
+        self.start_voice_loop_action = QAction(start_voice_action_text, self)
         self.start_voice_loop_action.triggered.connect(self.start_voice_loop)
         self.stop_voice_loop_action = QAction("Stop Voice Loop", self)
         self.stop_voice_loop_action.triggered.connect(self.stop_voice_loop)
@@ -1859,6 +1865,7 @@ class JarvisMainWindow(QMainWindow):
             report_callback=lambda report: self.voice_loop_events.put(
                 ("fast_report", report)
             ),
+            strict_command_validation=True,
         )
         self.voice_loop_status_value.setText("Starting")
         self.voice_loop_last_command_value.setText("None")
@@ -1888,7 +1895,7 @@ class JarvisMainWindow(QMainWindow):
     def _run_fast_voice_worker(self) -> None:
         try:
             if self.fast_voice_runner is not None:
-                self.fast_voice_runner.run_continuous()
+                self.fast_voice_runner.run_continuous(max_turns=1)
         except Exception as exc:  # pragma: no cover - defensive GUI boundary
             self.voice_loop_events.put(("fast_error", f"{type(exc).__name__}: {exc}"))
 
@@ -1959,6 +1966,9 @@ class JarvisMainWindow(QMainWindow):
         self.voice_vad_value.setText("yes" if report.vad_crossed else "no")
         self.voice_wake_only_value.setText("yes" if report.wake_only else "no")
         self.voice_repair_strategy_value.setText(repair.strategy if repair else "--")
+        if report.transcript_confidence is not None:
+            confidence_percent = int(round(report.transcript_confidence * 100))
+            self.voice_transcript_confidence_bar.setValue(confidence_percent)
         if repair is not None:
             self.voice_repair_confidence_value.setText(f"{repair.confidence * 100:.0f}%")
             self.voice_repair_confidence_bar.setValue(int(round(repair.confidence * 100)))
