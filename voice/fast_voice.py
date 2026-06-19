@@ -36,6 +36,9 @@ CLAP_MIN_RMS = 0.04
 CLAP_MIN_PEAK = 0.15
 SHORT_COMMAND_SPEECH_MS = 1000.0
 FAST_GUI_REJECTED_RESPONSE = "I heard sound, but it did not sound like a command."
+FAST_GUI_MISHEARD_RESPONSE = (
+    "That sounded incomplete or misheard. Please try again and speak clearly."
+)
 FAST_GUI_MIN_TRANSCRIPT_CONFIDENCE = 0.35
 FAST_GUI_WEAK_COMMANDS = {"you", "okay", "for me"}
 
@@ -160,6 +163,7 @@ class FastVoiceRunner:
         report_callback: Callable[[FastVoiceReport], None] | None = None,
         progress_callback: Callable[[FastVoiceProgress], None] | None = None,
         response_chunk_callback: Callable[[str], None] | None = None,
+        capture_max_seconds: float | None = None,
         strict_command_validation: bool = False,
     ) -> None:
         self.settings = settings
@@ -175,6 +179,7 @@ class FastVoiceRunner:
         self.report_callback = report_callback
         self.progress_callback = progress_callback
         self.response_chunk_callback = response_chunk_callback
+        self.capture_max_seconds = capture_max_seconds
         self.strict_command_validation = strict_command_validation
         self.log_file = self.settings.log_dir / "fast_voice.log"
         self.fast_logger = logger.bind(fast_voice=True)
@@ -521,8 +526,13 @@ class FastVoiceRunner:
             )
 
         if not validation.accepted and self.strict_command_validation:
+            likely_misheard = "misheard" in (validation.rejection_reason or "").lower()
             assistant_response = AssistantResponse(
-                text=FAST_GUI_REJECTED_RESPONSE,
+                text=(
+                    FAST_GUI_MISHEARD_RESPONSE
+                    if likely_misheard
+                    else FAST_GUI_REJECTED_RESPONSE
+                ),
                 accepted=False,
                 source="fast_voice_rejected",
             )
@@ -662,9 +672,14 @@ class FastVoiceRunner:
         channels = self.settings.voice_channels
         window_ms = min(self.settings.voice_vad_window_ms, 80)
         chunk_frames = max(1, int(sample_rate * window_ms / 1000.0))
+        capture_max_seconds = (
+            self.capture_max_seconds
+            if self.capture_max_seconds is not None
+            else self.settings.fast_voice_max_seconds
+        )
         max_seconds = min(
             self.settings.fast_voice_record_seconds,
-            self.settings.fast_voice_max_seconds,
+            capture_max_seconds,
         )
         max_frames = max(1, int(sample_rate * max_seconds))
         selected_silence_ms = self.settings.fast_voice_silence_ms
@@ -1133,6 +1148,13 @@ def validate_intentional_fast_command(
         return CommandValidationResult(False, command, "random numeric sequence")
     if not any(any(character.isalpha() for character in word) for word in words):
         return CommandValidationResult(False, command, "command contains no words")
+    incomplete_action_words = {"describe", "explain", "open", "search", "summarize", "tell"}
+    if words[-1] in incomplete_action_words:
+        return CommandValidationResult(
+            False,
+            command,
+            "likely misheard or incomplete command",
+        )
     if (
         transcript_confidence is not None
         and transcript_confidence < FAST_GUI_MIN_TRANSCRIPT_CONFIDENCE

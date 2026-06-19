@@ -67,7 +67,7 @@ def test_voice_loop_gui_state_updates_controls_and_status_fields() -> None:
     assert window.voice_tts_provider_value.text() == settings.tts_provider
     assert window.voice_response_mode_value.text() == settings.voice_response_mode
     assert window.voice_wake_ack_value.text() == "Off"
-    assert window.voice_response_speech_value.text() == "On"
+    assert window.voice_response_speech_value.text() == "TTS OFF: text-only mode"
     assert window.voice_raw_speech_value.text() == "--"
     assert window.voice_cleaned_value.text() == "--"
     assert window.voice_interpreted_value.text() == "--"
@@ -308,6 +308,9 @@ def test_fast_voice_gui_report_populates_existing_hud_panels() -> None:
         cleaned_transcript="status reports",
         command="status report",
         assistant_response=SimpleNamespace(text="Systems nominal."),
+        command_accepted=True,
+        validation=SimpleNamespace(rejection_reason=None),
+        tts_result=None,
         vad_crossed=True,
         wake_only=False,
         speech_repair=SimpleNamespace(strategy="common_intent", confidence=0.94),
@@ -342,6 +345,20 @@ def test_fast_voice_gui_report_populates_existing_hud_panels() -> None:
     assert window.voice_timing_command_transcribe_value.text() == "545 ms"
     assert window.voice_timing_openai_value.text() == "1387 ms"
     assert window.voice_timing_total_value.text() == "3700 ms"
+    assert window.voice_response_speech_value.text() == "TTS OFF: text-only mode"
+
+    report.command_accepted = False
+    report.validation = SimpleNamespace(
+        rejection_reason="likely misheard or incomplete command"
+    )
+    report.assistant_response = SimpleNamespace(
+        text="That sounded incomplete or misheard. Please try again and speak clearly."
+    )
+    window._handle_fast_voice_report(report)  # type: ignore[arg-type]
+    assert window.voice_detail_value.text() == (
+        "Command rejected: likely misheard or incomplete command. Please try again."
+    )
+    assert "misheard" in window.voice_response_panel.toPlainText()
 
     window._allow_close = True
     window.close()
@@ -489,6 +506,24 @@ def test_fast_voice_gui_preserves_response_when_streaming_is_disabled() -> None:
     app.processEvents()
 
 
+def test_fast_voice_gui_shows_tts_enabled_status() -> None:
+    app = _app()
+    window = JarvisMainWindow(
+        settings=AppSettings(
+            _env_file=None,
+            gui_voice_engine="fast",
+            fast_voice_tts_enabled=True,
+        ),
+        assistant=StubAssistant(),
+    )
+
+    assert window.voice_response_speech_value.text() == "TTS ON: speaking enabled"
+
+    window._allow_close = True
+    window.close()
+    app.processEvents()
+
+
 def test_gui_start_voice_selects_fast_engine_and_stop_requests_shutdown(monkeypatch) -> None:
     app = _app()
 
@@ -533,6 +568,7 @@ def test_gui_start_voice_selects_fast_engine_and_stop_requests_shutdown(monkeypa
     assert window.fast_voice_runner.kwargs["strict_command_validation"] is True
     assert callable(window.fast_voice_runner.kwargs["progress_callback"])
     assert callable(window.fast_voice_runner.kwargs["response_chunk_callback"])
+    assert window.fast_voice_runner.kwargs["capture_max_seconds"] == 2.5
 
     window._run_fast_voice_worker()
     assert window.fast_voice_runner.max_turns == 1

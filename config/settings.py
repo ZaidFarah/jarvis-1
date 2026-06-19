@@ -99,6 +99,15 @@ class AppSettings(BaseSettings):
         default=True,
         validation_alias=AliasChoices("GUI_STREAM_RESPONSE", "JARVIS_GUI_STREAM_RESPONSE"),
     )
+    gui_fast_voice_max_seconds: float = Field(
+        default=2.5,
+        ge=1.0,
+        le=30.0,
+        validation_alias=AliasChoices(
+            "GUI_FAST_VOICE_MAX_SECONDS",
+            "JARVIS_GUI_FAST_VOICE_MAX_SECONDS",
+        ),
+    )
     voice_sample_rate: int = Field(
         default=16000,
         ge=8000,

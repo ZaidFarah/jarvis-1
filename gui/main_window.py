@@ -434,7 +434,15 @@ class JarvisMainWindow(QMainWindow):
         self.voice_tts_provider_value = QLabel(self.settings.tts_provider)
         self.voice_response_mode_value = QLabel(self.settings.voice_response_mode)
         self.voice_wake_ack_value = QLabel("On" if self.settings.voice_loop_speak_wake_ack else "Off")
-        self.voice_response_speech_value = QLabel("On" if self.settings.voice_loop_speak_responses else "Off")
+        if self.settings.gui_voice_engine == "fast":
+            tts_status = (
+                "TTS ON: speaking enabled"
+                if self.settings.fast_voice_tts_enabled
+                else "TTS OFF: text-only mode"
+            )
+        else:
+            tts_status = "On" if self.settings.voice_loop_speak_responses else "Off"
+        self.voice_response_speech_value = QLabel(tts_status)
         self.voice_wake_score_value = QLabel("--")
         self.voice_rms_value = QLabel("--")
         self.voice_vad_value = QLabel("--")
@@ -921,6 +929,7 @@ class JarvisMainWindow(QMainWindow):
             ("STT DEVICE", self.voice_stt_device_value),
             ("WAKE PROVIDER", self.voice_wake_provider_value),
             ("TTS ENGINE", self.voice_tts_provider_value),
+            ("TTS STATUS", self.voice_response_speech_value),
             ("VOICE MODE", self.voice_response_mode_value),
             ("VAD CROSSED", self.voice_vad_value),
             ("WAKE ONLY", self.voice_wake_only_value),
@@ -1879,6 +1888,7 @@ class JarvisMainWindow(QMainWindow):
                 if self.settings.gui_stream_response
                 else None
             ),
+            capture_max_seconds=self.settings.gui_fast_voice_max_seconds,
             strict_command_validation=True,
         )
         self.voice_loop_status_value.setText("Starting")
@@ -2068,6 +2078,17 @@ class JarvisMainWindow(QMainWindow):
         if repair is not None:
             self.voice_repair_confidence_value.setText(f"{repair.confidence * 100:.0f}%")
             self.voice_repair_confidence_bar.setValue(int(round(repair.confidence * 100)))
+
+        if self.settings.fast_voice_tts_enabled:
+            if report.tts_result is not None and report.tts_result.error:
+                self.voice_response_speech_value.setText("TTS ON: speech failed")
+            else:
+                self.voice_response_speech_value.setText("TTS ON: speaking enabled")
+        else:
+            self.voice_response_speech_value.setText("TTS OFF: text-only mode")
+        if not report.command_accepted:
+            reason = report.validation.rejection_reason or "unusable speech"
+            self.voice_detail_value.setText(f"Command rejected: {reason}. Please try again.")
 
         timing = report.timing
         self.voice_timing_wake_capture_value.setText(f"{timing.vad_wait_ms:.0f} ms")

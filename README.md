@@ -133,6 +133,13 @@ FAST_VOICE_STREAM_OPENAI=true
 GUI_STREAM_RESPONSE=true
 ```
 
+Fast GUI voice can speak the completed response after text streaming finishes. TTS is deliberately non-streaming, and the provider card shows whether the GUI is in speaking or text-only mode. GUI capture allows longer questions without changing terminal fast voice timing:
+
+```dotenv
+FAST_VOICE_TTS_ENABLED=true
+GUI_FAST_VOICE_MAX_SECONDS=2.5
+```
+
 ```dotenv
 GUI_VOICE_ENGINE=fast
 ```

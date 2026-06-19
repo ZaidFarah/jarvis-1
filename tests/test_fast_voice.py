@@ -9,6 +9,7 @@ from assistant.core import AssistantResponse
 from config.settings import AppSettings
 from main import main
 from voice.fast_voice import (
+    FAST_GUI_MISHEARD_RESPONSE,
     FAST_GUI_REJECTED_RESPONSE,
     FastCaptureResult,
     FastVoiceProgress,
@@ -201,6 +202,24 @@ def test_gui_fast_voice_rejects_low_confidence_transcript(tmp_path: Path) -> Non
     assert report.transcript_confidence == 0.2
     assert report.assistant_response is not None
     assert report.assistant_response.text == FAST_GUI_REJECTED_RESPONSE
+    assert assistant.commands == []
+
+
+def test_gui_fast_voice_rejects_likely_misheard_word_order(tmp_path: Path) -> None:
+    assistant = SpyAssistant()
+    report = FastVoiceRunner(
+        AppSettings(_env_file=None, log_dir=tmp_path / "logs"),
+        provider=FakeProvider("or this explain"),
+        assistant=assistant,  # type: ignore[arg-type]
+        recorder=lambda: ([0.2] * 1600, "Microphone Array"),
+        strict_command_validation=True,
+        output_func=lambda _message: None,
+    ).run_once()
+
+    assert report.command_accepted is False
+    assert report.assistant_response is not None
+    assert report.assistant_response.text == FAST_GUI_MISHEARD_RESPONSE
+    assert "misheard" in (report.validation.rejection_reason or "")
     assert assistant.commands == []
 
 
@@ -406,6 +425,38 @@ def test_fast_capture_separates_blocking_reads_from_preparation(tmp_path: Path) 
     assert capture.audio_prepare_ms == pytest.approx(1960.0)
 
 
+def test_gui_capture_override_does_not_slow_terminal_default(tmp_path: Path) -> None:
+    settings = AppSettings(
+        _env_file=None,
+        log_dir=tmp_path / "logs",
+        voice_input_device="Microphone Array",
+        voice_vad_threshold=0.02,
+        fast_voice_record_seconds=4.0,
+        fast_voice_max_seconds=1.0,
+    )
+    terminal_sd = FakeSoundDevice([])
+    gui_sd = FakeSoundDevice([])
+
+    FastVoiceRunner(
+        settings,
+        provider=FakeProvider(""),
+        assistant=SpyAssistant(),  # type: ignore[arg-type]
+        sounddevice_module=terminal_sd,
+        output_func=lambda _message: None,
+    )._capture_until_silence()
+    FastVoiceRunner(
+        settings,
+        provider=FakeProvider(""),
+        assistant=SpyAssistant(),  # type: ignore[arg-type]
+        sounddevice_module=gui_sd,
+        capture_max_seconds=2.5,
+        output_func=lambda _message: None,
+    )._capture_until_silence()
+
+    assert terminal_sd.stream.read_count == 13
+    assert gui_sd.stream.read_count == 32
+
+
 def test_fast_voice_capture_metric_uses_audio_record_time(tmp_path: Path) -> None:
     settings = AppSettings(
         _env_file=None,
@@ -562,6 +613,51 @@ def test_fast_voice_streams_response_chunks_when_enabled(tmp_path: Path) -> None
     assert chunks == ["Systems ", "nominal."]
     assert report.assistant_response is not None
     assert report.assistant_response.text == "Systems nominal."
+
+
+def test_fast_voice_speaks_only_after_streaming_completes(tmp_path: Path) -> None:
+    events: list[str] = []
+
+    class StreamingAssistant:
+        def handle_fast_voice_command_stream(self, command: str, on_chunk) -> AssistantResponse:
+            on_chunk("Brief ")
+            events.append("chunk:Brief")
+            on_chunk("answer.")
+            events.append("chunk:answer")
+            events.append("stream:complete")
+            return AssistantResponse(text="Brief answer.", source="openai")
+
+    def fake_tts(text: str, settings: AppSettings, speak_requested: bool) -> TextToSpeechResult:
+        del settings
+        assert text == "Brief answer."
+        assert speak_requested is True
+        events.append("tts")
+        return TextToSpeechResult(
+            provider_name="fake_tts",
+            provider_available=True,
+            requested=True,
+            spoken=True,
+            log_file=tmp_path / "tts.log",
+        )
+
+    report = FastVoiceRunner(
+        AppSettings(
+            _env_file=None,
+            log_dir=tmp_path / "logs",
+            fast_voice_stream_openai=True,
+            fast_voice_tts_enabled=True,
+        ),
+        provider=FakeProvider("status report"),
+        assistant=StreamingAssistant(),  # type: ignore[arg-type]
+        recorder=lambda: ([0.2] * 1600, "Microphone Array"),
+        response_chunk_callback=lambda _chunk: None,
+        tts_function=fake_tts,
+        output_func=lambda _message: None,
+    ).run_once()
+
+    assert events == ["chunk:Brief", "chunk:answer", "stream:complete", "tts"]
+    assert report.tts_result is not None
+    assert report.tts_result.spoken is True
 
 
 def test_fast_voice_keeps_non_streaming_fallback_when_disabled(tmp_path: Path) -> None:
