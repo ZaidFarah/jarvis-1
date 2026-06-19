@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import importlib
 import math
+import re
 import time
+from collections import deque
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -31,13 +33,31 @@ CLAP_WAIT_SECONDS = 15.0
 CLAP_MIN_RMS = 0.04
 CLAP_MIN_PEAK = 0.15
 
-AudioRecorder = Callable[[], tuple[list[float], str]]
+@dataclass(frozen=True)
+class FastCaptureResult:
+    samples: list[float]
+    input_device: str
+    vad_wait_ms: float = 0.0
+    speech_ms: float = 0.0
+    trailing_silence_ms: float = 0.0
+    vad_crossed: bool = False
+    audio_record_ms: float | None = None
+    audio_prepare_ms: float = 0.0
+
+
+AudioRecorder = Callable[[], FastCaptureResult | tuple[list[float], str]]
 TtsFunction = Callable[..., TextToSpeechResult]
 
 
 @dataclass(frozen=True)
 class FastVoiceTiming:
     capture_ms: float = 0.0
+    audio_record_ms: float = 0.0
+    audio_prepare_ms: float = 0.0
+    stt_warmup_ms: float = 0.0
+    vad_wait_ms: float = 0.0
+    speech_ms: float = 0.0
+    trailing_silence_ms: float = 0.0
     transcribe_ms: float = 0.0
     openai_ms: float = 0.0
     tts_ms: float = 0.0
@@ -47,6 +67,12 @@ class FastVoiceTiming:
         return " ".join(
             (
                 f"capture_ms={self.capture_ms:.1f}",
+                f"audio_record_ms={self.audio_record_ms:.1f}",
+                f"audio_prepare_ms={self.audio_prepare_ms:.1f}",
+                f"stt_warmup_ms={self.stt_warmup_ms:.1f}",
+                f"vad_wait_ms={self.vad_wait_ms:.1f}",
+                f"speech_ms={self.speech_ms:.1f}",
+                f"trailing_silence_ms={self.trailing_silence_ms:.1f}",
                 f"transcribe_ms={self.transcribe_ms:.1f}",
                 f"openai_ms={self.openai_ms:.1f}",
                 f"tts_ms={self.tts_ms:.1f}",
@@ -69,6 +95,9 @@ class FastVoiceReport:
     tts_result: TextToSpeechResult | None
     timing: FastVoiceTiming
     log_file: Path
+    vad_crossed: bool = False
+    wake_only: bool = False
+    unintelligible_audio: bool = False
     errors: list[str] = field(default_factory=list)
 
     @property
@@ -81,11 +110,15 @@ class FastVoiceReport:
     def is_successful(self) -> bool:
         return bool(
             self.provider_available
-            and self.validation.accepted
+            and self.command_accepted
             and self.assistant_response is not None
             and self.assistant_response.accepted
             and not self.errors
         )
+
+    @property
+    def command_accepted(self) -> bool:
+        return self.wake_only or self.validation.accepted
 
 
 class FastVoiceRunner:
@@ -115,6 +148,8 @@ class FastVoiceRunner:
         self.clock = clock
         self.log_file = self.settings.log_dir / "fast_voice.log"
         self.fast_logger = logger.bind(fast_voice=True)
+        self._stt_warm_attempted = False
+        self._pending_stt_warmup_ms = 0.0
         add_managed_file_sink(
             self.log_file,
             level="DEBUG",
@@ -125,6 +160,9 @@ class FastVoiceRunner:
         if not self.settings.fast_voice_enabled:
             self.output_func("Fast voice is disabled. Set FAST_VOICE_ENABLED=true to enable it.")
             return 1
+
+        if self.settings.fast_voice_warm_stt_on_start:
+            self._warm_stt()
 
         activation = self.settings.fast_voice_activation
         self.output_func(
@@ -154,6 +192,10 @@ class FastVoiceRunner:
         return 0
 
     def run_once(self) -> FastVoiceReport:
+        if self.settings.fast_voice_warm_stt_on_start:
+            self._warm_stt()
+        stt_warmup_ms = self._pending_stt_warmup_ms
+        self._pending_stt_warmup_ms = 0.0
         total_started = self.clock()
         errors: list[str] = []
         input_device = "unavailable"
@@ -166,6 +208,7 @@ class FastVoiceRunner:
         transcribe_ms = 0.0
         openai_ms = 0.0
         tts_ms = 0.0
+        capture_result = FastCaptureResult([], input_device)
         validation = self._validate("")
 
         if not self.provider.available:
@@ -184,19 +227,35 @@ class FastVoiceRunner:
                 tts_ms,
                 total_started,
                 errors,
+                stt_warmup_ms=stt_warmup_ms,
+                capture_result=capture_result,
             )
 
         self.output_func("Listening...")
         capture_started = self.clock()
         try:
             if self.recorder is not None:
-                samples, input_device = self.recorder()
+                recorded = self.recorder()
+                if isinstance(recorded, FastCaptureResult):
+                    capture_result = recorded
+                else:
+                    samples, input_device = recorded
+                    capture_result = FastCaptureResult(samples, input_device)
             else:
-                samples, input_device = self._capture_until_silence()
+                capture_result = self._capture_until_silence()
+            samples = capture_result.samples
+            input_device = capture_result.input_device
         except Exception as exc:
             errors.append(f"Fast voice capture failed: {type(exc).__name__}: {exc}")
             samples = []
-        capture_ms = (self.clock() - capture_started) * 1000.0
+        capture_wall_ms = (self.clock() - capture_started) * 1000.0
+        if capture_result.audio_record_ms is None:
+            capture_result = replace(
+                capture_result,
+                audio_record_ms=capture_wall_ms if samples else 0.0,
+                audio_prepare_ms=0.0 if samples else capture_wall_ms,
+            )
+        capture_ms = float(capture_result.audio_record_ms or 0.0)
 
         if samples:
             transcribe_started = self.clock()
@@ -215,6 +274,79 @@ class FastVoiceRunner:
             wake_phrase=self.settings.wake_phrase,
             aliases=self.settings.wake_alias_list,
         )
+        if capture_result.vad_crossed and not raw_transcript:
+            assistant_response = AssistantResponse(
+                text=self.settings.fast_voice_empty_audio_response,
+                accepted=True,
+                source="fast_voice_empty_audio",
+            )
+            self.output_func(f"Jarvis: {assistant_response.text}")
+            if self.settings.fast_voice_tts_enabled:
+                tts_started = self.clock()
+                tts_result = self.tts_function(
+                    assistant_response.text,
+                    self.settings,
+                    speak_requested=True,
+                )
+                tts_ms = (self.clock() - tts_started) * 1000.0
+                if tts_result.error:
+                    errors.append(tts_result.error)
+            return self._report(
+                input_device,
+                raw_transcript,
+                cleaned_transcript,
+                repair,
+                validation,
+                assistant_response,
+                tts_result,
+                capture_ms,
+                transcribe_ms,
+                openai_ms,
+                tts_ms,
+                total_started,
+                errors,
+                stt_warmup_ms=stt_warmup_ms,
+                unintelligible_audio=True,
+                capture_result=capture_result,
+            )
+
+        wake_only = is_wake_only_transcript(raw_transcript, self.settings)
+        if wake_only:
+            assistant_response = AssistantResponse(
+                text=self.settings.fast_voice_wake_only_response,
+                accepted=True,
+                source="fast_voice_wake_only",
+            )
+            self.output_func(f"Jarvis: {assistant_response.text}")
+            if self.settings.fast_voice_tts_enabled:
+                tts_started = self.clock()
+                tts_result = self.tts_function(
+                    assistant_response.text,
+                    self.settings,
+                    speak_requested=True,
+                )
+                tts_ms = (self.clock() - tts_started) * 1000.0
+                if tts_result.error:
+                    errors.append(tts_result.error)
+            return self._report(
+                input_device,
+                raw_transcript,
+                cleaned_transcript,
+                repair,
+                validation,
+                assistant_response,
+                tts_result,
+                capture_ms,
+                transcribe_ms,
+                openai_ms,
+                tts_ms,
+                total_started,
+                errors,
+                stt_warmup_ms=stt_warmup_ms,
+                wake_only=True,
+                capture_result=capture_result,
+            )
+
         repair = SpeechRepairer(self.settings).repair(
             cleaned_transcript,
             raw_transcript=raw_transcript,
@@ -260,24 +392,46 @@ class FastVoiceRunner:
             tts_ms,
             total_started,
             errors,
+            stt_warmup_ms=stt_warmup_ms,
+            capture_result=capture_result,
         )
 
-    def _capture_until_silence(self) -> tuple[list[float], str]:
+    def _capture_until_silence(self) -> FastCaptureResult:
+        capture_work_started = self.clock()
+        audio_record_ms = 0.0
         sd = self.sounddevice_module or _require_sounddevice()
         device_index, device_name = resolve_fast_input_device(sd, self.settings.voice_input_device)
         sample_rate = self.settings.voice_sample_rate
         channels = self.settings.voice_channels
         window_ms = min(self.settings.voice_vad_window_ms, 80)
         chunk_frames = max(1, int(sample_rate * window_ms / 1000.0))
-        max_frames = max(1, int(sample_rate * self.settings.fast_voice_record_seconds))
-        silence_chunks_needed = max(1, math.ceil(self.settings.fast_voice_silence_ms / window_ms))
-        minimum_speech_chunks = max(1, math.ceil(240 / window_ms))
+        max_seconds = min(
+            self.settings.fast_voice_record_seconds,
+            self.settings.fast_voice_max_seconds,
+        )
+        max_frames = max(1, int(sample_rate * max_seconds))
+        silence_frames_needed = max(
+            1,
+            int(sample_rate * self.settings.fast_voice_silence_ms / 1000.0),
+        )
+        minimum_speech_frames = max(
+            1,
+            int(sample_rate * self.settings.fast_voice_min_speech_ms / 1000.0),
+        )
+        preroll_sample_limit = int(
+            sample_rate
+            * channels
+            * self.settings.fast_voice_preroll_ms
+            / 1000.0
+        )
+        preroll_samples: deque[float] = deque(maxlen=preroll_sample_limit)
         samples: list[float] = []
         levels: list[float] = []
         frames_read = 0
         triggered = False
-        chunks_after_trigger = 0
-        trailing_silence_chunks = 0
+        trigger_start_frame: int | None = None
+        last_speech_frame: int | None = None
+        trailing_silence_frames = 0
 
         sd.check_input_settings(device=device_index, samplerate=sample_rate, channels=channels)
         with sd.InputStream(
@@ -288,12 +442,13 @@ class FastVoiceRunner:
         ) as stream:
             while frames_read < max_frames:
                 frames_to_read = min(chunk_frames, max_frames - frames_read)
+                read_started = self.clock()
                 recording, _overflowed = stream.read(frames_to_read)
+                audio_record_ms += (self.clock() - read_started) * 1000.0
                 chunk = _flatten_samples(recording)
                 if not chunk:
                     break
                 frames_read += frames_to_read
-                samples.extend(chunk)
                 chunk_rms = calculate_rms(chunk)
                 levels.append(chunk_rms)
                 noise_floor = estimate_noise_floor(levels)
@@ -305,28 +460,91 @@ class FastVoiceRunner:
                     noise_multiplier=self.settings.voice_vad_noise_multiplier,
                 )
                 if chunk_rms >= threshold:
-                    triggered = True
-                    trailing_silence_chunks = 0
+                    if not triggered:
+                        samples.extend(preroll_samples)
+                        triggered = True
+                        trigger_start_frame = frames_read - frames_to_read
+                    samples.extend(chunk)
+                    last_speech_frame = frames_read
+                    trailing_silence_frames = 0
                 elif triggered:
-                    trailing_silence_chunks += 1
+                    samples.extend(chunk)
+                    trailing_silence_frames += frames_to_read
+                else:
+                    preroll_samples.extend(chunk)
 
-                if triggered:
-                    chunks_after_trigger += 1
+                if triggered and trigger_start_frame is not None:
+                    elapsed_since_trigger = frames_read - trigger_start_frame
                     if (
-                        chunks_after_trigger >= minimum_speech_chunks
-                        and trailing_silence_chunks >= silence_chunks_needed
+                        elapsed_since_trigger >= minimum_speech_frames
+                        and trailing_silence_frames >= silence_frames_needed
                     ):
                         break
 
+        capture_work_ms = (self.clock() - capture_work_started) * 1000.0
+        audio_prepare_ms = max(0.0, capture_work_ms - audio_record_ms)
+
+        vad_wait_ms = (
+            (trigger_start_frame / sample_rate) * 1000.0
+            if trigger_start_frame is not None
+            else (frames_read / sample_rate) * 1000.0
+        )
+        speech_ms = (
+            ((last_speech_frame - trigger_start_frame) / sample_rate) * 1000.0
+            if trigger_start_frame is not None and last_speech_frame is not None
+            else 0.0
+        )
+        trailing_silence_ms = (trailing_silence_frames / sample_rate) * 1000.0
+
         self.fast_logger.info(
-            "Fast capture device={} samples={} triggered={} max_seconds={} silence_ms={}",
+            "Fast capture device={} samples={} triggered={} max_seconds={} silence_ms={} "
+            "audio_record_ms={:.1f} audio_prepare_ms={:.1f}",
             device_name,
             len(samples),
             triggered,
-            self.settings.fast_voice_record_seconds,
+            max_seconds,
             self.settings.fast_voice_silence_ms,
+            audio_record_ms,
+            audio_prepare_ms,
         )
-        return samples, device_name
+        return FastCaptureResult(
+            samples=samples,
+            input_device=device_name,
+            vad_wait_ms=vad_wait_ms,
+            speech_ms=speech_ms,
+            trailing_silence_ms=trailing_silence_ms,
+            vad_crossed=triggered,
+            audio_record_ms=audio_record_ms,
+            audio_prepare_ms=audio_prepare_ms,
+        )
+
+    def _warm_stt(self) -> float:
+        if self._stt_warm_attempted or not self.provider.available:
+            return 0.0
+        self._stt_warm_attempted = True
+        warm_up = getattr(self.provider, "warm_up", None)
+        if not callable(warm_up):
+            return 0.0
+        started = self.clock()
+        warmed = False
+        try:
+            warmed = bool(warm_up())
+        except Exception as exc:
+            self.fast_logger.warning(
+                "Fast voice STT warm-up failed provider={}: {}: {}",
+                self.provider.name,
+                type(exc).__name__,
+                exc,
+            )
+        elapsed_ms = (self.clock() - started) * 1000.0
+        self._pending_stt_warmup_ms += elapsed_ms
+        self.fast_logger.info(
+            "Fast voice STT warm-up provider={} warmed={} elapsed_ms={:.1f}",
+            self.provider.name,
+            warmed,
+            elapsed_ms,
+        )
+        return elapsed_ms
 
     def _wait_for_clap(self) -> bool:
         sd = self.sounddevice_module or _require_sounddevice()
@@ -379,9 +597,21 @@ class FastVoiceRunner:
         tts_ms: float,
         total_started: float,
         errors: list[str],
+        *,
+        stt_warmup_ms: float = 0.0,
+        wake_only: bool = False,
+        unintelligible_audio: bool = False,
+        capture_result: FastCaptureResult | None = None,
     ) -> FastVoiceReport:
+        capture_result = capture_result or FastCaptureResult([], input_device)
         timing = FastVoiceTiming(
             capture_ms=capture_ms,
+            audio_record_ms=float(capture_result.audio_record_ms or 0.0),
+            audio_prepare_ms=capture_result.audio_prepare_ms,
+            stt_warmup_ms=stt_warmup_ms,
+            vad_wait_ms=capture_result.vad_wait_ms,
+            speech_ms=capture_result.speech_ms,
+            trailing_silence_ms=capture_result.trailing_silence_ms,
             transcribe_ms=transcribe_ms,
             openai_ms=openai_ms,
             tts_ms=tts_ms,
@@ -390,7 +620,7 @@ class FastVoiceRunner:
         self.fast_logger.info(
             "Fast voice command={} accepted={} response_source={} {}",
             repair.repaired_transcript if repair else "<empty>",
-            validation.accepted,
+            wake_only or validation.accepted,
             assistant_response.source if assistant_response else "none",
             timing.format(),
         )
@@ -407,6 +637,9 @@ class FastVoiceRunner:
             tts_result=tts_result,
             timing=timing,
             log_file=self.log_file,
+            vad_crossed=capture_result.vad_crossed,
+            wake_only=wake_only,
+            unintelligible_audio=unintelligible_audio,
             errors=errors,
         )
 
@@ -454,6 +687,16 @@ def resolve_fast_input_device(sd: Any, preferred: str) -> tuple[int, str]:
     return next((item for item in inputs if item[0] == default_index), inputs[0])
 
 
+def is_wake_only_transcript(transcript: str, settings: AppSettings) -> bool:
+    normalized = _normalize_phrase(transcript)
+    if not normalized:
+        return False
+    configured = [settings.wake_phrase, *settings.wake_alias_list]
+    phrases = {"wake up jarvis", "hey jarvis", "jarvis"}
+    phrases.update(_normalize_phrase(phrase) for phrase in configured)
+    return normalized in phrases
+
+
 def format_fast_voice_report(report: FastVoiceReport) -> str:
     repair = report.speech_repair
     lines = [
@@ -467,7 +710,10 @@ def format_fast_voice_report(report: FastVoiceReport) -> str:
         f"cleaned transcript: {report.cleaned_transcript or '<empty>'}",
         f"repaired command: {report.command or '<empty>'}",
         f"repair strategy: {repair.strategy if repair else '<none>'}",
-        f"command accepted: {_yes_no(report.validation.accepted)}",
+        f"VAD crossed: {_yes_no(report.vad_crossed)}",
+        f"wake only: {_yes_no(report.wake_only)}",
+        f"unintelligible audio: {_yes_no(report.unintelligible_audio)}",
+        f"command accepted: {_yes_no(report.command_accepted)}",
     ]
     if report.validation.rejection_reason:
         lines.append(f"rejection reason: {report.validation.rejection_reason}")
@@ -512,3 +758,8 @@ def _flatten_samples(recording: Any) -> list[float]:
 
 def _yes_no(value: bool) -> str:
     return "yes" if value else "no"
+
+
+def _normalize_phrase(value: str) -> str:
+    without_punctuation = re.sub(r"[^a-z0-9\s]", " ", value.casefold())
+    return re.sub(r"\s+", " ", without_punctuation).strip()

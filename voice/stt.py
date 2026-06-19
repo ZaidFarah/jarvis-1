@@ -16,6 +16,9 @@ class InterfaceOnlySpeechToTextProvider:
     name = "interface-only"
     available = False
 
+    def warm_up(self) -> bool:
+        return False
+
     def transcribe(self, samples: Sequence[float], sample_rate: int) -> TranscriptionResult:
         del samples, sample_rate
         raise NotImplementedError("Interface-only STT cannot transcribe audio.")
@@ -52,6 +55,13 @@ class FasterWhisperSpeechToTextProvider:
     @property
     def available(self) -> bool:
         return self._model_class is not None
+
+    def warm_up(self) -> bool:
+        """Load the configured model once so the first transcription is not cold."""
+        if not self.available:
+            return False
+        self._load_model()
+        return True
 
     def transcribe(self, samples: Sequence[float], sample_rate: int) -> TranscriptionResult:
         if not self.available:

@@ -123,6 +123,7 @@ def test_faster_whisper_provider_reuses_loaded_model() -> None:
         model_class=FakeModel,
     )
 
+    assert provider.warm_up() is True
     first = provider.transcribe([0.1], sample_rate=16000)
     second = provider.transcribe([0.2], sample_rate=16000)
 

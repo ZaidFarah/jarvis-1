@@ -8,7 +8,12 @@ import pytest
 from assistant.core import AssistantResponse
 from config.settings import AppSettings
 from main import main
-from voice.fast_voice import FastVoiceRunner, format_fast_voice_report, resolve_fast_input_device
+from voice.fast_voice import (
+    FastCaptureResult,
+    FastVoiceRunner,
+    format_fast_voice_report,
+    resolve_fast_input_device,
+)
 from voice.interfaces import TranscriptionResult
 from voice.tts import TextToSpeechResult
 
@@ -20,6 +25,11 @@ class FakeProvider:
     def __init__(self, transcript: str) -> None:
         self.transcript = transcript
         self.calls = 0
+        self.warm_up_calls = 0
+
+    def warm_up(self) -> bool:
+        self.warm_up_calls += 1
+        return True
 
     def transcribe(self, samples, sample_rate: int) -> TranscriptionResult:
         assert samples
@@ -69,8 +79,75 @@ def test_fast_voice_runs_one_repaired_command_through_assistant(tmp_path: Path) 
     assert report.tts_result is None
     assert report.is_successful is True
     assert any(item == "Jarvis: Systems nominal." for item in output)
-    for field in ("capture_ms=", "transcribe_ms=", "openai_ms=", "tts_ms=", "total_ms="):
+    for field in (
+        "capture_ms=",
+        "audio_record_ms=",
+        "audio_prepare_ms=",
+        "stt_warmup_ms=",
+        "vad_wait_ms=",
+        "speech_ms=",
+        "trailing_silence_ms=",
+        "transcribe_ms=",
+        "openai_ms=",
+        "tts_ms=",
+        "total_ms=",
+    ):
         assert field in text
+
+
+@pytest.mark.parametrize("transcript", ["Wake up, Jarvis.", "Hey Jarvis", "Jarvis"])
+def test_fast_voice_wake_only_returns_ready_without_assistant(
+    transcript: str,
+    tmp_path: Path,
+) -> None:
+    settings = AppSettings(_env_file=None, log_dir=tmp_path / "logs")
+    provider = FakeProvider(transcript)
+    assistant = SpyAssistant()
+    output: list[str] = []
+    report = FastVoiceRunner(
+        settings,
+        provider=provider,
+        assistant=assistant,  # type: ignore[arg-type]
+        recorder=lambda: ([0.2] * 1600, "Microphone Array"),
+        output_func=output.append,
+    ).run_once()
+
+    assert report.wake_only is True
+    assert report.command == ""
+    assert report.command_accepted is True
+    assert report.is_successful is True
+    assert report.assistant_response is not None
+    assert report.assistant_response.text == "I'm listening."
+    assert report.timing.openai_ms == 0.0
+    assert assistant.commands == []
+    assert "Jarvis: I'm listening." in output
+
+
+def test_fast_voice_vad_with_empty_transcript_returns_clear_local_response(tmp_path: Path) -> None:
+    settings = AppSettings(_env_file=None, log_dir=tmp_path / "logs")
+    assistant = SpyAssistant()
+    output: list[str] = []
+    report = FastVoiceRunner(
+        settings,
+        provider=FakeProvider(""),
+        assistant=assistant,  # type: ignore[arg-type]
+        recorder=lambda: FastCaptureResult(
+            [0.2] * 1600,
+            "Microphone Array",
+            speech_ms=400.0,
+            vad_crossed=True,
+        ),
+        output_func=output.append,
+    ).run_once()
+
+    assert report.unintelligible_audio is True
+    assert report.vad_crossed is True
+    assert report.command_accepted is False
+    assert report.assistant_response is not None
+    assert report.assistant_response.text == "I heard sound but could not understand it."
+    assert report.timing.openai_ms == 0.0
+    assert assistant.commands == []
+    assert "Jarvis: I heard sound but could not understand it." in output
 
 
 def test_fast_voice_tts_is_controlled_by_fast_setting(tmp_path: Path) -> None:
@@ -164,12 +241,139 @@ def test_fast_capture_stops_shortly_after_silence(tmp_path: Path) -> None:
         output_func=lambda _message: None,
     )
 
-    samples, device_name = runner._capture_until_silence()
+    capture = runner._capture_until_silence()
 
-    assert device_name == "Microphone Array (Realtek)"
-    assert samples
+    assert capture.input_device == "Microphone Array (Realtek)"
+    assert capture.samples
+    assert capture.vad_crossed is True
     assert sd.stream.read_count == 8
-    assert len(samples) < int(settings.voice_sample_rate * settings.fast_voice_record_seconds)
+    assert len(capture.samples) < int(settings.voice_sample_rate * settings.fast_voice_record_seconds)
+    assert capture.vad_wait_ms == pytest.approx(240.0)
+    assert capture.speech_ms == pytest.approx(240.0)
+    assert capture.trailing_silence_ms == pytest.approx(160.0)
+
+
+def test_fast_capture_separates_blocking_reads_from_preparation(tmp_path: Path) -> None:
+    settings = AppSettings(
+        _env_file=None,
+        log_dir=tmp_path / "logs",
+        voice_input_device="Microphone Array",
+        voice_vad_threshold=0.02,
+        fast_voice_record_seconds=2.0,
+        fast_voice_silence_ms=160,
+    )
+    sd = FakeSoundDevice([0.01, 0.01, 0.01, 0.2, 0.2, 0.2, 0.01, 0.01])
+    clock_values = [0.0]
+    read_started = 0.5
+    for _ in range(8):
+        clock_values.extend((read_started, read_started + 0.08))
+        read_started += 0.10
+    clock_values.append(2.6)
+    values = iter(clock_values)
+    runner = FastVoiceRunner(
+        settings,
+        provider=FakeProvider("status report"),
+        assistant=SpyAssistant(),  # type: ignore[arg-type]
+        sounddevice_module=sd,
+        output_func=lambda _message: None,
+        clock=lambda: next(values),
+    )
+
+    capture = runner._capture_until_silence()
+
+    assert capture.audio_record_ms == pytest.approx(640.0)
+    assert capture.audio_prepare_ms == pytest.approx(1960.0)
+
+
+def test_fast_voice_capture_metric_uses_audio_record_time(tmp_path: Path) -> None:
+    settings = AppSettings(
+        _env_file=None,
+        log_dir=tmp_path / "logs",
+        fast_voice_warm_stt_on_start=False,
+    )
+    report = FastVoiceRunner(
+        settings,
+        provider=FakeProvider("status report"),
+        assistant=SpyAssistant(),  # type: ignore[arg-type]
+        recorder=lambda: FastCaptureResult(
+            [0.2] * 1600,
+            "Microphone Array",
+            vad_wait_ms=240.0,
+            speech_ms=960.0,
+            trailing_silence_ms=400.0,
+            vad_crossed=True,
+            audio_record_ms=1600.0,
+            audio_prepare_ms=1676.0,
+        ),
+        output_func=lambda _message: None,
+    ).run_once()
+
+    assert report.timing.capture_ms == 1600.0
+    assert report.timing.audio_record_ms == 1600.0
+    assert report.timing.audio_prepare_ms == 1676.0
+    assert report.timing.stt_warmup_ms == 0.0
+
+
+def test_fast_capture_keeps_only_configured_preroll_before_speech(tmp_path: Path) -> None:
+    settings = AppSettings(
+        _env_file=None,
+        log_dir=tmp_path / "logs",
+        voice_input_device="Microphone Array",
+        voice_vad_threshold=0.02,
+        fast_voice_record_seconds=2.0,
+        fast_voice_max_seconds=2.0,
+        fast_voice_min_speech_ms=300,
+        fast_voice_silence_ms=160,
+        fast_voice_preroll_ms=250,
+    )
+    sd = FakeSoundDevice(
+        [0.01, 0.01, 0.01, 0.01, 0.01, 0.2, 0.2, 0.2, 0.01, 0.01]
+    )
+    runner = FastVoiceRunner(
+        settings,
+        provider=FakeProvider("status report"),
+        assistant=SpyAssistant(),  # type: ignore[arg-type]
+        sounddevice_module=sd,
+        output_func=lambda _message: None,
+    )
+
+    capture = runner._capture_until_silence()
+
+    expected_preroll_samples = int(settings.voice_sample_rate * 0.250)
+    captured_after_trigger = 5 * int(settings.voice_sample_rate * 0.080)
+    assert sd.stream.read_count == 10
+    assert len(capture.samples) == expected_preroll_samples + captured_after_trigger
+    assert len(capture.samples) < sd.stream.read_count * int(settings.voice_sample_rate * 0.080)
+
+
+def test_fast_voice_reuses_and_warms_stt_provider_once(tmp_path: Path) -> None:
+    settings = AppSettings(_env_file=None, log_dir=tmp_path / "logs")
+    provider = FakeProvider("status report")
+    runner = FastVoiceRunner(
+        settings,
+        provider=provider,
+        assistant=SpyAssistant(),  # type: ignore[arg-type]
+        recorder=lambda: FastCaptureResult(
+            [0.2] * 1600,
+            "Microphone Array",
+            vad_wait_ms=80.0,
+            speech_ms=500.0,
+            trailing_silence_ms=600.0,
+        ),
+        output_func=lambda _message: None,
+    )
+
+    first = runner.run_once()
+    second = runner.run_once()
+
+    assert first.timing.vad_wait_ms == 80.0
+    assert first.timing.speech_ms == 500.0
+    assert first.timing.trailing_silence_ms == 600.0
+    assert second.is_successful is True
+    assert provider.warm_up_calls == 1
+    assert provider.calls == 2
+    assert first.timing.stt_warmup_ms >= 0.0
+    assert second.timing.stt_warmup_ms == 0.0
 
 
 def test_fast_input_device_supports_name_and_index() -> None:

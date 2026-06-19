@@ -165,15 +165,54 @@ class AppSettings(BaseSettings):
         le=30.0,
         validation_alias=AliasChoices("FAST_VOICE_RECORD_SECONDS", "JARVIS_FAST_VOICE_RECORD_SECONDS"),
     )
+    fast_voice_max_seconds: float = Field(
+        default=2.2,
+        ge=1.0,
+        le=30.0,
+        validation_alias=AliasChoices("FAST_VOICE_MAX_SECONDS", "JARVIS_FAST_VOICE_MAX_SECONDS"),
+    )
+    fast_voice_min_speech_ms: int = Field(
+        default=300,
+        ge=80,
+        le=5000,
+        validation_alias=AliasChoices("FAST_VOICE_MIN_SPEECH_MS", "JARVIS_FAST_VOICE_MIN_SPEECH_MS"),
+    )
     fast_voice_silence_ms: int = Field(
-        default=450,
+        default=400,
         ge=120,
         le=2500,
         validation_alias=AliasChoices("FAST_VOICE_SILENCE_MS", "JARVIS_FAST_VOICE_SILENCE_MS"),
     )
+    fast_voice_preroll_ms: int = Field(
+        default=250,
+        ge=0,
+        le=1000,
+        validation_alias=AliasChoices("FAST_VOICE_PREROLL_MS", "JARVIS_FAST_VOICE_PREROLL_MS"),
+    )
     fast_voice_tts_enabled: bool = Field(
         default=False,
         validation_alias=AliasChoices("FAST_VOICE_TTS_ENABLED", "JARVIS_FAST_VOICE_TTS_ENABLED"),
+    )
+    fast_voice_wake_only_response: str = Field(
+        default="I'm listening.",
+        validation_alias=AliasChoices(
+            "FAST_VOICE_WAKE_ONLY_RESPONSE",
+            "JARVIS_FAST_VOICE_WAKE_ONLY_RESPONSE",
+        ),
+    )
+    fast_voice_empty_audio_response: str = Field(
+        default="I heard sound but could not understand it.",
+        validation_alias=AliasChoices(
+            "FAST_VOICE_EMPTY_AUDIO_RESPONSE",
+            "JARVIS_FAST_VOICE_EMPTY_AUDIO_RESPONSE",
+        ),
+    )
+    fast_voice_warm_stt_on_start: bool = Field(
+        default=True,
+        validation_alias=AliasChoices(
+            "FAST_VOICE_WARM_STT_ON_START",
+            "JARVIS_FAST_VOICE_WARM_STT_ON_START",
+        ),
     )
     speech_to_text_provider: str = Field(
         default="faster_whisper",
@@ -1005,7 +1044,12 @@ class AppSettings(BaseSettings):
             raise ValueError(f"Unsupported voice response mode: {value}")
         return cleaned
 
-    @field_validator("voice_concise_instruction", "voice_loop_standby_message")
+    @field_validator(
+        "voice_concise_instruction",
+        "voice_loop_standby_message",
+        "fast_voice_wake_only_response",
+        "fast_voice_empty_audio_response",
+    )
     @classmethod
     def normalize_voice_text(cls, value: str) -> str:
         cleaned = value.strip()
