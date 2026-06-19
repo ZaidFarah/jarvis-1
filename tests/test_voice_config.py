@@ -22,14 +22,21 @@ def test_voice_settings_defaults_are_lightweight() -> None:
     assert settings.fast_voice_enabled is True
     assert settings.fast_voice_activation == "enter"
     assert settings.fast_voice_record_seconds == 4.0
-    assert settings.fast_voice_max_seconds == 2.2
+    assert settings.fast_voice_max_seconds == 1.8
     assert settings.fast_voice_min_speech_ms == 300
-    assert settings.fast_voice_silence_ms == 400
+    assert settings.fast_voice_silence_ms == 300
+    assert settings.fast_voice_fast_stop_enabled is True
+    assert settings.fast_voice_short_command_silence_ms == 250
+    assert settings.fast_voice_long_command_silence_ms == 450
     assert settings.fast_voice_preroll_ms == 250
     assert settings.fast_voice_tts_enabled is False
     assert settings.fast_voice_wake_only_response == "I'm listening."
     assert settings.fast_voice_empty_audio_response == "I heard sound but could not understand it."
     assert settings.fast_voice_warm_stt_on_start is True
+    assert settings.fast_voice_concise_responses is True
+    assert settings.fast_voice_concise_instruction == (
+        "Respond in one short sentence. Be direct unless the user asks for detail."
+    )
     assert settings.speech_to_text_provider == "faster_whisper"
     assert settings.whisper_model == "base.en"
     assert settings.whisper_device == "cpu"
@@ -138,11 +145,16 @@ def test_voice_settings_read_environment(monkeypatch) -> None:
     monkeypatch.setenv("FAST_VOICE_MAX_SECONDS", "2.75")
     monkeypatch.setenv("FAST_VOICE_MIN_SPEECH_MS", "260")
     monkeypatch.setenv("FAST_VOICE_SILENCE_MS", "320")
+    monkeypatch.setenv("FAST_VOICE_FAST_STOP_ENABLED", "false")
+    monkeypatch.setenv("FAST_VOICE_SHORT_COMMAND_SILENCE_MS", "210")
+    monkeypatch.setenv("FAST_VOICE_LONG_COMMAND_SILENCE_MS", "510")
     monkeypatch.setenv("FAST_VOICE_PREROLL_MS", "180")
     monkeypatch.setenv("FAST_VOICE_TTS_ENABLED", "true")
     monkeypatch.setenv("FAST_VOICE_WAKE_ONLY_RESPONSE", "  Ready.  ")
     monkeypatch.setenv("FAST_VOICE_EMPTY_AUDIO_RESPONSE", "  Please repeat.  ")
     monkeypatch.setenv("FAST_VOICE_WARM_STT_ON_START", "false")
+    monkeypatch.setenv("FAST_VOICE_CONCISE_RESPONSES", "false")
+    monkeypatch.setenv("FAST_VOICE_CONCISE_INSTRUCTION", "  Give one brief answer.  ")
     monkeypatch.setenv("WAKE_THRESHOLD", "0.81")
     monkeypatch.setenv("WAKE_FALLBACK_PROVIDER", "manual")
 
@@ -162,11 +174,16 @@ def test_voice_settings_read_environment(monkeypatch) -> None:
     assert settings.fast_voice_max_seconds == 2.75
     assert settings.fast_voice_min_speech_ms == 260
     assert settings.fast_voice_silence_ms == 320
+    assert settings.fast_voice_fast_stop_enabled is False
+    assert settings.fast_voice_short_command_silence_ms == 210
+    assert settings.fast_voice_long_command_silence_ms == 510
     assert settings.fast_voice_preroll_ms == 180
     assert settings.fast_voice_tts_enabled is True
     assert settings.fast_voice_wake_only_response == "Ready."
     assert settings.fast_voice_empty_audio_response == "Please repeat."
     assert settings.fast_voice_warm_stt_on_start is False
+    assert settings.fast_voice_concise_responses is False
+    assert settings.fast_voice_concise_instruction == "Give one brief answer."
     assert settings.wake_match_threshold == 0.81
     assert settings.wake_fallback_provider == "manual"
 

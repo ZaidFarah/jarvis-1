@@ -166,7 +166,7 @@ class AppSettings(BaseSettings):
         validation_alias=AliasChoices("FAST_VOICE_RECORD_SECONDS", "JARVIS_FAST_VOICE_RECORD_SECONDS"),
     )
     fast_voice_max_seconds: float = Field(
-        default=2.2,
+        default=1.8,
         ge=1.0,
         le=30.0,
         validation_alias=AliasChoices("FAST_VOICE_MAX_SECONDS", "JARVIS_FAST_VOICE_MAX_SECONDS"),
@@ -178,10 +178,35 @@ class AppSettings(BaseSettings):
         validation_alias=AliasChoices("FAST_VOICE_MIN_SPEECH_MS", "JARVIS_FAST_VOICE_MIN_SPEECH_MS"),
     )
     fast_voice_silence_ms: int = Field(
-        default=400,
+        default=300,
         ge=120,
         le=2500,
         validation_alias=AliasChoices("FAST_VOICE_SILENCE_MS", "JARVIS_FAST_VOICE_SILENCE_MS"),
+    )
+    fast_voice_fast_stop_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices(
+            "FAST_VOICE_FAST_STOP_ENABLED",
+            "JARVIS_FAST_VOICE_FAST_STOP_ENABLED",
+        ),
+    )
+    fast_voice_short_command_silence_ms: int = Field(
+        default=250,
+        ge=120,
+        le=1500,
+        validation_alias=AliasChoices(
+            "FAST_VOICE_SHORT_COMMAND_SILENCE_MS",
+            "JARVIS_FAST_VOICE_SHORT_COMMAND_SILENCE_MS",
+        ),
+    )
+    fast_voice_long_command_silence_ms: int = Field(
+        default=450,
+        ge=120,
+        le=2500,
+        validation_alias=AliasChoices(
+            "FAST_VOICE_LONG_COMMAND_SILENCE_MS",
+            "JARVIS_FAST_VOICE_LONG_COMMAND_SILENCE_MS",
+        ),
     )
     fast_voice_preroll_ms: int = Field(
         default=250,
@@ -212,6 +237,20 @@ class AppSettings(BaseSettings):
         validation_alias=AliasChoices(
             "FAST_VOICE_WARM_STT_ON_START",
             "JARVIS_FAST_VOICE_WARM_STT_ON_START",
+        ),
+    )
+    fast_voice_concise_responses: bool = Field(
+        default=True,
+        validation_alias=AliasChoices(
+            "FAST_VOICE_CONCISE_RESPONSES",
+            "JARVIS_FAST_VOICE_CONCISE_RESPONSES",
+        ),
+    )
+    fast_voice_concise_instruction: str = Field(
+        default="Respond in one short sentence. Be direct unless the user asks for detail.",
+        validation_alias=AliasChoices(
+            "FAST_VOICE_CONCISE_INSTRUCTION",
+            "JARVIS_FAST_VOICE_CONCISE_INSTRUCTION",
         ),
     )
     speech_to_text_provider: str = Field(
@@ -1049,6 +1088,7 @@ class AppSettings(BaseSettings):
         "voice_loop_standby_message",
         "fast_voice_wake_only_response",
         "fast_voice_empty_audio_response",
+        "fast_voice_concise_instruction",
     )
     @classmethod
     def normalize_voice_text(cls, value: str) -> str:

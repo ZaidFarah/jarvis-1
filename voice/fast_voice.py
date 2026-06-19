@@ -33,6 +33,7 @@ FAST_VOICE_EXIT_WORDS = {"exit fast voice", "quit fast voice", "stop fast voice"
 CLAP_WAIT_SECONDS = 15.0
 CLAP_MIN_RMS = 0.04
 CLAP_MIN_PEAK = 0.15
+SHORT_COMMAND_SPEECH_MS = 1000.0
 
 @dataclass(frozen=True)
 class FastCaptureResult:
@@ -378,7 +379,13 @@ class FastVoiceRunner:
         if validation.accepted:
             assistant_started = self.clock()
             try:
-                assistant_response = self.assistant.handle_voice_command(repair.repaired_transcript)
+                fast_handler = getattr(self.assistant, "handle_fast_voice_command", None)
+                if callable(fast_handler):
+                    assistant_response = fast_handler(repair.repaired_transcript)
+                else:
+                    assistant_response = self.assistant.handle_voice_command(
+                        repair.repaired_transcript
+                    )
             except Exception as exc:
                 errors.append(f"Assistant handling failed: {type(exc).__name__}: {exc}")
             openai_ms = (self.clock() - assistant_started) * 1000.0
@@ -441,10 +448,7 @@ class FastVoiceRunner:
             self.settings.fast_voice_max_seconds,
         )
         max_frames = max(1, int(sample_rate * max_seconds))
-        silence_frames_needed = max(
-            1,
-            int(sample_rate * self.settings.fast_voice_silence_ms / 1000.0),
-        )
+        selected_silence_ms = self.settings.fast_voice_silence_ms
         minimum_speech_frames = max(
             1,
             int(sample_rate * self.settings.fast_voice_min_speech_ms / 1000.0),
@@ -477,7 +481,6 @@ class FastVoiceRunner:
                     break
                 frames_read += frames_to_read
                 chunk_rms = calculate_rms(chunk)
-                levels.append(chunk_rms)
                 noise_floor = estimate_noise_floor(levels)
                 if noise_floor <= 0.0 and levels:
                     noise_floor = min(levels)
@@ -498,10 +501,24 @@ class FastVoiceRunner:
                     samples.extend(chunk)
                     trailing_silence_frames += frames_to_read
                 else:
+                    levels.append(chunk_rms)
                     preroll_samples.extend(chunk)
 
                 if triggered and trigger_start_frame is not None:
                     elapsed_since_trigger = frames_read - trigger_start_frame
+                    speech_span_ms = (
+                        ((last_speech_frame - trigger_start_frame) / sample_rate) * 1000.0
+                        if last_speech_frame is not None
+                        else 0.0
+                    )
+                    selected_silence_ms = select_fast_voice_silence_ms(
+                        self.settings,
+                        speech_span_ms,
+                    )
+                    silence_frames_needed = max(
+                        1,
+                        int(sample_rate * selected_silence_ms / 1000.0),
+                    )
                     if (
                         elapsed_since_trigger >= minimum_speech_frames
                         and trailing_silence_frames >= silence_frames_needed
@@ -530,7 +547,7 @@ class FastVoiceRunner:
             len(samples),
             triggered,
             max_seconds,
-            self.settings.fast_voice_silence_ms,
+            selected_silence_ms,
             audio_record_ms,
             audio_prepare_ms,
         )
@@ -763,6 +780,14 @@ def run_fast_command_test(
     assistant: AssistantCore | None = None,
 ) -> FastVoiceReport:
     return FastVoiceRunner(settings, assistant=assistant).run_once()
+
+
+def select_fast_voice_silence_ms(settings: AppSettings, speech_ms: float) -> int:
+    if not settings.fast_voice_fast_stop_enabled:
+        return settings.fast_voice_silence_ms
+    if speech_ms <= SHORT_COMMAND_SPEECH_MS:
+        return settings.fast_voice_short_command_silence_ms
+    return settings.fast_voice_long_command_silence_ms
 
 
 def resolve_fast_input_device(sd: Any, preferred: str) -> tuple[int, str]:

@@ -97,6 +97,7 @@ class AssistantCore:
         if self.settings.agent_enabled:
             self.agent_runtime = self._create_agent_runtime()
         self._voice_mode_active = False
+        self._voice_instruction_override: str | None = None
         if memory_store is not None:
             self.memory_store = memory_store
         elif self.settings.memory_enabled:
@@ -119,20 +120,39 @@ class AssistantCore:
         return self.handle_command_direct(cleaned)
 
     def handle_voice_command(self, command: str) -> AssistantResponse:
+        concise = self.settings.voice_response_mode == "concise"
+        instruction = self.settings.voice_concise_instruction if concise else None
+        return self._handle_spoken_command(command, concise=concise, instruction=instruction)
+
+    def handle_fast_voice_command(self, command: str) -> AssistantResponse:
+        concise = self.settings.fast_voice_concise_responses
+        instruction = self.settings.fast_voice_concise_instruction if concise else None
+        return self._handle_spoken_command(command, concise=concise, instruction=instruction)
+
+    def _handle_spoken_command(
+        self,
+        command: str,
+        *,
+        concise: bool,
+        instruction: str | None,
+    ) -> AssistantResponse:
         cleaned = command.strip()
         if not cleaned:
             return AssistantResponse(text="Please enter a command first.", accepted=False)
 
         previous_voice_mode = self._voice_mode_active
-        self._voice_mode_active = self.settings.voice_response_mode == "concise"
+        previous_instruction = self._voice_instruction_override
+        self._voice_mode_active = concise
+        self._voice_instruction_override = instruction
         try:
             if self.settings.agent_enabled and self.agent_runtime is not None:
                 result = self.agent_runtime.run(cleaned)
                 return result.response
 
-            return self.handle_command_direct(cleaned, voice_mode=True)
+            return self.handle_command_direct(cleaned, voice_mode=concise)
         finally:
             self._voice_mode_active = previous_voice_mode
+            self._voice_instruction_override = previous_instruction
 
     def handle_command_direct(self, command: str, *, voice_mode: bool = False) -> AssistantResponse:
         cleaned = command.strip()
@@ -209,8 +229,9 @@ class AssistantCore:
         return AgentRuntime(settings=self.settings, assistant=self)
 
     def _chat_system_prompt(self, *, voice_mode: bool = False) -> str:
-        if voice_mode and self.settings.voice_response_mode == "concise":
-            return f"{self.settings.system_prompt}\n\n{self.settings.voice_concise_instruction}"
+        if voice_mode:
+            instruction = self._voice_instruction_override or self.settings.voice_concise_instruction
+            return f"{self.settings.system_prompt}\n\n{instruction}"
         return self.settings.system_prompt
 
     def _fallback_response(self, command: str, error: str | None = None) -> AssistantResponse:

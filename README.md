@@ -526,14 +526,19 @@ Supported activation modes:
 FAST_VOICE_ENABLED=true
 FAST_VOICE_ACTIVATION=enter
 FAST_VOICE_RECORD_SECONDS=4.0
-FAST_VOICE_MAX_SECONDS=2.2
+FAST_VOICE_MAX_SECONDS=1.8
 FAST_VOICE_MIN_SPEECH_MS=300
-FAST_VOICE_SILENCE_MS=400
+FAST_VOICE_SILENCE_MS=300
+FAST_VOICE_FAST_STOP_ENABLED=true
+FAST_VOICE_SHORT_COMMAND_SILENCE_MS=250
+FAST_VOICE_LONG_COMMAND_SILENCE_MS=450
 FAST_VOICE_PREROLL_MS=250
 FAST_VOICE_TTS_ENABLED=false
 FAST_VOICE_WAKE_ONLY_RESPONSE=I'm listening.
 FAST_VOICE_EMPTY_AUDIO_RESPONSE=I heard sound but could not understand it.
 FAST_VOICE_WARM_STT_ON_START=true
+FAST_VOICE_CONCISE_RESPONSES=true
+FAST_VOICE_CONCISE_INSTRUCTION=Respond in one short sentence. Be direct unless the user asks for detail.
 VOICE_INPUT_DEVICE=Microphone Array
 WHISPER_MODEL=base.en
 ```
@@ -544,7 +549,11 @@ Run a single full-path fast command test with:
 python main.py --fast-command-test
 ```
 
-The effective hard capture limit is the lower of the backwards-compatible `FAST_VOICE_RECORD_SECONDS` setting and `FAST_VOICE_MAX_SECONDS`. A short pre-roll retains audio immediately before VAD fires so the first word is not clipped. If VAD hears sound but STT produces no transcript, Jarvis responds locally instead of sending an empty command. Each result logs `capture_ms`, `audio_record_ms`, `audio_prepare_ms`, `stt_warmup_ms`, `vad_wait_ms`, `speech_ms`, `trailing_silence_ms`, `transcribe_ms`, `openai_ms`, `tts_ms`, and `total_ms`. `capture_ms` and `audio_record_ms` measure only blocking microphone reads; per-command stream start/stop, conversion, and VAD processing are reported separately as `audio_prepare_ms`. Persistent device discovery and stream construction appear once as `audio_session_prepare_ms` on the startup line. Here `openai_ms` measures the existing `AssistantCore` response stage, which may complete locally without an OpenAI request. Detailed logs are written to `logs/fast_voice.log`.
+The effective hard capture limit is the lower of the backwards-compatible `FAST_VOICE_RECORD_SECONDS` setting and `FAST_VOICE_MAX_SECONDS`. With fast-stop enabled, speech up to one second uses the short-command silence window; longer speech uses the long-command window. The minimum speech duration and pre-roll protect short commands and their first word. Disable fast-stop to use the fixed `FAST_VOICE_SILENCE_MS` value. If VAD hears sound but STT produces no transcript, Jarvis responds locally instead of sending an empty command.
+
+Fast voice uses its own concise system instruction by default to reduce generated response length while leaving text chat and the full voice loop unchanged. Set `FAST_VOICE_CONCISE_RESPONSES=false` for normal-length answers.
+
+Each result logs `capture_ms`, `audio_record_ms`, `audio_prepare_ms`, `stt_warmup_ms`, `vad_wait_ms`, `speech_ms`, `trailing_silence_ms`, `transcribe_ms`, `openai_ms`, `tts_ms`, and `total_ms`. `capture_ms` and `audio_record_ms` measure only blocking microphone reads; per-command stream start/stop, conversion, and VAD processing are reported separately as `audio_prepare_ms`. Persistent device discovery and stream construction appear once as `audio_session_prepare_ms` on the startup line. Here `openai_ms` measures the existing `AssistantCore` response stage, which may complete locally without an OpenAI request. Detailed logs are written to `logs/fast_voice.log`.
 
 ## Voice Loop
 

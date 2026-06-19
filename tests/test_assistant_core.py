@@ -273,6 +273,40 @@ def test_assistant_core_voice_command_can_use_normal_prompt() -> None:
     assert service.prompts == [settings.system_prompt]
 
 
+def test_assistant_core_fast_voice_uses_fast_concise_prompt() -> None:
+    service = FakeOpenAIService(OpenAIChatResult(success=True, text="Brief answer.", used_openai=True))
+    settings = AppSettings(
+        _env_file=None,
+        openai_enabled=True,
+        openai_api_key="sk-test",
+        voice_response_mode="normal",
+        fast_voice_concise_responses=True,
+        fast_voice_concise_instruction="Answer in one brief sentence.",
+    )
+    assistant = AssistantCore(settings=settings, openai_service=service)
+
+    response = assistant.handle_fast_voice_command("explain the status")
+
+    assert response.source == "openai"
+    assert service.prompts == [f"{settings.system_prompt}\n\nAnswer in one brief sentence."]
+
+
+def test_assistant_core_fast_voice_can_disable_concise_prompt() -> None:
+    service = FakeOpenAIService(OpenAIChatResult(success=True, text="Normal answer.", used_openai=True))
+    settings = AppSettings(
+        _env_file=None,
+        openai_enabled=True,
+        openai_api_key="sk-test",
+        fast_voice_concise_responses=False,
+    )
+    assistant = AssistantCore(settings=settings, openai_service=service)
+
+    response = assistant.handle_fast_voice_command("explain the status")
+
+    assert response.source == "openai"
+    assert service.prompts == [settings.system_prompt]
+
+
 def test_assistant_core_uses_fallback_when_openai_disabled() -> None:
     service = FakeOpenAIService(
         OpenAIChatResult(success=False, text="", used_openai=False, safe_error="OpenAI is disabled.")

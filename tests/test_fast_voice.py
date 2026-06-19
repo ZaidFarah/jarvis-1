@@ -13,6 +13,7 @@ from voice.fast_voice import (
     FastVoiceRunner,
     format_fast_voice_report,
     resolve_fast_input_device,
+    select_fast_voice_silence_ms,
 )
 from voice.interfaces import TranscriptionResult
 from voice.tts import TextToSpeechResult
@@ -254,6 +255,7 @@ def test_fast_capture_stops_shortly_after_silence(tmp_path: Path) -> None:
         voice_vad_threshold=0.02,
         fast_voice_record_seconds=2.0,
         fast_voice_silence_ms=160,
+        fast_voice_fast_stop_enabled=False,
     )
     sd = FakeSoundDevice([0.01, 0.01, 0.01, 0.2, 0.2, 0.2, 0.01, 0.01, 0.01])
     runner = FastVoiceRunner(
@@ -284,6 +286,7 @@ def test_fast_capture_separates_blocking_reads_from_preparation(tmp_path: Path) 
         voice_vad_threshold=0.02,
         fast_voice_record_seconds=2.0,
         fast_voice_silence_ms=160,
+        fast_voice_fast_stop_enabled=False,
     )
     sd = FakeSoundDevice([0.01, 0.01, 0.01, 0.2, 0.2, 0.2, 0.01, 0.01])
     clock_values = [0.0]
@@ -347,6 +350,7 @@ def test_fast_capture_keeps_only_configured_preroll_before_speech(tmp_path: Path
         fast_voice_max_seconds=2.0,
         fast_voice_min_speech_ms=300,
         fast_voice_silence_ms=160,
+        fast_voice_fast_stop_enabled=False,
         fast_voice_preroll_ms=250,
     )
     sd = FakeSoundDevice(
@@ -367,6 +371,75 @@ def test_fast_capture_keeps_only_configured_preroll_before_speech(tmp_path: Path
     assert sd.stream.read_count == 10
     assert len(capture.samples) == expected_preroll_samples + captured_after_trigger
     assert len(capture.samples) < sd.stream.read_count * int(settings.voice_sample_rate * 0.080)
+
+
+@pytest.mark.parametrize(
+    ("speech_chunks", "expected_silence_ms", "expected_silence_chunks"),
+    [(5, 250, 4), (14, 450, 6)],
+)
+def test_fast_capture_adapts_silence_to_command_length(
+    speech_chunks: int,
+    expected_silence_ms: int,
+    expected_silence_chunks: int,
+    tmp_path: Path,
+) -> None:
+    settings = AppSettings(
+        _env_file=None,
+        log_dir=tmp_path / "logs",
+        voice_input_device="Microphone Array",
+        voice_vad_threshold=0.02,
+        fast_voice_record_seconds=3.0,
+        fast_voice_max_seconds=3.0,
+        fast_voice_fast_stop_enabled=True,
+        fast_voice_short_command_silence_ms=250,
+        fast_voice_long_command_silence_ms=450,
+    )
+    pre_speech_chunks = 3
+    sd = FakeSoundDevice(
+        [0.01] * pre_speech_chunks
+        + [0.2] * speech_chunks
+        + [0.01] * (expected_silence_chunks + 2)
+    )
+    runner = FastVoiceRunner(
+        settings,
+        provider=FakeProvider("status report"),
+        assistant=SpyAssistant(),  # type: ignore[arg-type]
+        sounddevice_module=sd,
+        output_func=lambda _message: None,
+    )
+
+    capture = runner._capture_until_silence()
+
+    speech_ms = speech_chunks * 80.0
+    assert select_fast_voice_silence_ms(settings, speech_ms) == expected_silence_ms
+    assert sd.stream.read_count == pre_speech_chunks + speech_chunks + expected_silence_chunks
+    assert capture.trailing_silence_ms == pytest.approx(expected_silence_chunks * 80.0)
+
+
+def test_fast_voice_uses_fast_specific_assistant_handler(tmp_path: Path) -> None:
+    class FastAwareAssistant:
+        def __init__(self) -> None:
+            self.fast_commands: list[str] = []
+
+        def handle_fast_voice_command(self, command: str) -> AssistantResponse:
+            self.fast_commands.append(command)
+            return AssistantResponse(text="Brief response.", source="fake")
+
+        def handle_voice_command(self, command: str) -> AssistantResponse:
+            pytest.fail(f"normal voice handler called for fast command: {command}")
+
+    assistant = FastAwareAssistant()
+    report = FastVoiceRunner(
+        AppSettings(_env_file=None, log_dir=tmp_path / "logs"),
+        provider=FakeProvider("status report"),
+        assistant=assistant,  # type: ignore[arg-type]
+        recorder=lambda: ([0.2] * 1600, "Microphone Array"),
+        output_func=lambda _message: None,
+    ).run_once()
+
+    assert assistant.fast_commands == ["status report"]
+    assert report.assistant_response is not None
+    assert report.assistant_response.text == "Brief response."
 
 
 def test_fast_voice_reuses_and_warms_stt_provider_once(tmp_path: Path) -> None:
@@ -407,6 +480,7 @@ def test_fast_voice_loop_reuses_one_persistent_audio_stream(tmp_path: Path) -> N
         voice_vad_threshold=0.02,
         fast_voice_activation="enter",
         fast_voice_silence_ms=160,
+        fast_voice_fast_stop_enabled=False,
     )
     levels = [0.01, 0.01, 0.01, 0.2, 0.2, 0.2, 0.01, 0.01] * 2
     sd = FakeSoundDevice(levels)
@@ -445,6 +519,7 @@ def test_fast_command_capture_keeps_one_shot_stream_fallback(tmp_path: Path) -> 
         voice_input_device="Microphone Array",
         voice_vad_threshold=0.02,
         fast_voice_silence_ms=160,
+        fast_voice_fast_stop_enabled=False,
     )
     sd = FakeSoundDevice([0.01, 0.01, 0.01, 0.2, 0.2, 0.2, 0.01, 0.01])
     runner = FastVoiceRunner(
