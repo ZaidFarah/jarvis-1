@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from config.settings import AppSettings
 from services.openai_service import OpenAIService, format_openai_check_report, format_openai_error
 
@@ -165,3 +167,72 @@ def test_openai_chat_error_is_safe() -> None:
     assert result.success is False
     assert result.safe_error is not None
     assert "sk-secret" not in result.safe_error
+
+
+def test_openai_chat_stream_emits_text_deltas() -> None:
+    captured: dict[str, object] = {}
+
+    class StreamingResponses:
+        def create(self, **kwargs):
+            captured.update(kwargs)
+            return iter(
+                [
+                    SimpleNamespace(type="response.created"),
+                    SimpleNamespace(type="response.output_text.delta", delta="Systems "),
+                    SimpleNamespace(type="response.output_text.delta", delta="nominal."),
+                    SimpleNamespace(type="response.completed", response=FakeResponse()),
+                ]
+            )
+
+    class StreamingClient:
+        responses = StreamingResponses()
+
+    settings = AppSettings(
+        _env_file=None,
+        openai_enabled=True,
+        openai_api_key="sk-secret",
+        openai_model="gpt-test",
+    )
+    chunks: list[str] = []
+    result = OpenAIService(
+        settings,
+        client_factory=lambda api_key: StreamingClient(),
+    ).chat_stream("status report", chunks.append)
+
+    assert result.success is True
+    assert result.text == "Systems nominal."
+    assert chunks == ["Systems ", "nominal."]
+    assert captured["stream"] is True
+    assert captured["model"] == "gpt-test"
+
+
+def test_openai_chat_stream_falls_back_when_streaming_is_unsupported() -> None:
+    calls: list[bool] = []
+
+    class FallbackResponses:
+        def create(self, **kwargs):
+            streaming = bool(kwargs.get("stream", False))
+            calls.append(streaming)
+            if streaming:
+                raise TypeError("stream is unsupported")
+            return FakeResponse()
+
+    class FallbackClient:
+        responses = FallbackResponses()
+
+    settings = AppSettings(
+        _env_file=None,
+        openai_enabled=True,
+        openai_api_key="sk-secret",
+        openai_model="gpt-test",
+    )
+    chunks: list[str] = []
+    result = OpenAIService(
+        settings,
+        client_factory=lambda api_key: FallbackClient(),
+    ).chat_stream("status report", chunks.append)
+
+    assert result.success is True
+    assert result.text == "Jarvis OpenAI check OK."
+    assert calls == [True, False]
+    assert chunks == []

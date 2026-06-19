@@ -159,6 +159,7 @@ class FastVoiceRunner:
         status_callback: Callable[[str], None] | None = None,
         report_callback: Callable[[FastVoiceReport], None] | None = None,
         progress_callback: Callable[[FastVoiceProgress], None] | None = None,
+        response_chunk_callback: Callable[[str], None] | None = None,
         strict_command_validation: bool = False,
     ) -> None:
         self.settings = settings
@@ -173,6 +174,7 @@ class FastVoiceRunner:
         self.status_callback = status_callback
         self.report_callback = report_callback
         self.progress_callback = progress_callback
+        self.response_chunk_callback = response_chunk_callback
         self.strict_command_validation = strict_command_validation
         self.log_file = self.settings.log_dir / "fast_voice.log"
         self.fast_logger = logger.bind(fast_voice=True)
@@ -568,13 +570,28 @@ class FastVoiceRunner:
             )
             assistant_started = self.clock()
             try:
-                fast_handler = getattr(self.assistant, "handle_fast_voice_command", None)
-                if callable(fast_handler):
-                    assistant_response = fast_handler(repair.repaired_transcript)
-                else:
-                    assistant_response = self.assistant.handle_voice_command(
-                        repair.repaired_transcript
+                stream_handler = getattr(
+                    self.assistant,
+                    "handle_fast_voice_command_stream",
+                    None,
+                )
+                if (
+                    self.settings.fast_voice_stream_openai
+                    and self.response_chunk_callback is not None
+                    and callable(stream_handler)
+                ):
+                    assistant_response = stream_handler(
+                        repair.repaired_transcript,
+                        self.response_chunk_callback,
                     )
+                else:
+                    fast_handler = getattr(self.assistant, "handle_fast_voice_command", None)
+                    if callable(fast_handler):
+                        assistant_response = fast_handler(repair.repaired_transcript)
+                    else:
+                        assistant_response = self.assistant.handle_voice_command(
+                            repair.repaired_transcript
+                        )
             except Exception as exc:
                 self._notify_status("Error")
                 errors.append(f"Assistant handling failed: {type(exc).__name__}: {exc}")

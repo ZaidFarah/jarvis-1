@@ -57,10 +57,7 @@ class OpenAIVisionResult:
 
 
 class OpenAIService:
-    """OpenAI diagnostics service.
-
-    This class only checks connectivity. It is not wired into AssistantCore.
-    """
+    """OpenAI diagnostics, chat, streaming chat, and vision service."""
 
     def __init__(
         self,
@@ -207,6 +204,103 @@ class OpenAIService:
             self.chat_logger.error("OpenAI chat request failed: {}", safe_error)
             return OpenAIChatResult(success=False, text="", used_openai=False, safe_error=safe_error)
 
+    def chat_stream(
+        self,
+        user_text: str,
+        on_chunk: Callable[[str], None],
+        system_prompt: str | None = None,
+        conversation_history: str | None = None,
+    ) -> OpenAIChatResult:
+        cleaned = user_text.strip()
+        if not cleaned or not self.settings.openai_enabled or not self.settings.has_openai_api_key:
+            return self.chat(
+                user_text,
+                system_prompt=system_prompt,
+                conversation_history=conversation_history,
+            )
+
+        prompt = system_prompt or self.settings.system_prompt
+        chunks: list[str] = []
+        completed_response: Any | None = None
+        stream: Any | None = None
+        try:
+            client = self.client_factory(api_key=self.settings.openai_api_key)
+            input_text = self._build_chat_input(
+                cleaned,
+                conversation_history=conversation_history,
+            )
+            self.chat_logger.info(
+                "Sending streaming OpenAI chat request model={} prompt_chars={} "
+                "user_chars={} history_chars={}",
+                self.settings.openai_model,
+                len(prompt),
+                len(cleaned),
+                len(conversation_history or ""),
+            )
+            stream = client.responses.create(
+                model=self.settings.openai_model,
+                instructions=prompt,
+                input=input_text,
+                max_output_tokens=400,
+                stream=True,
+            )
+            for event in stream:
+                delta = self._extract_stream_delta(event)
+                if delta:
+                    chunks.append(delta)
+                    on_chunk(delta)
+                if self._stream_event_type(event) == "response.completed":
+                    completed_response = self._stream_event_value(event, "response")
+
+            text = "".join(chunks)
+            if not text and completed_response is not None:
+                text = self._extract_response_text(completed_response)
+            if not text:
+                raise RuntimeError("OpenAI returned an empty streaming response.")
+            self.chat_logger.info(
+                "Streaming OpenAI chat request succeeded response_chars={} chunks={}",
+                len(text),
+                len(chunks),
+            )
+            return OpenAIChatResult(success=True, text=text, used_openai=True)
+        except TypeError as exc:
+            if not chunks:
+                self.chat_logger.warning(
+                    "OpenAI streaming is unsupported by the active client; using non-streaming fallback"
+                )
+                return self.chat(
+                    cleaned,
+                    system_prompt=system_prompt,
+                    conversation_history=conversation_history,
+                )
+            safe_error = format_openai_error(exc)
+            self.chat_logger.error("OpenAI streaming chat failed after output: {}", safe_error)
+            return OpenAIChatResult(
+                success=False,
+                text="".join(chunks),
+                used_openai=True,
+                safe_error=safe_error,
+            )
+        except Exception as exc:
+            safe_error = format_openai_error(exc)
+            self.chat_logger.error("OpenAI streaming chat request failed: {}", safe_error)
+            return OpenAIChatResult(
+                success=False,
+                text="".join(chunks),
+                used_openai=bool(chunks),
+                safe_error=safe_error,
+            )
+        finally:
+            close = getattr(stream, "close", None)
+            if callable(close):
+                try:
+                    close()
+                except Exception as exc:
+                    self.chat_logger.warning(
+                        "OpenAI response stream cleanup failed: {}",
+                        format_openai_error(exc),
+                    )
+
     def analyze_image(
         self,
         image_path: Path,
@@ -328,6 +422,25 @@ class OpenAIService:
         if output_text:
             return str(output_text).strip()
         return ""
+
+    @staticmethod
+    def _stream_event_type(event: Any) -> str:
+        if isinstance(event, dict):
+            return str(event.get("type", ""))
+        return str(getattr(event, "type", ""))
+
+    @staticmethod
+    def _stream_event_value(event: Any, name: str) -> Any:
+        if isinstance(event, dict):
+            return event.get(name)
+        return getattr(event, name, None)
+
+    @classmethod
+    def _extract_stream_delta(cls, event: Any) -> str:
+        if cls._stream_event_type(event) != "response.output_text.delta":
+            return ""
+        delta = cls._stream_event_value(event, "delta")
+        return delta if isinstance(delta, str) else ""
 
     @staticmethod
     def _build_chat_input(user_text: str, conversation_history: str | None) -> str:

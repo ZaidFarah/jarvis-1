@@ -307,6 +307,45 @@ def test_assistant_core_fast_voice_can_disable_concise_prompt() -> None:
     assert service.prompts == [settings.system_prompt]
 
 
+def test_assistant_core_fast_voice_streams_openai_chunks() -> None:
+    class StreamingOpenAIService(FakeOpenAIService):
+        def chat_stream(
+            self,
+            user_text: str,
+            on_chunk,
+            system_prompt: str | None = None,
+            conversation_history: str | None = None,
+        ) -> OpenAIChatResult:
+            self.messages.append(user_text)
+            self.prompts.append(system_prompt)
+            self.histories.append(conversation_history)
+            on_chunk("Brief ")
+            on_chunk("answer.")
+            return OpenAIChatResult(
+                success=True,
+                text="Brief answer.",
+                used_openai=True,
+            )
+
+    service = StreamingOpenAIService()
+    settings = AppSettings(
+        _env_file=None,
+        openai_enabled=True,
+        openai_api_key="sk-test",
+        fast_voice_concise_instruction="Answer briefly.",
+    )
+    chunks: list[str] = []
+    response = AssistantCore(
+        settings=settings,
+        openai_service=service,
+    ).handle_fast_voice_command_stream("status report", chunks.append)
+
+    assert response.text == "Brief answer."
+    assert response.source == "openai"
+    assert chunks == ["Brief ", "answer."]
+    assert service.prompts == [f"{settings.system_prompt}\n\nAnswer briefly."]
+
+
 def test_assistant_core_uses_fallback_when_openai_disabled() -> None:
     service = FakeOpenAIService(
         OpenAIChatResult(success=False, text="", used_openai=False, safe_error="OpenAI is disabled.")

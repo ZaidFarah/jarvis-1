@@ -537,6 +537,66 @@ def test_fast_voice_uses_fast_specific_assistant_handler(tmp_path: Path) -> None
     assert report.assistant_response.text == "Brief response."
 
 
+def test_fast_voice_streams_response_chunks_when_enabled(tmp_path: Path) -> None:
+    class StreamingAssistant:
+        def handle_fast_voice_command_stream(self, command: str, on_chunk) -> AssistantResponse:
+            assert command == "status report"
+            on_chunk("Systems ")
+            on_chunk("nominal.")
+            return AssistantResponse(text="Systems nominal.", source="openai")
+
+    chunks: list[str] = []
+    report = FastVoiceRunner(
+        AppSettings(
+            _env_file=None,
+            log_dir=tmp_path / "logs",
+            fast_voice_stream_openai=True,
+        ),
+        provider=FakeProvider("status report"),
+        assistant=StreamingAssistant(),  # type: ignore[arg-type]
+        recorder=lambda: ([0.2] * 1600, "Microphone Array"),
+        response_chunk_callback=chunks.append,
+        output_func=lambda _message: None,
+    ).run_once()
+
+    assert chunks == ["Systems ", "nominal."]
+    assert report.assistant_response is not None
+    assert report.assistant_response.text == "Systems nominal."
+
+
+def test_fast_voice_keeps_non_streaming_fallback_when_disabled(tmp_path: Path) -> None:
+    class DualModeAssistant:
+        def __init__(self) -> None:
+            self.non_stream_calls = 0
+
+        def handle_fast_voice_command_stream(self, command: str, on_chunk) -> AssistantResponse:
+            pytest.fail(f"streaming handler called for {command}: {on_chunk}")
+
+        def handle_fast_voice_command(self, command: str) -> AssistantResponse:
+            self.non_stream_calls += 1
+            return AssistantResponse(text=f"Handled {command}.", source="openai")
+
+    assistant = DualModeAssistant()
+    chunks: list[str] = []
+    report = FastVoiceRunner(
+        AppSettings(
+            _env_file=None,
+            log_dir=tmp_path / "logs",
+            fast_voice_stream_openai=False,
+        ),
+        provider=FakeProvider("status report"),
+        assistant=assistant,  # type: ignore[arg-type]
+        recorder=lambda: ([0.2] * 1600, "Microphone Array"),
+        response_chunk_callback=chunks.append,
+        output_func=lambda _message: None,
+    ).run_once()
+
+    assert chunks == []
+    assert assistant.non_stream_calls == 1
+    assert report.assistant_response is not None
+    assert report.assistant_response.text == "Handled status report."
+
+
 def test_fast_voice_reuses_and_warms_stt_provider_once(tmp_path: Path) -> None:
     settings = AppSettings(_env_file=None, log_dir=tmp_path / "logs")
     provider = FakeProvider("status report")

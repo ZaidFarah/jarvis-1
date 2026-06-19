@@ -124,7 +124,14 @@ The GUI `Start Listening` button uses the persistent fast voice engine by defaul
 
 The GUI shows Listening, Transcribing, Thinking, Responding, and Error states and updates the existing HUD panels with raw, cleaned, and repaired speech, response text, transcript confidence, VAD/wake-only state, and timing. The legacy wake-based loop remains available through configuration:
 
-During one-command capture, the HUD updates in real time with VAD waiting/triggered state, detected speech duration, trailing silence, capture percentage, capture completion, transcription readiness, thinking, and response readiness. Speech-to-text and OpenAI requests remain one-shot; this progress display does not enable streaming OpenAI responses.
+During one-command capture, the HUD updates in real time with VAD waiting/triggered state, detected speech duration, trailing silence, capture percentage, capture completion, transcription readiness, thinking, and response readiness. Speech-to-text remains one-shot.
+
+Fast GUI voice can stream OpenAI text into the response panel as it is generated. The final assembled response still follows the normal AssistantCore path, and unsupported clients fall back to the existing non-streaming request:
+
+```dotenv
+FAST_VOICE_STREAM_OPENAI=true
+GUI_STREAM_RESPONSE=true
+```
 
 ```dotenv
 GUI_VOICE_ENGINE=fast

@@ -1874,6 +1874,11 @@ class JarvisMainWindow(QMainWindow):
             progress_callback=lambda progress: self.voice_loop_events.put(
                 ("fast_progress", progress)
             ),
+            response_chunk_callback=(
+                lambda chunk: self.voice_loop_events.put(("fast_response_chunk", chunk))
+                if self.settings.gui_stream_response
+                else None
+            ),
             strict_command_validation=True,
         )
         self.voice_loop_status_value.setText("Starting")
@@ -1928,6 +1933,8 @@ class JarvisMainWindow(QMainWindow):
                     self._handle_fast_voice_status(str(payload))
                 elif event_type == "fast_progress" and isinstance(payload, FastVoiceProgress):
                     self._handle_fast_voice_progress(payload)
+                elif event_type == "fast_response_chunk":
+                    self._handle_fast_voice_response_chunk(str(payload))
                 elif event_type == "fast_report" and isinstance(payload, FastVoiceReport):
                     self._handle_fast_voice_report(payload)
                 elif event_type == "fast_error":
@@ -2019,8 +2026,23 @@ class JarvisMainWindow(QMainWindow):
             transcript = progress.transcript or "<empty>"
             self.transcript.setText(transcript)
             self.voice_raw_speech_value.setText(transcript)
+        if (
+            progress.stage == "thinking"
+            and self.settings.fast_voice_stream_openai
+            and self.settings.gui_stream_response
+        ):
+            self.voice_response_panel.clear()
         if progress.stage == "response_ready" and progress.response:
             self.voice_response_panel.setText(progress.response)
+
+    def _handle_fast_voice_response_chunk(self, chunk: str) -> None:
+        if not chunk or not self.settings.gui_stream_response:
+            return
+        self.voice_loop_status_value.setText("Responding")
+        self.set_status(AssistantStatus.RESPONDING)
+        self.voice_detail_value.setText("Streaming response")
+        self.voice_response_panel.insertPlainText(chunk)
+        self.voice_response_panel.ensureCursorVisible()
 
     def _handle_fast_voice_report(self, report: FastVoiceReport) -> None:
         raw = report.raw_transcript or "<empty>"

@@ -95,6 +95,10 @@ class AppSettings(BaseSettings):
         default="fast",
         validation_alias=AliasChoices("GUI_VOICE_ENGINE", "JARVIS_GUI_VOICE_ENGINE"),
     )
+    gui_stream_response: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("GUI_STREAM_RESPONSE", "JARVIS_GUI_STREAM_RESPONSE"),
+    )
     voice_sample_rate: int = Field(
         default=16000,
         ge=8000,
@@ -248,6 +252,13 @@ class AppSettings(BaseSettings):
         validation_alias=AliasChoices(
             "FAST_VOICE_CONCISE_RESPONSES",
             "JARVIS_FAST_VOICE_CONCISE_RESPONSES",
+        ),
+    )
+    fast_voice_stream_openai: bool = Field(
+        default=True,
+        validation_alias=AliasChoices(
+            "FAST_VOICE_STREAM_OPENAI",
+            "JARVIS_FAST_VOICE_STREAM_OPENAI",
         ),
     )
     fast_voice_concise_instruction: str = Field(

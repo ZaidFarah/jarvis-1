@@ -9,6 +9,7 @@ def test_voice_settings_defaults_are_lightweight() -> None:
     settings = AppSettings(_env_file=None)
 
     assert settings.gui_voice_engine == "fast"
+    assert settings.gui_stream_response is True
     assert settings.voice_sample_rate == 16000
     assert settings.voice_channels == 1
     assert settings.voice_input_device == ""
@@ -35,6 +36,7 @@ def test_voice_settings_defaults_are_lightweight() -> None:
     assert settings.fast_voice_empty_audio_response == "I heard sound but could not understand it."
     assert settings.fast_voice_warm_stt_on_start is True
     assert settings.fast_voice_concise_responses is True
+    assert settings.fast_voice_stream_openai is True
     assert settings.fast_voice_concise_instruction == (
         "Respond in one short sentence. Be direct unless the user asks for detail."
     )
@@ -133,6 +135,7 @@ def test_voice_settings_defaults_are_lightweight() -> None:
 
 def test_voice_settings_read_environment(monkeypatch) -> None:
     monkeypatch.setenv("GUI_VOICE_ENGINE", "legacy")
+    monkeypatch.setenv("GUI_STREAM_RESPONSE", "false")
     monkeypatch.setenv("VOICE_SAMPLE_RATE", "22050")
     monkeypatch.setenv("VOICE_INPUT_DEVICE", "  USB Microphone  ")
     monkeypatch.setenv("VOICE_HEALTH_SPEECH_SECONDS", "7.5")
@@ -156,6 +159,7 @@ def test_voice_settings_read_environment(monkeypatch) -> None:
     monkeypatch.setenv("FAST_VOICE_EMPTY_AUDIO_RESPONSE", "  Please repeat.  ")
     monkeypatch.setenv("FAST_VOICE_WARM_STT_ON_START", "false")
     monkeypatch.setenv("FAST_VOICE_CONCISE_RESPONSES", "false")
+    monkeypatch.setenv("FAST_VOICE_STREAM_OPENAI", "false")
     monkeypatch.setenv("FAST_VOICE_CONCISE_INSTRUCTION", "  Give one brief answer.  ")
     monkeypatch.setenv("WAKE_THRESHOLD", "0.81")
     monkeypatch.setenv("WAKE_FALLBACK_PROVIDER", "manual")
@@ -163,6 +167,7 @@ def test_voice_settings_read_environment(monkeypatch) -> None:
     settings = AppSettings(_env_file=None)
 
     assert settings.gui_voice_engine == "legacy"
+    assert settings.gui_stream_response is False
     assert settings.voice_sample_rate == 22050
     assert settings.voice_input_device == "USB Microphone"
     assert settings.voice_health_speech_seconds == 7.5
@@ -186,6 +191,7 @@ def test_voice_settings_read_environment(monkeypatch) -> None:
     assert settings.fast_voice_empty_audio_response == "Please repeat."
     assert settings.fast_voice_warm_stt_on_start is False
     assert settings.fast_voice_concise_responses is False
+    assert settings.fast_voice_stream_openai is False
     assert settings.fast_voice_concise_instruction == "Give one brief answer."
     assert settings.wake_match_threshold == 0.81
     assert settings.wake_fallback_provider == "manual"

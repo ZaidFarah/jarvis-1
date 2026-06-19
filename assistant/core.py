@@ -129,12 +129,27 @@ class AssistantCore:
         instruction = self.settings.fast_voice_concise_instruction if concise else None
         return self._handle_spoken_command(command, concise=concise, instruction=instruction)
 
+    def handle_fast_voice_command_stream(
+        self,
+        command: str,
+        on_chunk: Callable[[str], None],
+    ) -> AssistantResponse:
+        concise = self.settings.fast_voice_concise_responses
+        instruction = self.settings.fast_voice_concise_instruction if concise else None
+        return self._handle_spoken_command(
+            command,
+            concise=concise,
+            instruction=instruction,
+            stream_callback=on_chunk,
+        )
+
     def _handle_spoken_command(
         self,
         command: str,
         *,
         concise: bool,
         instruction: str | None,
+        stream_callback: Callable[[str], None] | None = None,
     ) -> AssistantResponse:
         cleaned = command.strip()
         if not cleaned:
@@ -149,12 +164,22 @@ class AssistantCore:
                 result = self.agent_runtime.run(cleaned)
                 return result.response
 
-            return self.handle_command_direct(cleaned, voice_mode=concise)
+            return self.handle_command_direct(
+                cleaned,
+                voice_mode=concise,
+                stream_callback=stream_callback,
+            )
         finally:
             self._voice_mode_active = previous_voice_mode
             self._voice_instruction_override = previous_instruction
 
-    def handle_command_direct(self, command: str, *, voice_mode: bool = False) -> AssistantResponse:
+    def handle_command_direct(
+        self,
+        command: str,
+        *,
+        voice_mode: bool = False,
+        stream_callback: Callable[[str], None] | None = None,
+    ) -> AssistantResponse:
         cleaned = command.strip()
         if not cleaned:
             return AssistantResponse(text="Please enter a command first.", accepted=False)
@@ -204,11 +229,20 @@ class AssistantCore:
         self.conversation_history.add_user(cleaned)
 
         try:
-            chat_result = self.openai_service.chat(
-                cleaned,
-                system_prompt=self._chat_system_prompt(voice_mode=voice_mode),
-                conversation_history=history_context or None,
-            )
+            chat_stream = getattr(self.openai_service, "chat_stream", None)
+            if stream_callback is not None and callable(chat_stream):
+                chat_result = chat_stream(
+                    cleaned,
+                    on_chunk=stream_callback,
+                    system_prompt=self._chat_system_prompt(voice_mode=voice_mode),
+                    conversation_history=history_context or None,
+                )
+            else:
+                chat_result = self.openai_service.chat(
+                    cleaned,
+                    system_prompt=self._chat_system_prompt(voice_mode=voice_mode),
+                    conversation_history=history_context or None,
+                )
         except Exception as exc:
             response = self._fallback_response(cleaned, error=f"{type(exc).__name__}: {exc}")
             self.conversation_history.add_assistant(response.text)

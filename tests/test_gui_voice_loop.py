@@ -424,6 +424,71 @@ def test_fast_voice_gui_shows_live_capture_progress() -> None:
     app.processEvents()
 
 
+def test_fast_voice_gui_appends_streaming_response_chunks() -> None:
+    app = _app()
+    window = JarvisMainWindow(
+        settings=AppSettings(
+            _env_file=None,
+            gui_voice_engine="fast",
+            gui_stream_response=True,
+            fast_voice_stream_openai=True,
+        ),
+        assistant=StubAssistant(),
+    )
+    window.voice_response_panel.setText("Previous response")
+
+    window._handle_fast_voice_progress(
+        FastVoiceProgress(stage="thinking", vad_crossed=True, capture_progress=1.0)
+    )
+    assert window.voice_response_panel.toPlainText() == ""
+
+    window._handle_fast_voice_response_chunk("Systems ")
+    window._handle_fast_voice_response_chunk("nominal.")
+
+    assert window.voice_loop_status_value.text() == "Responding"
+    assert window.voice_detail_value.text() == "Streaming response"
+    assert window.voice_response_panel.toPlainText() == "Systems nominal."
+
+    window._handle_fast_voice_progress(
+        FastVoiceProgress(
+            stage="response_ready",
+            vad_crossed=True,
+            capture_progress=1.0,
+            response="Systems nominal.",
+        )
+    )
+    assert window.voice_response_panel.toPlainText() == "Systems nominal."
+
+    window._allow_close = True
+    window.close()
+    app.processEvents()
+
+
+def test_fast_voice_gui_preserves_response_when_streaming_is_disabled() -> None:
+    app = _app()
+    window = JarvisMainWindow(
+        settings=AppSettings(
+            _env_file=None,
+            gui_voice_engine="fast",
+            gui_stream_response=False,
+            fast_voice_stream_openai=False,
+        ),
+        assistant=StubAssistant(),
+    )
+    window.voice_response_panel.setText("Previous response")
+
+    window._handle_fast_voice_progress(
+        FastVoiceProgress(stage="thinking", vad_crossed=True, capture_progress=1.0)
+    )
+    window._handle_fast_voice_response_chunk("ignored")
+
+    assert window.voice_response_panel.toPlainText() == "Previous response"
+
+    window._allow_close = True
+    window.close()
+    app.processEvents()
+
+
 def test_gui_start_voice_selects_fast_engine_and_stop_requests_shutdown(monkeypatch) -> None:
     app = _app()
 
@@ -467,6 +532,7 @@ def test_gui_start_voice_selects_fast_engine_and_stop_requests_shutdown(monkeypa
     assert window.stop_voice_loop_button.isEnabled() is True
     assert window.fast_voice_runner.kwargs["strict_command_validation"] is True
     assert callable(window.fast_voice_runner.kwargs["progress_callback"])
+    assert callable(window.fast_voice_runner.kwargs["response_chunk_callback"])
 
     window._run_fast_voice_worker()
     assert window.fast_voice_runner.max_turns == 1
