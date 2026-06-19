@@ -11,6 +11,7 @@ from main import main
 from voice.fast_voice import (
     FAST_GUI_REJECTED_RESPONSE,
     FastCaptureResult,
+    FastVoiceProgress,
     FastVoiceRunner,
     format_fast_voice_report,
     resolve_fast_input_device,
@@ -617,6 +618,7 @@ def test_fast_voice_continuous_session_emits_gui_stages_and_report(tmp_path: Pat
     )
     sd = FakeSoundDevice([0.01, 0.01, 0.01, 0.2, 0.2, 0.2, 0.01, 0.01])
     statuses: list[str] = []
+    progress_events: list[FastVoiceProgress] = []
     reports = []
     runner = FastVoiceRunner(
         settings,
@@ -626,6 +628,7 @@ def test_fast_voice_continuous_session_emits_gui_stages_and_report(tmp_path: Pat
         output_func=lambda _message: None,
         status_callback=statuses.append,
         report_callback=reports.append,
+        progress_callback=progress_events.append,
     )
 
     result = runner.run_continuous(max_turns=1)
@@ -635,6 +638,37 @@ def test_fast_voice_continuous_session_emits_gui_stages_and_report(tmp_path: Pat
     assert len(reports) == 1
     assert reports[0].command == "status report"
     assert sd.stream.close_count == 1
+
+    stages = [event.stage for event in progress_events]
+    expected_stages = [
+        "listening_started",
+        "vad_waiting",
+        "vad_triggered",
+        "speech_detected",
+        "silence_detected",
+        "capture_complete",
+        "transcribing",
+        "transcript_ready",
+        "thinking",
+        "response_ready",
+    ]
+    for stage in expected_stages:
+        assert stage in stages
+    assert [stages.index(stage) for stage in expected_stages] == sorted(
+        stages.index(stage) for stage in expected_stages
+    )
+
+    speech_event = next(event for event in reversed(progress_events) if event.stage == "speech_detected")
+    silence_event = next(event for event in reversed(progress_events) if event.stage == "silence_detected")
+    complete_event = next(event for event in progress_events if event.stage == "capture_complete")
+    transcript_event = next(event for event in progress_events if event.stage == "transcript_ready")
+    response_event = next(event for event in progress_events if event.stage == "response_ready")
+    assert speech_event.vad_crossed is True
+    assert speech_event.speech_ms > 0.0
+    assert silence_event.trailing_silence_ms > 0.0
+    assert complete_event.capture_progress == 1.0
+    assert transcript_event.transcript == "status report"
+    assert response_event.response == "Systems nominal."
 
 
 def test_fast_command_capture_keeps_one_shot_stream_fallback(tmp_path: Path) -> None:

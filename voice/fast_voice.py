@@ -39,6 +39,7 @@ FAST_GUI_REJECTED_RESPONSE = "I heard sound, but it did not sound like a command
 FAST_GUI_MIN_TRANSCRIPT_CONFIDENCE = 0.35
 FAST_GUI_WEAK_COMMANDS = {"you", "okay", "for me"}
 
+
 @dataclass(frozen=True)
 class FastCaptureResult:
     samples: list[float]
@@ -53,6 +54,18 @@ class FastCaptureResult:
 
 AudioRecorder = Callable[[], FastCaptureResult | tuple[list[float], str]]
 TtsFunction = Callable[..., TextToSpeechResult]
+
+
+@dataclass(frozen=True)
+class FastVoiceProgress:
+    stage: str
+    vad_crossed: bool = False
+    speech_ms: float = 0.0
+    trailing_silence_ms: float = 0.0
+    capture_elapsed_ms: float = 0.0
+    capture_progress: float = 0.0
+    transcript: str = ""
+    response: str = ""
 
 
 @dataclass(frozen=True)
@@ -145,6 +158,7 @@ class FastVoiceRunner:
         clock: Callable[[], float] = time.perf_counter,
         status_callback: Callable[[str], None] | None = None,
         report_callback: Callable[[FastVoiceReport], None] | None = None,
+        progress_callback: Callable[[FastVoiceProgress], None] | None = None,
         strict_command_validation: bool = False,
     ) -> None:
         self.settings = settings
@@ -158,6 +172,7 @@ class FastVoiceRunner:
         self.clock = clock
         self.status_callback = status_callback
         self.report_callback = report_callback
+        self.progress_callback = progress_callback
         self.strict_command_validation = strict_command_validation
         self.log_file = self.settings.log_dir / "fast_voice.log"
         self.fast_logger = logger.bind(fast_voice=True)
@@ -309,6 +324,7 @@ class FastVoiceRunner:
             )
 
         self._notify_status("Listening")
+        self._notify_progress("listening_started")
         self.output_func("Listening...")
         capture_started = self.clock()
         try:
@@ -335,9 +351,25 @@ class FastVoiceRunner:
                 audio_prepare_ms=0.0 if samples else capture_wall_ms,
             )
         capture_ms = float(capture_result.audio_record_ms or 0.0)
+        self._notify_progress(
+            "capture_complete",
+            vad_crossed=capture_result.vad_crossed,
+            speech_ms=capture_result.speech_ms,
+            trailing_silence_ms=capture_result.trailing_silence_ms,
+            capture_elapsed_ms=capture_ms,
+            capture_progress=1.0,
+        )
 
         if samples:
             self._notify_status("Transcribing")
+            self._notify_progress(
+                "transcribing",
+                vad_crossed=capture_result.vad_crossed,
+                speech_ms=capture_result.speech_ms,
+                trailing_silence_ms=capture_result.trailing_silence_ms,
+                capture_elapsed_ms=capture_ms,
+                capture_progress=1.0,
+            )
             transcribe_started = self.clock()
             try:
                 transcription: TranscriptionResult = self.provider.transcribe(
@@ -350,6 +382,15 @@ class FastVoiceRunner:
                 self._notify_status("Error")
                 errors.append(f"Fast voice transcription failed: {type(exc).__name__}: {exc}")
             transcribe_ms = (self.clock() - transcribe_started) * 1000.0
+            self._notify_progress(
+                "transcript_ready",
+                vad_crossed=capture_result.vad_crossed,
+                speech_ms=capture_result.speech_ms,
+                trailing_silence_ms=capture_result.trailing_silence_ms,
+                capture_elapsed_ms=capture_ms,
+                capture_progress=1.0,
+                transcript=raw_transcript,
+            )
 
         cleaned_transcript = remove_wake_phrase_prefix(
             raw_transcript,
@@ -372,6 +413,16 @@ class FastVoiceRunner:
                 ),
             )
             self._notify_status("Responding")
+            self._notify_progress(
+                "response_ready",
+                vad_crossed=capture_result.vad_crossed,
+                speech_ms=capture_result.speech_ms,
+                trailing_silence_ms=capture_result.trailing_silence_ms,
+                capture_elapsed_ms=capture_ms,
+                capture_progress=1.0,
+                transcript=raw_transcript,
+                response=assistant_response.text,
+            )
             self.output_func(f"Jarvis: {assistant_response.text}")
             if self.settings.fast_voice_tts_enabled:
                 tts_started = self.clock()
@@ -418,6 +469,16 @@ class FastVoiceRunner:
                 source="fast_voice_wake_only",
             )
             self._notify_status("Responding")
+            self._notify_progress(
+                "response_ready",
+                vad_crossed=capture_result.vad_crossed,
+                speech_ms=capture_result.speech_ms,
+                trailing_silence_ms=capture_result.trailing_silence_ms,
+                capture_elapsed_ms=capture_ms,
+                capture_progress=1.0,
+                transcript=raw_transcript,
+                response=assistant_response.text,
+            )
             self.output_func(f"Jarvis: {assistant_response.text}")
             if self.settings.fast_voice_tts_enabled:
                 tts_started = self.clock()
@@ -464,6 +525,16 @@ class FastVoiceRunner:
                 source="fast_voice_rejected",
             )
             self._notify_status("Responding")
+            self._notify_progress(
+                "response_ready",
+                vad_crossed=capture_result.vad_crossed,
+                speech_ms=capture_result.speech_ms,
+                trailing_silence_ms=capture_result.trailing_silence_ms,
+                capture_elapsed_ms=capture_ms,
+                capture_progress=1.0,
+                transcript=raw_transcript,
+                response=assistant_response.text,
+            )
             self.output_func(f"Jarvis: {assistant_response.text}")
             return self._report(
                 input_device,
@@ -486,6 +557,15 @@ class FastVoiceRunner:
 
         if validation.accepted:
             self._notify_status("Thinking")
+            self._notify_progress(
+                "thinking",
+                vad_crossed=capture_result.vad_crossed,
+                speech_ms=capture_result.speech_ms,
+                trailing_silence_ms=capture_result.trailing_silence_ms,
+                capture_elapsed_ms=capture_ms,
+                capture_progress=1.0,
+                transcript=raw_transcript,
+            )
             assistant_started = self.clock()
             try:
                 fast_handler = getattr(self.assistant, "handle_fast_voice_command", None)
@@ -502,6 +582,16 @@ class FastVoiceRunner:
 
             if assistant_response is not None:
                 self._notify_status("Responding")
+                self._notify_progress(
+                    "response_ready",
+                    vad_crossed=capture_result.vad_crossed,
+                    speech_ms=capture_result.speech_ms,
+                    trailing_silence_ms=capture_result.trailing_silence_ms,
+                    capture_elapsed_ms=capture_ms,
+                    capture_progress=1.0,
+                    transcript=raw_transcript,
+                    response=assistant_response.text,
+                )
                 self.output_func(f"Jarvis: {assistant_response.text}")
                 if assistant_response.accepted and self.settings.fast_voice_tts_enabled:
                     tts_started = self.clock()
@@ -580,6 +670,8 @@ class FastVoiceRunner:
         last_speech_frame: int | None = None
         trailing_silence_frames = 0
 
+        self._notify_progress("vad_waiting")
+
         if self._audio_stream is None:
             sd.check_input_settings(device=device_index, samplerate=sample_rate, channels=channels)
         with self._active_input_stream(sd, device_index, sample_rate, channels) as stream:
@@ -601,10 +693,13 @@ class FastVoiceRunner:
                     noise_floor,
                     noise_multiplier=self.settings.voice_vad_noise_multiplier,
                 )
-                if chunk_rms >= threshold:
+                is_speech = chunk_rms >= threshold
+                just_triggered = False
+                if is_speech:
                     if not triggered:
                         samples.extend(preroll_samples)
                         triggered = True
+                        just_triggered = True
                         trigger_start_frame = frames_read - frames_to_read
                     samples.extend(chunk)
                     last_speech_frame = frames_read
@@ -616,13 +711,32 @@ class FastVoiceRunner:
                     levels.append(chunk_rms)
                     preroll_samples.extend(chunk)
 
+                capture_elapsed_ms = (frames_read / sample_rate) * 1000.0
+                capture_progress = min(1.0, frames_read / max_frames)
+                speech_span_ms = (
+                    ((last_speech_frame - trigger_start_frame) / sample_rate) * 1000.0
+                    if trigger_start_frame is not None and last_speech_frame is not None
+                    else 0.0
+                )
+                trailing_ms = (trailing_silence_frames / sample_rate) * 1000.0
+                progress_values = {
+                    "vad_crossed": triggered,
+                    "speech_ms": speech_span_ms,
+                    "trailing_silence_ms": trailing_ms,
+                    "capture_elapsed_ms": capture_elapsed_ms,
+                    "capture_progress": capture_progress,
+                }
+                if just_triggered:
+                    self._notify_progress("vad_triggered", **progress_values)
+                if is_speech:
+                    self._notify_progress("speech_detected", **progress_values)
+                elif triggered:
+                    self._notify_progress("silence_detected", **progress_values)
+                else:
+                    self._notify_progress("vad_waiting", **progress_values)
+
                 if triggered and trigger_start_frame is not None:
                     elapsed_since_trigger = frames_read - trigger_start_frame
-                    speech_span_ms = (
-                        ((last_speech_frame - trigger_start_frame) / sample_rate) * 1000.0
-                        if last_speech_frame is not None
-                        else 0.0
-                    )
                     selected_silence_ms = select_fast_voice_silence_ms(
                         self.settings,
                         speech_span_ms,
@@ -787,6 +901,33 @@ class FastVoiceRunner:
     def _notify_status(self, status: str) -> None:
         if self.status_callback is not None:
             self.status_callback(status)
+
+    def _notify_progress(
+        self,
+        stage: str,
+        *,
+        vad_crossed: bool = False,
+        speech_ms: float = 0.0,
+        trailing_silence_ms: float = 0.0,
+        capture_elapsed_ms: float = 0.0,
+        capture_progress: float = 0.0,
+        transcript: str = "",
+        response: str = "",
+    ) -> None:
+        if self.progress_callback is None:
+            return
+        self.progress_callback(
+            FastVoiceProgress(
+                stage=stage,
+                vad_crossed=vad_crossed,
+                speech_ms=speech_ms,
+                trailing_silence_ms=trailing_silence_ms,
+                capture_elapsed_ms=capture_elapsed_ms,
+                capture_progress=max(0.0, min(1.0, capture_progress)),
+                transcript=transcript,
+                response=response,
+            )
+        )
 
     def _wait_for_clap(self) -> bool:
         sd = self.sounddevice_module or _require_sounddevice()

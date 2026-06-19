@@ -10,6 +10,7 @@ from PySide6.QtWidgets import QApplication
 from config.settings import AppSettings
 import gui.main_window as main_window_module
 from gui.main_window import JarvisMainWindow
+from voice.fast_voice import FastVoiceProgress
 from voice.voice_command_test import NO_COMMAND_DETECTED_MESSAGE
 from voice.voice_loop import (
     ACCEPTED_COMMAND_PREFIX,
@@ -347,6 +348,82 @@ def test_fast_voice_gui_report_populates_existing_hud_panels() -> None:
     app.processEvents()
 
 
+def test_fast_voice_gui_shows_live_capture_progress() -> None:
+    app = _app()
+    window = JarvisMainWindow(
+        settings=AppSettings(_env_file=None, gui_voice_engine="fast"),
+        assistant=StubAssistant(),
+    )
+    events = [
+        FastVoiceProgress(stage="listening_started"),
+        FastVoiceProgress(
+            stage="vad_waiting",
+            capture_elapsed_ms=240.0,
+            capture_progress=0.2,
+        ),
+        FastVoiceProgress(
+            stage="vad_triggered",
+            vad_crossed=True,
+            capture_elapsed_ms=320.0,
+            capture_progress=0.3,
+        ),
+        FastVoiceProgress(
+            stage="speech_detected",
+            vad_crossed=True,
+            speech_ms=640.0,
+            capture_elapsed_ms=960.0,
+            capture_progress=0.6,
+        ),
+        FastVoiceProgress(
+            stage="silence_detected",
+            vad_crossed=True,
+            speech_ms=640.0,
+            trailing_silence_ms=160.0,
+            capture_elapsed_ms=1120.0,
+            capture_progress=0.8,
+        ),
+        FastVoiceProgress(
+            stage="capture_complete",
+            vad_crossed=True,
+            speech_ms=640.0,
+            trailing_silence_ms=160.0,
+            capture_elapsed_ms=1120.0,
+            capture_progress=1.0,
+        ),
+        FastVoiceProgress(stage="transcribing", vad_crossed=True, capture_progress=1.0),
+        FastVoiceProgress(
+            stage="transcript_ready",
+            vad_crossed=True,
+            capture_progress=1.0,
+            transcript="status report",
+        ),
+        FastVoiceProgress(stage="thinking", vad_crossed=True, capture_progress=1.0),
+        FastVoiceProgress(
+            stage="response_ready",
+            vad_crossed=True,
+            capture_progress=1.0,
+            transcript="status report",
+            response="Systems nominal.",
+        ),
+    ]
+
+    for event in events:
+        window._handle_fast_voice_progress(event)
+
+    assert window.voice_loop_status_value.text() == "Response ready"
+    assert window.voice_detail_value.text() == "Response ready"
+    assert window.voice_vad_value.text() == "yes"
+    assert window.voice_command_score_value.text() == "100%"
+    assert window.voice_command_score_bar.value() == 100
+    assert window.transcript.toPlainText() == "status report"
+    assert window.voice_raw_speech_value.text() == "status report"
+    assert window.voice_response_panel.toPlainText() == "Systems nominal."
+
+    window._allow_close = True
+    window.close()
+    app.processEvents()
+
+
 def test_gui_start_voice_selects_fast_engine_and_stop_requests_shutdown(monkeypatch) -> None:
     app = _app()
 
@@ -389,6 +466,7 @@ def test_gui_start_voice_selects_fast_engine_and_stop_requests_shutdown(monkeypa
     assert window.start_voice_loop_button.isEnabled() is False
     assert window.stop_voice_loop_button.isEnabled() is True
     assert window.fast_voice_runner.kwargs["strict_command_validation"] is True
+    assert callable(window.fast_voice_runner.kwargs["progress_callback"])
 
     window._run_fast_voice_worker()
     assert window.fast_voice_runner.max_turns == 1

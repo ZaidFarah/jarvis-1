@@ -41,7 +41,7 @@ from services.startup_service import StartupService, format_startup_action_repor
 from gui.settings_window import SettingsWindow
 from gui.log_viewer import LogViewerWindow
 from voice.audio_diagnostics import AudioDiagnostics, format_microphone_test_summary
-from voice.fast_voice import FastVoiceReport, FastVoiceRunner
+from voice.fast_voice import FastVoiceProgress, FastVoiceReport, FastVoiceRunner
 from voice.voice_command_test import (
     COMMAND_PROMPT,
     LISTENING_FOR_COMMAND_PROMPT,
@@ -887,7 +887,13 @@ class JarvisMainWindow(QMainWindow):
         confidence_rows = [
             ("WAKE SCORE", self.voice_wake_score_value, self.voice_wake_score_bar),
             ("TRANSCRIPT", None, self.voice_transcript_confidence_bar),
-            ("COMMAND SCORE", self.voice_command_score_value, self.voice_command_score_bar),
+            (
+                "CAPTURE PROGRESS"
+                if self.settings.gui_voice_engine == "fast"
+                else "COMMAND SCORE",
+                self.voice_command_score_value,
+                self.voice_command_score_bar,
+            ),
             ("REPAIR", self.voice_repair_confidence_value, self.voice_repair_confidence_bar),
         ]
         for row_index, (label_text, value_widget, bar_widget) in enumerate(confidence_rows, start=1):
@@ -1865,6 +1871,9 @@ class JarvisMainWindow(QMainWindow):
             report_callback=lambda report: self.voice_loop_events.put(
                 ("fast_report", report)
             ),
+            progress_callback=lambda progress: self.voice_loop_events.put(
+                ("fast_progress", progress)
+            ),
             strict_command_validation=True,
         )
         self.voice_loop_status_value.setText("Starting")
@@ -1917,6 +1926,8 @@ class JarvisMainWindow(QMainWindow):
                 event_type, payload = event
                 if event_type == "fast_status":
                     self._handle_fast_voice_status(str(payload))
+                elif event_type == "fast_progress" and isinstance(payload, FastVoiceProgress):
+                    self._handle_fast_voice_progress(payload)
                 elif event_type == "fast_report" and isinstance(payload, FastVoiceReport):
                     self._handle_fast_voice_report(payload)
                 elif event_type == "fast_error":
@@ -1949,6 +1960,68 @@ class JarvisMainWindow(QMainWindow):
         self.set_status(AssistantStatus.ERROR)
         self._append_message("Error", error)
 
+    def _handle_fast_voice_progress(self, progress: FastVoiceProgress) -> None:
+        stage_labels = {
+            "listening_started": "Listening started",
+            "vad_waiting": "VAD waiting",
+            "vad_triggered": "VAD triggered",
+            "speech_detected": "Speech detected",
+            "silence_detected": "Silence detected",
+            "capture_complete": "Capture complete",
+            "transcribing": "Transcribing",
+            "transcript_ready": "Transcript ready",
+            "thinking": "Thinking",
+            "response_ready": "Response ready",
+        }
+        stage_status = {
+            "listening_started": AssistantStatus.LISTENING,
+            "vad_waiting": AssistantStatus.LISTENING,
+            "vad_triggered": AssistantStatus.LISTENING,
+            "speech_detected": AssistantStatus.LISTENING,
+            "silence_detected": AssistantStatus.LISTENING,
+            "capture_complete": AssistantStatus.LISTENING,
+            "transcribing": AssistantStatus.TRANSCRIBING,
+            "transcript_ready": AssistantStatus.TRANSCRIBING,
+            "thinking": AssistantStatus.THINKING,
+            "response_ready": AssistantStatus.RESPONDING,
+        }
+        label = stage_labels.get(progress.stage, progress.stage.replace("_", " ").title())
+        self.voice_loop_status_value.setText(label)
+        self.set_status(stage_status.get(progress.stage, AssistantStatus.LISTENING))
+
+        if progress.stage == "listening_started":
+            self.transcript.setText("Listening for your command...")
+            self.voice_vad_value.setText("no")
+            self.voice_command_score_value.setText("0%")
+            self.voice_command_score_bar.setValue(0)
+
+        progress_percent = int(round(progress.capture_progress * 100))
+        self.voice_vad_value.setText("yes" if progress.vad_crossed else "no")
+        self.voice_command_score_value.setText(f"{progress_percent}%")
+        self.voice_command_score_bar.setValue(progress_percent)
+        self.voice_timing_command_capture_value.setText(
+            f"{progress.capture_elapsed_ms:.0f} ms"
+        )
+        self.voice_timing_slow_value.setText(
+            f"speech={progress.speech_ms:.0f}ms silence={progress.trailing_silence_ms:.0f}ms"
+        )
+
+        detail = label
+        if progress.stage == "vad_waiting":
+            detail = f"Waiting for speech · capture {progress_percent}%"
+        elif progress.stage == "speech_detected":
+            detail = f"Speech detected · {progress.speech_ms:.0f} ms"
+        elif progress.stage == "silence_detected":
+            detail = f"Silence detected · {progress.trailing_silence_ms:.0f} ms trailing"
+        self.voice_detail_value.setText(detail)
+
+        if progress.stage == "transcript_ready":
+            transcript = progress.transcript or "<empty>"
+            self.transcript.setText(transcript)
+            self.voice_raw_speech_value.setText(transcript)
+        if progress.stage == "response_ready" and progress.response:
+            self.voice_response_panel.setText(progress.response)
+
     def _handle_fast_voice_report(self, report: FastVoiceReport) -> None:
         raw = report.raw_transcript or "<empty>"
         cleaned = report.cleaned_transcript or "<empty>"
@@ -1957,6 +2030,7 @@ class JarvisMainWindow(QMainWindow):
         repair = report.speech_repair
 
         self.voice_provider_value.setText(report.provider_name)
+        self.transcript.setText(raw)
         self.voice_raw_speech_value.setText(raw)
         self.voice_cleaned_value.setText(cleaned)
         self.voice_interpreted_value.setText(repaired)
