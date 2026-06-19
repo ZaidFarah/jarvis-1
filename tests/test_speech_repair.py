@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from config.settings import AppSettings
 from voice.speech_repair import (
     REPAIR_STRATEGY_COMMON_INTENT,
@@ -58,6 +60,18 @@ def test_speech_repair_repairs_weather_homophone_without_rewriting_other_whether
     assert weather.confidence == 0.86
     assert weather.strategy == REPAIR_STRATEGY_COMMON_INTENT
     assert ordinary.repaired_transcript == "whether I should go"
+
+
+@pytest.mark.parametrize(
+    "transcript",
+    ["that's report", "status reports", "start us report", "stat us report"],
+)
+def test_speech_repair_repairs_status_report_variants(transcript: str) -> None:
+    result = SpeechRepairer(AppSettings(_env_file=None)).repair(transcript)
+
+    assert result.repaired_transcript == "status report"
+    assert result.confidence == 0.94
+    assert result.strategy == REPAIR_STRATEGY_COMMON_INTENT
 
 
 def test_speech_repair_context_completes_recent_reminder() -> None:

@@ -27,13 +27,17 @@ VAD_PROBLEM = "VAD_PROBLEM"
 WAKE_PROBLEM = "WAKE_PROBLEM"
 STT_PROBLEM = "STT_PROBLEM"
 COMMAND_REPAIR_PROBLEM = "COMMAND_REPAIR_PROBLEM"
+TIMING_PROBLEM = "TIMING_PROBLEM"
 HEALTHY = "HEALTHY"
+HEALTHY_WITH_WARNINGS = "HEALTHY_WITH_WARNINGS"
 
 CALIBRATION_SECONDS = 2.0
 MIN_AVERAGE_RMS = 0.006
 MIN_MAX_RMS = 0.025
 MIN_SIGNAL_TO_NOISE_DB = 10.0
 LATE_VAD_TRIGGER_FRACTION = 0.70
+CALIBRATION_CONTAMINATION_RATIO = 0.75
+NOISE_PERCENTILE = 0.20
 MIN_TRANSCRIPT_CONFIDENCE = 0.35
 
 
@@ -45,10 +49,13 @@ class VoiceHealthSignals:
     max_rms: float = 0.0
     noise_floor: float = 0.0
     signal_to_noise_db: float = 0.0
+    calibration_rms: float = 0.0
+    calibration_contaminated: bool = False
     clipping: bool = False
     vad_crossed: bool = False
     vad_trigger_seconds: float | None = None
     speech_seconds: float = 0.0
+    selected_device_problem: bool = False
     wake_provider_available: bool = False
     wake_detected: bool = False
     wake_requires_stt: bool = False
@@ -67,6 +74,8 @@ class VoiceHealthAudioMetrics:
     max_rms: float
     noise_floor: float
     signal_to_noise_db: float
+    calibration_rms: float
+    calibration_contaminated: bool
     clipping: bool
     vad_threshold: float
     effective_vad_threshold: float
@@ -107,19 +116,25 @@ class VoiceHealthReport:
 
     @property
     def is_healthy(self) -> bool:
-        return self.diagnosis == HEALTHY
+        return self.diagnosis in {HEALTHY, HEALTHY_WITH_WARNINGS}
 
 
 def diagnose_voice_health(signals: VoiceHealthSignals) -> str:
+    pipeline_succeeded = bool(
+        signals.wake_detected
+        and signals.raw_transcript.strip()
+        and signals.command_accepted
+    )
     if (
         not signals.microphone_detected
         or not signals.stream_opened
         or signals.average_rms < MIN_AVERAGE_RMS
         or signals.max_rms < MIN_MAX_RMS
-        or signals.signal_to_noise_db < MIN_SIGNAL_TO_NOISE_DB
         or signals.clipping
-        or _vad_trigger_is_late(signals.vad_trigger_seconds, signals.speech_seconds)
+        or signals.selected_device_problem
     ):
+        return MIC_PROBLEM
+    if not signals.raw_transcript.strip() and signals.signal_to_noise_db < MIN_SIGNAL_TO_NOISE_DB:
         return MIC_PROBLEM
     if not signals.vad_crossed:
         return VAD_PROBLEM
@@ -129,9 +144,14 @@ def diagnose_voice_health(signals: VoiceHealthSignals) -> str:
         return WAKE_PROBLEM
     if _stt_failed(signals):
         return STT_PROBLEM
+    if pipeline_succeeded:
+        if _has_nonfatal_input_warning(signals):
+            return HEALTHY_WITH_WARNINGS
+        return HEALTHY
+    if signals.wake_detected and not signals.repaired_transcript.strip():
+        return TIMING_PROBLEM
     if (
-        not signals.repaired_transcript.strip()
-        or not signals.command_accepted
+        not signals.command_accepted
         or signals.repair_confidence <= 0.0
     ):
         return COMMAND_REPAIR_PROBLEM
@@ -160,6 +180,14 @@ def recommended_voice_action(diagnosis: str) -> str:
         COMMAND_REPAIR_PROBLEM: (
             "Transcription succeeded but command cleaning/repair did not produce an accepted command. Review "
             "the raw, clean, and repaired transcript plus repair rules."
+        ),
+        TIMING_PROBLEM: (
+            "Wake detection succeeded, but no command was captured. Speak immediately when the prompt appears, "
+            "or extend VOICE_HEALTH_SPEECH_SECONDS and rerun the check."
+        ),
+        HEALTHY_WITH_WARNINGS: (
+            "Wake, transcription, and command handling succeeded. Review the warnings, repeat calibration in "
+            "silence, and rerun the check if recognition remains unreliable."
         ),
         HEALTHY: "The measured voice pipeline is healthy. Run python main.py --voice-loop to verify normal operation.",
     }.get(diagnosis, "Review the voice health report and rerun the check.")
@@ -190,6 +218,7 @@ class VoiceHealthCheck:
         devices: list[AudioDeviceInfo] = []
         selected_device: AudioDeviceInfo | None = None
         selected_device_warning: str | None = None
+        selected_device_problem = False
         stream_opened = False
         silence_samples: list[float] = []
         speech_samples: list[float] = []
@@ -202,9 +231,11 @@ class VoiceHealthCheck:
                 devices,
                 self.settings.voice_input_device,
             )
+            device_name_warning = _selected_device_name_warning(selected_device)
+            selected_device_problem = device_name_warning is not None
             selected_device_warning = _join_warnings(
                 selection_warning,
-                _selected_device_name_warning(selected_device),
+                device_name_warning,
             )
             if selected_device is None:
                 errors.append("No microphone input device was detected.")
@@ -213,11 +244,11 @@ class VoiceHealthCheck:
                 silence_samples = self._record(sd, CALIBRATION_SECONDS, selected_device.index)
                 self.output(
                     f"Speech sample: say '{self.settings.wake_phrase.title()}, status report' now "
-                    f"({self.settings.voice_command_record_seconds:.1f} seconds)..."
+                    f"({self.settings.voice_health_speech_seconds:.1f} seconds)..."
                 )
                 speech_samples = self._record(
                     sd,
-                    self.settings.voice_command_record_seconds,
+                    self.settings.voice_health_speech_seconds,
                     selected_device.index,
                 )
                 stream_opened = True
@@ -287,10 +318,13 @@ class VoiceHealthCheck:
             max_rms=audio.max_rms,
             noise_floor=audio.noise_floor,
             signal_to_noise_db=audio.signal_to_noise_db,
+            calibration_rms=audio.calibration_rms,
+            calibration_contaminated=audio.calibration_contaminated,
             clipping=audio.clipping,
             vad_crossed=audio.vad_crossed,
             vad_trigger_seconds=audio.vad_trigger_seconds,
-            speech_seconds=self.settings.voice_command_record_seconds,
+            speech_seconds=self.settings.voice_health_speech_seconds,
+            selected_device_problem=selected_device_problem,
             wake_provider_available=wake_available,
             wake_detected=wake_detection.detected,
             wake_requires_stt=wake_requires_stt,
@@ -308,7 +342,7 @@ class VoiceHealthCheck:
             input_devices=devices,
             selected_input_device=selected_device,
             calibration_seconds=CALIBRATION_SECONDS,
-            speech_seconds=self.settings.voice_command_record_seconds,
+            speech_seconds=self.settings.voice_health_speech_seconds,
             audio=audio,
             wake_provider=wake_resolution.effective_provider,
             wake_model_name=wake_model_name,
@@ -394,10 +428,23 @@ def calculate_voice_health_audio_metrics(
 ) -> VoiceHealthAudioMetrics:
     silence = list(silence_samples)
     speech = list(speech_samples)
-    noise_floor = calculate_rms(silence)
+    calibration_rms = calculate_rms(silence)
     average_rms = calculate_rms(speech)
+    calibration_windows = calculate_window_rms(silence, sample_rate, vad_window_ms=vad_window_ms)
     windows = calculate_window_rms(speech, sample_rate, vad_window_ms=vad_window_ms)
+    calibration_noise = _percentile(calibration_windows, NOISE_PERCENTILE)
+    speech_noise = _percentile(windows, NOISE_PERCENTILE)
+    noise_candidates: list[float] = []
+    if calibration_windows:
+        noise_candidates.append(calibration_noise)
+    if windows:
+        noise_candidates.append(speech_noise)
+    noise_floor = min(noise_candidates) if noise_candidates else 0.0
     max_rms = max(windows) if windows else 0.0
+    calibration_contaminated = bool(
+        average_rms >= MIN_AVERAGE_RMS
+        and calibration_rms >= average_rms * CALIBRATION_CONTAMINATION_RATIO
+    )
     effective_threshold = calculate_effective_vad_threshold(
         vad_threshold,
         noise_floor,
@@ -412,6 +459,8 @@ def calculate_voice_health_audio_metrics(
         max_rms=max_rms,
         noise_floor=noise_floor,
         signal_to_noise_db=_signal_to_noise_db(average_rms, noise_floor),
+        calibration_rms=calibration_rms,
+        calibration_contaminated=calibration_contaminated,
         clipping=any(abs(sample) >= 0.98 for sample in speech),
         vad_threshold=vad_threshold,
         effective_vad_threshold=effective_threshold,
@@ -447,6 +496,7 @@ def format_voice_health_report(report: VoiceHealthReport) -> str:
             "Audio capture and VAD:",
             f"  calibration silence: {report.calibration_seconds:.1f}s",
             f"  speech sample: {report.speech_seconds:.1f}s",
+            f"  calibration RMS: {report.audio.calibration_rms:.6f}",
             f"  average RMS: {report.audio.average_rms:.6f}",
             f"  max RMS: {report.audio.max_rms:.6f}",
             f"  noise floor: {report.audio.noise_floor:.6f}",
@@ -607,6 +657,11 @@ def _input_quality_warnings(signals: VoiceHealthSignals) -> list[str]:
             f"Signal-to-noise ratio {signals.signal_to_noise_db:.2f} dB is below the required "
             f"{MIN_SIGNAL_TO_NOISE_DB:.0f} dB."
         )
+    if signals.calibration_contaminated:
+        warnings.append(
+            "Calibration may have captured noise or speech because silence RMS is close to speech RMS; "
+            "repeat the check and remain silent during calibration."
+        )
     if _vad_trigger_is_late(signals.vad_trigger_seconds, signals.speech_seconds):
         fraction = signals.vad_trigger_seconds / signals.speech_seconds
         warnings.append(
@@ -614,6 +669,14 @@ def _input_quality_warnings(signals: VoiceHealthSignals) -> list[str]:
             "speech was detected very late."
         )
     return warnings
+
+
+def _has_nonfatal_input_warning(signals: VoiceHealthSignals) -> bool:
+    return bool(
+        signals.signal_to_noise_db < MIN_SIGNAL_TO_NOISE_DB
+        or signals.calibration_contaminated
+        or _vad_trigger_is_late(signals.vad_trigger_seconds, signals.speech_seconds)
+    )
 
 
 def _vad_trigger_is_late(trigger_seconds: float | None, speech_seconds: float) -> bool:
@@ -678,6 +741,14 @@ def _signal_to_noise_db(signal_rms: float, noise_floor: float) -> float:
     if noise_floor <= 0.0:
         return math.inf
     return 20.0 * math.log10(signal_rms / noise_floor)
+
+
+def _percentile(values: Sequence[float], percentile: float) -> float:
+    if not values:
+        return 0.0
+    ordered = sorted(max(0.0, float(value)) for value in values)
+    index = int((len(ordered) - 1) * max(0.0, min(1.0, percentile)))
+    return ordered[index]
 
 
 def _format_snr(value: float) -> str:

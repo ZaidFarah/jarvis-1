@@ -500,6 +500,39 @@ Detailed command capture logs are saved to:
 logs/command_capture.log
 ```
 
+## Experimental Phase 10 - Lightweight Fast Voice Mode
+
+Fast voice mode is a separate low-latency path inspired by the tutorial's simple terminal interaction. It does not replace the full wake loop, OpenWakeWord, AssistantCore, OpenAI routing, or the red HUD GUI.
+
+```powershell
+python main.py --fast-voice
+```
+
+The default `enter` activation waits for Enter, records immediately, stops shortly after speech becomes silent, transcribes once, repairs and validates the command, routes it through `AssistantCore`, and prints the response before optional TTS. Type `q` at the activation prompt to exit.
+
+Supported activation modes:
+
+- `enter`: push-to-talk style; press Enter for each command.
+- `direct`: capture one command immediately and exit.
+- `clap`: wait locally for a short high-energy clap, then capture commands. Clap detection is experimental and never sends audio anywhere by itself.
+
+```dotenv
+FAST_VOICE_ENABLED=true
+FAST_VOICE_ACTIVATION=enter
+FAST_VOICE_RECORD_SECONDS=4.0
+FAST_VOICE_SILENCE_MS=450
+FAST_VOICE_TTS_ENABLED=false
+VOICE_INPUT_DEVICE=Microphone Array
+```
+
+Run a single full-path fast command test with:
+
+```powershell
+python main.py --fast-command-test
+```
+
+Each result logs `capture_ms`, `transcribe_ms`, `openai_ms`, `tts_ms`, and `total_ms`. Here `openai_ms` measures the existing `AssistantCore` response stage, which may complete locally without an OpenAI request. Detailed logs are written to `logs/fast_voice.log`.
+
 ## Voice Loop
 
 ```powershell

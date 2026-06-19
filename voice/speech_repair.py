@@ -152,6 +152,15 @@ class SpeechRepairer:
     def _repair_from_common_intents(self, raw: str, cleaned: str) -> SpeechRepairResult | None:
         normalized = _normalize_for_match(cleaned)
         city = self.settings.weather_default_city
+        if normalized in {"thats report", "status reports", "start us report", "stat us report"}:
+            return SpeechRepairResult(
+                raw,
+                cleaned,
+                "status report",
+                0.94,
+                REPAIR_STRATEGY_COMMON_INTENT,
+                "repaired likely status report transcription",
+            )
         if normalized == "weather in":
             return SpeechRepairResult(
                 raw,

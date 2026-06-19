@@ -9,15 +9,19 @@ from config.settings import AppSettings
 from diagnostics.voice_health import (
     COMMAND_REPAIR_PROBLEM,
     HEALTHY,
+    HEALTHY_WITH_WARNINGS,
     MIC_PROBLEM,
     STT_PROBLEM,
+    TIMING_PROBLEM,
     VAD_PROBLEM,
     WAKE_PROBLEM,
     VoiceHealthAudioMetrics,
     VoiceHealthReport,
     VoiceHealthSignals,
+    _input_quality_warnings,
     _select_input_device,
     _selected_device_name_warning,
+    calculate_voice_health_audio_metrics,
     diagnose_voice_health,
     format_voice_health_report,
 )
@@ -54,8 +58,8 @@ def _healthy_signals() -> VoiceHealthSignals:
         ({"stream_opened": False}, MIC_PROBLEM),
         ({"average_rms": 0.0059}, MIC_PROBLEM),
         ({"max_rms": 0.0249}, MIC_PROBLEM),
-        ({"signal_to_noise_db": 9.9}, MIC_PROBLEM),
-        ({"vad_trigger_seconds": 3.51}, MIC_PROBLEM),
+        ({"signal_to_noise_db": 9.9}, HEALTHY_WITH_WARNINGS),
+        ({"vad_trigger_seconds": 3.51}, HEALTHY_WITH_WARNINGS),
         ({"clipping": True}, MIC_PROBLEM),
         ({"vad_crossed": False}, VAD_PROBLEM),
         ({"wake_detected": False}, WAKE_PROBLEM),
@@ -96,6 +100,68 @@ def test_weak_microphone_has_priority_over_failed_wake() -> None:
 
 def test_good_audio_with_failed_wake_is_wake_problem() -> None:
     assert diagnose_voice_health(replace(_healthy_signals(), wake_detected=False)) == WAKE_PROBLEM
+
+
+def test_healthy_audio_late_wake_only_transcript_is_timing_problem() -> None:
+    signals = replace(
+        _healthy_signals(),
+        average_rms=0.063054,
+        max_rms=0.278146,
+        signal_to_noise_db=32.89,
+        vad_trigger_seconds=4.0,
+        wake_detected=True,
+        raw_transcript="Hey Jarvis.",
+        repaired_transcript="",
+        repair_confidence=1.0,
+        command_accepted=False,
+    )
+
+    assert diagnose_voice_health(signals) == TIMING_PROBLEM
+
+
+def test_healthy_audio_with_late_vad_and_complete_command_is_healthy() -> None:
+    signals = replace(_healthy_signals(), vad_trigger_seconds=4.0)
+
+    assert diagnose_voice_health(signals) == HEALTHY_WITH_WARNINGS
+
+
+def test_successful_pipeline_with_low_snr_is_healthy_with_warnings() -> None:
+    signals = replace(
+        _healthy_signals(),
+        signal_to_noise_db=0.19,
+        calibration_rms=0.065784,
+        calibration_contaminated=True,
+    )
+
+    assert diagnose_voice_health(signals) == HEALTHY_WITH_WARNINGS
+
+
+def test_contaminated_calibration_produces_warning() -> None:
+    signals = replace(
+        _healthy_signals(),
+        signal_to_noise_db=0.19,
+        calibration_rms=0.065784,
+        calibration_contaminated=True,
+    )
+
+    warnings = _input_quality_warnings(signals)
+
+    assert any("Calibration may have captured noise or speech" in warning for warning in warnings)
+
+
+def test_contaminated_calibration_uses_robust_speech_percentile() -> None:
+    metrics = calculate_voice_health_audio_metrics(
+        [0.07] * 1000,
+        [0.01] * 800 + [0.2] * 200,
+        sample_rate=1000,
+        vad_threshold=0.02,
+        vad_window_ms=100,
+        noise_multiplier=3.0,
+    )
+
+    assert metrics.calibration_rms == pytest.approx(0.07)
+    assert metrics.noise_floor == pytest.approx(0.01)
+    assert metrics.calibration_contaminated is True
 
 
 class _DefaultAudioDevice:
@@ -144,6 +210,8 @@ def _report(tmp_path: Path) -> VoiceHealthReport:
             max_rms=0.08,
             noise_floor=0.002,
             signal_to_noise_db=23.5,
+            calibration_rms=0.002,
+            calibration_contaminated=False,
             clipping=False,
             vad_threshold=0.0015,
             effective_vad_threshold=0.006,
@@ -182,6 +250,7 @@ def test_voice_health_report_contains_complete_pipeline(tmp_path: Path) -> None:
         "selected device warning: none",
         "calibration silence: 2.0s",
         "speech sample: 5.0s",
+        "calibration RMS: 0.002000",
         "average RMS: 0.030000",
         "max RMS: 0.080000",
         "noise floor: 0.002000",

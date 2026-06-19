@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from config.settings import AppSettings
 
 
@@ -9,6 +11,7 @@ def test_voice_settings_defaults_are_lightweight() -> None:
     assert settings.voice_sample_rate == 16000
     assert settings.voice_channels == 1
     assert settings.voice_input_device == ""
+    assert settings.voice_health_speech_seconds == 6.0
     assert settings.voice_record_seconds == 5.0
     assert settings.voice_microphone_test_seconds == 5.0
     assert settings.voice_vad_enabled is True
@@ -16,6 +19,11 @@ def test_voice_settings_defaults_are_lightweight() -> None:
     assert settings.voice_vad_window_ms == 80
     assert settings.voice_vad_noise_multiplier == 3.0
     assert settings.voice_vad_silence_ms == 650
+    assert settings.fast_voice_enabled is True
+    assert settings.fast_voice_activation == "enter"
+    assert settings.fast_voice_record_seconds == 4.0
+    assert settings.fast_voice_silence_ms == 450
+    assert settings.fast_voice_tts_enabled is False
     assert settings.speech_to_text_provider == "faster_whisper"
     assert settings.whisper_model == "base.en"
     assert settings.whisper_device == "cpu"
@@ -112,11 +120,17 @@ def test_voice_settings_defaults_are_lightweight() -> None:
 def test_voice_settings_read_environment(monkeypatch) -> None:
     monkeypatch.setenv("VOICE_SAMPLE_RATE", "22050")
     monkeypatch.setenv("VOICE_INPUT_DEVICE", "  USB Microphone  ")
+    monkeypatch.setenv("VOICE_HEALTH_SPEECH_SECONDS", "7.5")
     monkeypatch.setenv("VOICE_RECORD_SECONDS", "1.5")
     monkeypatch.setenv("VOICE_VAD_THRESHOLD", "0.02")
     monkeypatch.setenv("VOICE_VAD_WINDOW_MS", "60")
     monkeypatch.setenv("VOICE_VAD_NOISE_MULTIPLIER", "2.5")
     monkeypatch.setenv("VOICE_VAD_SILENCE_MS", "500")
+    monkeypatch.setenv("FAST_VOICE_ENABLED", "false")
+    monkeypatch.setenv("FAST_VOICE_ACTIVATION", "direct")
+    monkeypatch.setenv("FAST_VOICE_RECORD_SECONDS", "3.5")
+    monkeypatch.setenv("FAST_VOICE_SILENCE_MS", "320")
+    monkeypatch.setenv("FAST_VOICE_TTS_ENABLED", "true")
     monkeypatch.setenv("WAKE_THRESHOLD", "0.81")
     monkeypatch.setenv("WAKE_FALLBACK_PROVIDER", "manual")
 
@@ -124,11 +138,17 @@ def test_voice_settings_read_environment(monkeypatch) -> None:
 
     assert settings.voice_sample_rate == 22050
     assert settings.voice_input_device == "USB Microphone"
+    assert settings.voice_health_speech_seconds == 7.5
     assert settings.voice_record_seconds == 1.5
     assert settings.voice_vad_threshold == 0.02
     assert settings.voice_vad_window_ms == 60
     assert settings.voice_vad_noise_multiplier == 2.5
     assert settings.voice_vad_silence_ms == 500
+    assert settings.fast_voice_enabled is False
+    assert settings.fast_voice_activation == "direct"
+    assert settings.fast_voice_record_seconds == 3.5
+    assert settings.fast_voice_silence_ms == 320
+    assert settings.fast_voice_tts_enabled is True
     assert settings.wake_match_threshold == 0.81
     assert settings.wake_fallback_provider == "manual"
 
@@ -143,6 +163,13 @@ def test_voice_settings_keep_previous_jarvis_prefixed_names(monkeypatch) -> None
     assert settings.voice_sample_rate == 24000
     assert settings.voice_record_seconds == 3.0
     assert settings.voice_vad_threshold == 0.03
+
+
+def test_fast_voice_activation_aliases_and_validation() -> None:
+    assert AppSettings(_env_file=None, fast_voice_activation="push-to-talk").fast_voice_activation == "enter"
+    assert AppSettings(_env_file=None, fast_voice_activation="immediate").fast_voice_activation == "direct"
+    with pytest.raises(ValueError, match="Unsupported fast voice activation"):
+        AppSettings(_env_file=None, fast_voice_activation="wake")
 
 
 def test_stt_settings_read_environment(monkeypatch) -> None:

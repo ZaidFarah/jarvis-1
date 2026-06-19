@@ -107,6 +107,15 @@ class AppSettings(BaseSettings):
         default="",
         validation_alias=AliasChoices("VOICE_INPUT_DEVICE", "JARVIS_VOICE_INPUT_DEVICE"),
     )
+    voice_health_speech_seconds: float = Field(
+        default=6.0,
+        ge=1.0,
+        le=30.0,
+        validation_alias=AliasChoices(
+            "VOICE_HEALTH_SPEECH_SECONDS",
+            "JARVIS_VOICE_HEALTH_SPEECH_SECONDS",
+        ),
+    )
     voice_record_seconds: float = Field(
         default=5.0,
         ge=0.25,
@@ -141,6 +150,30 @@ class AppSettings(BaseSettings):
         ge=120,
         le=2500,
         validation_alias=AliasChoices("VOICE_VAD_SILENCE_MS", "JARVIS_VOICE_VAD_SILENCE_MS"),
+    )
+    fast_voice_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("FAST_VOICE_ENABLED", "JARVIS_FAST_VOICE_ENABLED"),
+    )
+    fast_voice_activation: str = Field(
+        default="enter",
+        validation_alias=AliasChoices("FAST_VOICE_ACTIVATION", "JARVIS_FAST_VOICE_ACTIVATION"),
+    )
+    fast_voice_record_seconds: float = Field(
+        default=4.0,
+        ge=1.0,
+        le=30.0,
+        validation_alias=AliasChoices("FAST_VOICE_RECORD_SECONDS", "JARVIS_FAST_VOICE_RECORD_SECONDS"),
+    )
+    fast_voice_silence_ms: int = Field(
+        default=450,
+        ge=120,
+        le=2500,
+        validation_alias=AliasChoices("FAST_VOICE_SILENCE_MS", "JARVIS_FAST_VOICE_SILENCE_MS"),
+    )
+    fast_voice_tts_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("FAST_VOICE_TTS_ENABLED", "JARVIS_FAST_VOICE_TTS_ENABLED"),
     )
     speech_to_text_provider: str = Field(
         default="faster_whisper",
@@ -817,6 +850,16 @@ class AppSettings(BaseSettings):
     @classmethod
     def normalize_voice_input_device(cls, value: str) -> str:
         return value.strip()
+
+    @field_validator("fast_voice_activation")
+    @classmethod
+    def normalize_fast_voice_activation(cls, value: str) -> str:
+        cleaned = value.strip().lower().replace("-", "_")
+        aliases = {"push_to_talk": "enter", "ptt": "enter", "immediate": "direct"}
+        cleaned = aliases.get(cleaned, cleaned)
+        if cleaned not in {"enter", "clap", "direct"}:
+            raise ValueError(f"Unsupported fast voice activation: {value}")
+        return cleaned
 
     @field_validator("weather_provider")
     @classmethod

@@ -68,6 +68,7 @@ from reminders.service import ReminderService
 from reminders.scheduler import ReminderWatcher
 from voice.audio_diagnostics import AudioDiagnostics, format_audio_check_report
 from voice.command_capture import format_command_capture_report, run_command_capture_test
+from voice.fast_voice import FastVoiceRunner, format_fast_voice_report, run_fast_command_test
 from voice.tts import TextToSpeechResult, format_tts_result, speak_text
 from voice.transcription_diagnostics import TranscriptionDiagnostics, format_transcription_report
 from voice.voice_command_test import (
@@ -112,6 +113,23 @@ def main(argv: list[str] | None = None) -> int:
         report = AudioDiagnostics(settings).run_full_check()
         print(format_audio_check_report(report))
         return 0 if report.is_successful else 1
+
+    if "--fast-command-test" in args:
+        settings = load_settings()
+        configure_logging(settings, console=False)
+        report = run_fast_command_test(settings, assistant=_build_cli_assistant(settings))
+        print(format_fast_voice_report(report))
+        return 0 if report.is_successful else 1
+
+    if "--fast-voice" in args:
+        settings = load_settings()
+        configure_logging(settings, console=False)
+        runner = FastVoiceRunner(settings, assistant=_build_cli_assistant(settings))
+        try:
+            return runner.run()
+        except KeyboardInterrupt:
+            print("\nJarvis fast voice stopped.")
+            return 0
 
     if "--voice-health-check" in args:
         settings = load_settings()
