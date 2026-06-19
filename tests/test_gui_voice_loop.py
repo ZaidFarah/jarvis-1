@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import os
+from types import SimpleNamespace
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication
 
 from config.settings import AppSettings
+import gui.main_window as main_window_module
 from gui.main_window import JarvisMainWindow
 from voice.voice_command_test import NO_COMMAND_DETECTED_MESSAGE
 from voice.voice_loop import (
@@ -66,7 +68,9 @@ def test_voice_loop_gui_state_updates_controls_and_status_fields() -> None:
     assert window.voice_wake_ack_value.text() == "Off"
     assert window.voice_response_speech_value.text() == "On"
     assert window.voice_raw_speech_value.text() == "--"
+    assert window.voice_cleaned_value.text() == "--"
     assert window.voice_interpreted_value.text() == "--"
+    assert window.voice_wake_only_value.text() == "--"
     assert window.voice_repair_confidence_value.text() == "--"
     assert window.voice_repair_strategy_value.text() == "--"
     assert window.voice_wake_score_bar.value() == 0
@@ -286,5 +290,155 @@ def test_voice_loop_gui_updates_speech_repair_display() -> None:
     assert window.voice_repair_strategy_value.text() == "rule"
     assert window.voice_loop_status_value.text() == "Confirming repair"
 
+    window.close()
+    app.processEvents()
+
+
+def test_fast_voice_gui_report_populates_existing_hud_panels() -> None:
+    app = _app()
+    window = JarvisMainWindow(
+        settings=AppSettings(_env_file=None, gui_voice_engine="fast"),
+        assistant=StubAssistant(),
+    )
+    report = SimpleNamespace(
+        provider_name="faster_whisper",
+        raw_transcript="Hey Jarvis, status reports",
+        cleaned_transcript="status reports",
+        command="status report",
+        assistant_response=SimpleNamespace(text="Systems nominal."),
+        vad_crossed=True,
+        wake_only=False,
+        speech_repair=SimpleNamespace(strategy="common_intent", confidence=0.94),
+        timing=SimpleNamespace(
+            vad_wait_ms=160.0,
+            audio_prepare_ms=12.0,
+            capture_ms=1280.0,
+            transcribe_ms=545.0,
+            openai_ms=1387.0,
+            tts_ms=0.0,
+            total_ms=3700.0,
+            speech_ms=720.0,
+            trailing_silence_ms=320.0,
+        ),
+        errors=[],
+    )
+
+    for status in ("Listening", "Transcribing", "Thinking", "Responding"):
+        window._handle_fast_voice_status(status)
+        assert window.voice_loop_status_value.text() == status
+
+    window._handle_fast_voice_report(report)  # type: ignore[arg-type]
+
+    assert window.voice_raw_speech_value.text() == "Hey Jarvis, status reports"
+    assert window.voice_cleaned_value.text() == "status reports"
+    assert window.voice_interpreted_value.text() == "status report"
+    assert window.voice_response_panel.toPlainText() == "Systems nominal."
+    assert window.voice_vad_value.text() == "yes"
+    assert window.voice_wake_only_value.text() == "no"
+    assert window.voice_timing_command_capture_value.text() == "1280 ms"
+    assert window.voice_timing_command_transcribe_value.text() == "545 ms"
+    assert window.voice_timing_openai_value.text() == "1387 ms"
+    assert window.voice_timing_total_value.text() == "3700 ms"
+
+    window._allow_close = True
+    window.close()
+    app.processEvents()
+
+
+def test_gui_start_voice_selects_fast_engine_and_stop_requests_shutdown(monkeypatch) -> None:
+    app = _app()
+
+    class FakeFastRunner:
+        def __init__(self, **kwargs) -> None:
+            self.kwargs = kwargs
+            self.stop_requested = False
+
+        def run_continuous(self) -> int:
+            return 0
+
+        def request_stop(self) -> None:
+            self.stop_requested = True
+
+    class FakeThread:
+        def __init__(self, *, target, daemon: bool) -> None:
+            self.target = target
+            self.daemon = daemon
+            self.started = False
+
+        def start(self) -> None:
+            self.started = True
+
+        def is_alive(self) -> bool:
+            return self.started
+
+    monkeypatch.setattr(main_window_module, "FastVoiceRunner", FakeFastRunner)
+    monkeypatch.setattr(main_window_module.threading, "Thread", FakeThread)
+    window = JarvisMainWindow(
+        settings=AppSettings(_env_file=None, gui_voice_engine="fast"),
+        assistant=StubAssistant(),
+    )
+
+    window.start_voice_loop()
+
+    assert isinstance(window.fast_voice_runner, FakeFastRunner)
+    assert window.voice_loop_runner is None
+    assert window.current_mode == "Fast Voice"
+    assert window.start_voice_loop_button.isEnabled() is False
+    assert window.stop_voice_loop_button.isEnabled() is True
+
+    runner = window.fast_voice_runner
+    window.stop_voice_loop()
+    assert runner.stop_requested is True
+
+    window.voice_loop_event_timer.stop()
+    window.fast_voice_runner = None
+    window.voice_loop_thread = None
+    window._allow_close = True
+    window.close()
+    app.processEvents()
+
+
+def test_gui_voice_engine_legacy_keeps_voice_loop_available(monkeypatch) -> None:
+    app = _app()
+
+    class FakeLegacyRunner:
+        def __init__(self, **kwargs) -> None:
+            self.kwargs = kwargs
+            self.stop_requested = False
+
+        def run(self) -> int:
+            return 0
+
+        def request_stop(self) -> None:
+            self.stop_requested = True
+
+    class FakeThread:
+        def __init__(self, *, target, daemon: bool) -> None:
+            self.target = target
+            self.started = False
+
+        def start(self) -> None:
+            self.started = True
+
+        def is_alive(self) -> bool:
+            return self.started
+
+    monkeypatch.setattr(main_window_module, "VoiceLoopRunner", FakeLegacyRunner)
+    monkeypatch.setattr(main_window_module.threading, "Thread", FakeThread)
+    window = JarvisMainWindow(
+        settings=AppSettings(_env_file=None, gui_voice_engine="legacy"),
+        assistant=StubAssistant(),
+    )
+
+    window.start_voice_loop()
+
+    assert isinstance(window.voice_loop_runner, FakeLegacyRunner)
+    assert window.fast_voice_runner is None
+    assert window.current_mode == "Voice Loop"
+
+    window.voice_loop_event_timer.stop()
+    window.voice_loop_runner = None
+    window.voice_loop_thread = None
+    window._allow_close = True
     window.close()
     app.processEvents()

@@ -120,6 +120,18 @@ The GUI now uses a tabbed dark interface with quick actions for voice, tools, re
 
 The main window is a premium dark red glassmorphism dashboard with a three-column HUD layout, a large animated circular core, angular control buttons, confidence meters, turn timing, provider indicators, and a compact command bar at the bottom. It uses a Segoe UI Variable-first font stack with Segoe UI fallback, and it is built entirely from PySide6 widgets, gradients, borders, and animations so it remains lightweight on Windows and does not require external artwork.
 
+The GUI Start Voice button uses the persistent fast voice engine by default. It shows Listening, Transcribing, Thinking, Responding, and Error states and updates the existing HUD panels with raw, cleaned, and repaired speech, response text, VAD/wake-only state, and timing. The legacy wake-based loop remains available through configuration:
+
+```dotenv
+GUI_VOICE_ENGINE=fast
+```
+
+Allowed values are `fast` and `legacy`. Start the source GUI with:
+
+```powershell
+python main.py
+```
+
 Screenshot placeholder note: this repo does not bundle generated screenshots. Add them later under `docs/` or `assets/` only if you want to publish a demo image set.
 
 ## Phase 9.5 Scope

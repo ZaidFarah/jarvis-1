@@ -3,6 +3,7 @@ from __future__ import annotations
 import threading
 from enum import Enum
 from queue import Empty, Queue
+from typing import Any
 
 from PySide6.QtCore import QPoint, QRectF, Qt, QTimer
 from PySide6.QtGui import QAction, QColor, QFont, QFontMetrics, QIcon, QLinearGradient, QMouseEvent, QPainter, QPainterPath, QPen, QPixmap, QRadialGradient
@@ -40,6 +41,7 @@ from services.startup_service import StartupService, format_startup_action_repor
 from gui.settings_window import SettingsWindow
 from gui.log_viewer import LogViewerWindow
 from voice.audio_diagnostics import AudioDiagnostics, format_microphone_test_summary
+from voice.fast_voice import FastVoiceReport, FastVoiceRunner
 from voice.voice_command_test import (
     COMMAND_PROMPT,
     LISTENING_FOR_COMMAND_PROMPT,
@@ -70,8 +72,10 @@ from vision.vision_service import format_vision_check_report
 class AssistantStatus(str, Enum):
     SLEEPING = "Sleeping"
     LISTENING = "Listening"
+    TRANSCRIBING = "Transcribing"
     THINKING = "Thinking"
     SPEAKING = "Speaking"
+    RESPONDING = "Responding"
     FOLLOW_UP = "Follow-up"
     WAKE_DETECTED = "Wake detected"
     ERROR = "Error"
@@ -80,8 +84,10 @@ class AssistantStatus(str, Enum):
 STATUS_COLORS = {
     AssistantStatus.SLEEPING: "#4a2525",
     AssistantStatus.LISTENING: "#d14f4f",
+    AssistantStatus.TRANSCRIBING: "#b83b48",
     AssistantStatus.THINKING: "#8a2633",
     AssistantStatus.SPEAKING: "#b73a3a",
+    AssistantStatus.RESPONDING: "#c94343",
     AssistantStatus.FOLLOW_UP: "#9d3030",
     AssistantStatus.WAKE_DETECTED: "#ef4444",
     AssistantStatus.ERROR: "#ff5a5a",
@@ -215,8 +221,10 @@ class OrbWidget(QWidget):
         self._density = {
             AssistantStatus.SLEEPING: 0.65,
             AssistantStatus.LISTENING: 1.15,
+            AssistantStatus.TRANSCRIBING: 1.0,
             AssistantStatus.THINKING: 0.95,
             AssistantStatus.SPEAKING: 1.2,
+            AssistantStatus.RESPONDING: 1.2,
             AssistantStatus.FOLLOW_UP: 1.05,
             AssistantStatus.WAKE_DETECTED: 1.3,
             AssistantStatus.ERROR: 0.8,
@@ -240,8 +248,10 @@ class OrbWidget(QWidget):
         intensity = {
             AssistantStatus.SLEEPING: 42,
             AssistantStatus.LISTENING: 172,
+            AssistantStatus.TRANSCRIBING: 166,
             AssistantStatus.THINKING: 160,
             AssistantStatus.SPEAKING: 188,
+            AssistantStatus.RESPONDING: 188,
             AssistantStatus.FOLLOW_UP: 165,
             AssistantStatus.WAKE_DETECTED: 220,
             AssistantStatus.ERROR: 235,
@@ -342,7 +352,12 @@ class OrbWidget(QWidget):
         painter.drawText(rect.adjusted(0, 54, 0, -22), Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop, state_text)
 
         wave_heights = [4, 7, 12, 8, 5, 10, 14, 9, 5]
-        if self._status in {AssistantStatus.THINKING, AssistantStatus.SPEAKING}:
+        if self._status in {
+            AssistantStatus.TRANSCRIBING,
+            AssistantStatus.THINKING,
+            AssistantStatus.SPEAKING,
+            AssistantStatus.RESPONDING,
+        }:
             wave_heights = [6, 12, 18, 24, 18, 12, 8, 14, 7]
         elif self._status == AssistantStatus.SLEEPING:
             wave_heights = [3, 4, 6, 4, 3, 5, 6, 4, 3]
@@ -424,7 +439,9 @@ class JarvisMainWindow(QMainWindow):
         self.voice_rms_value = QLabel("--")
         self.voice_vad_value = QLabel("--")
         self.voice_raw_speech_value = QLabel("--")
+        self.voice_cleaned_value = QLabel("--")
         self.voice_interpreted_value = QLabel("--")
+        self.voice_wake_only_value = QLabel("--")
         self.voice_repair_confidence_value = QLabel("--")
         self.voice_repair_strategy_value = QLabel("--")
         self.voice_wake_score_bar = QProgressBar()
@@ -455,8 +472,9 @@ class JarvisMainWindow(QMainWindow):
         self.confirmation_result_value = QLabel("Idle")
         self.reminder_watch_status_value = QLabel("Idle")
         self.voice_loop_runner: VoiceLoopRunner | None = None
+        self.fast_voice_runner: FastVoiceRunner | None = None
         self.voice_loop_thread: threading.Thread | None = None
-        self.voice_loop_events: Queue[str] = Queue()
+        self.voice_loop_events: Queue[Any] = Queue()
         self.voice_loop_event_timer = QTimer(self)
         self.voice_loop_event_timer.timeout.connect(self._drain_voice_loop_events)
         self.reminder_watch_runner: ReminderWatcher | None = None
@@ -523,7 +541,9 @@ class JarvisMainWindow(QMainWindow):
         self.voice_rms_value.setObjectName("voiceLoopValue")
         self.voice_vad_value.setObjectName("voiceLoopValue")
         self.voice_raw_speech_value.setObjectName("voiceLoopValue")
+        self.voice_cleaned_value.setObjectName("voiceLoopValue")
         self.voice_interpreted_value.setObjectName("voiceLoopValue")
+        self.voice_wake_only_value.setObjectName("voiceLoopValue")
         self.voice_repair_confidence_value.setObjectName("voiceLoopValue")
         self.voice_repair_strategy_value.setObjectName("voiceLoopValue")
         self.voice_command_score_value.setObjectName("voiceLoopValue")
@@ -756,8 +776,14 @@ class JarvisMainWindow(QMainWindow):
         timing_title.setObjectName("panelTitle")
         timing_grid.addWidget(timing_title, 0, 0, 1, 4)
         timing_metrics = [
-            ("WAKE CAPTURE", self.voice_timing_wake_capture_value),
-            ("WAKE TRANSCRIBE", self.voice_timing_wake_transcribe_value),
+            (
+                "VAD WAIT" if self.settings.gui_voice_engine == "fast" else "WAKE CAPTURE",
+                self.voice_timing_wake_capture_value,
+            ),
+            (
+                "AUDIO PREP" if self.settings.gui_voice_engine == "fast" else "WAKE TRANSCRIBE",
+                self.voice_timing_wake_transcribe_value,
+            ),
             ("COMMAND CAPTURE", self.voice_timing_command_capture_value),
             ("COMMAND TRANSCRIBE", self.voice_timing_command_transcribe_value),
             ("OPENAI", self.voice_timing_openai_value),
@@ -815,10 +841,21 @@ class JarvisMainWindow(QMainWindow):
         clean_title = QLabel("CLEAN COMMAND")
         clean_title.setObjectName("panelTitle")
         clean_layout.addWidget(clean_title)
-        self.voice_interpreted_value.setObjectName("cleanCommandValue")
-        clean_layout.addWidget(self.voice_interpreted_value)
+        raw_label = QLabel("RAW TRANSCRIPT")
+        raw_label.setObjectName("smallHudLabel")
+        clean_layout.addWidget(raw_label)
         self.voice_raw_speech_value.setObjectName("smallHudBody")
         clean_layout.addWidget(self.voice_raw_speech_value)
+        cleaned_label = QLabel("CLEANED")
+        cleaned_label.setObjectName("smallHudLabel")
+        clean_layout.addWidget(cleaned_label)
+        self.voice_cleaned_value.setObjectName("cleanCommandValue")
+        clean_layout.addWidget(self.voice_cleaned_value)
+        repaired_label = QLabel("REPAIRED")
+        repaired_label.setObjectName("smallHudLabel")
+        clean_layout.addWidget(repaired_label)
+        self.voice_interpreted_value.setObjectName("cleanCommandValue")
+        clean_layout.addWidget(self.voice_interpreted_value)
         right_layout.addWidget(clean_card)
 
         response_card = QFrame()
@@ -876,6 +913,8 @@ class JarvisMainWindow(QMainWindow):
             ("WAKE PROVIDER", self.voice_wake_provider_value),
             ("TTS ENGINE", self.voice_tts_provider_value),
             ("VOICE MODE", self.voice_response_mode_value),
+            ("VAD CROSSED", self.voice_vad_value),
+            ("WAKE ONLY", self.voice_wake_only_value),
         ]
         for row_index, (label_text, value_widget) in enumerate(provider_rows, start=1):
             label = QLabel(label_text)
@@ -1788,6 +1827,10 @@ class JarvisMainWindow(QMainWindow):
             self._append_message("Jarvis", "Voice loop is already running.")
             return
 
+        if self.settings.gui_voice_engine == "fast":
+            self._start_fast_voice_session()
+            return
+
         self._set_mode("Voice Loop")
         self._append_message("Jarvis", "Starting continuous voice loop...")
         self.voice_loop_runner = VoiceLoopRunner(
@@ -1803,7 +1846,36 @@ class JarvisMainWindow(QMainWindow):
         self.voice_loop_event_timer.start(100)
         self.voice_loop_thread.start()
 
+    def _start_fast_voice_session(self) -> None:
+        self._set_mode("Fast Voice")
+        self._append_message("Jarvis", "Starting fast voice session...")
+        self.fast_voice_runner = FastVoiceRunner(
+            settings=self.settings,
+            assistant=self.assistant,
+            output_func=lambda _message: None,
+            status_callback=lambda status: self.voice_loop_events.put(
+                ("fast_status", status)
+            ),
+            report_callback=lambda report: self.voice_loop_events.put(
+                ("fast_report", report)
+            ),
+        )
+        self.voice_loop_status_value.setText("Starting")
+        self.voice_loop_last_command_value.setText("None")
+        self.voice_loop_last_response_value.setText("None")
+        self.voice_loop_thread = threading.Thread(
+            target=self._run_fast_voice_worker,
+            daemon=True,
+        )
+        self._set_voice_loop_running(True)
+        self.voice_loop_event_timer.start(100)
+        self.voice_loop_thread.start()
+
     def stop_voice_loop(self) -> None:
+        if self.fast_voice_runner is not None:
+            self._append_message("Jarvis", "Stopping fast voice session...")
+            self.fast_voice_runner.request_stop()
+            return
         if self.voice_loop_runner is None:
             self._append_message("Jarvis", "Voice loop is not running.")
             self._set_voice_loop_running(False)
@@ -1812,6 +1884,13 @@ class JarvisMainWindow(QMainWindow):
 
         self._append_message("Jarvis", "Stopping voice loop...")
         self.voice_loop_runner.request_stop()
+
+    def _run_fast_voice_worker(self) -> None:
+        try:
+            if self.fast_voice_runner is not None:
+                self.fast_voice_runner.run_continuous()
+        except Exception as exc:  # pragma: no cover - defensive GUI boundary
+            self.voice_loop_events.put(("fast_error", f"{type(exc).__name__}: {exc}"))
 
     def _run_voice_loop_worker(self) -> None:
         try:
@@ -1824,16 +1903,83 @@ class JarvisMainWindow(QMainWindow):
     def _drain_voice_loop_events(self) -> None:
         while True:
             try:
-                status = self.voice_loop_events.get_nowait()
+                event = self.voice_loop_events.get_nowait()
             except Empty:
                 break
-            self._handle_voice_loop_status(status)
+            if isinstance(event, tuple) and len(event) == 2:
+                event_type, payload = event
+                if event_type == "fast_status":
+                    self._handle_fast_voice_status(str(payload))
+                elif event_type == "fast_report" and isinstance(payload, FastVoiceReport):
+                    self._handle_fast_voice_report(payload)
+                elif event_type == "fast_error":
+                    self._handle_fast_voice_error(str(payload))
+                continue
+            self._handle_voice_loop_status(str(event))
 
         if self.voice_loop_thread is not None and not self.voice_loop_thread.is_alive():
-            self._set_voice_loop_running(False)
             self.voice_loop_event_timer.stop()
             self.voice_loop_runner = None
+            self.fast_voice_runner = None
             self.voice_loop_thread = None
+            self._set_voice_loop_running(False)
+
+    def _handle_fast_voice_status(self, status: str) -> None:
+        status_map = {
+            "Listening": AssistantStatus.LISTENING,
+            "Transcribing": AssistantStatus.TRANSCRIBING,
+            "Thinking": AssistantStatus.THINKING,
+            "Responding": AssistantStatus.RESPONDING,
+            "Error": AssistantStatus.ERROR,
+            "Stopped": AssistantStatus.SLEEPING,
+        }
+        self.voice_loop_status_value.setText(status)
+        self.set_status(status_map.get(status, AssistantStatus.SLEEPING))
+
+    def _handle_fast_voice_error(self, error: str) -> None:
+        self.voice_loop_status_value.setText("Error")
+        self.voice_detail_value.setText(error)
+        self.set_status(AssistantStatus.ERROR)
+        self._append_message("Error", error)
+
+    def _handle_fast_voice_report(self, report: FastVoiceReport) -> None:
+        raw = report.raw_transcript or "<empty>"
+        cleaned = report.cleaned_transcript or "<empty>"
+        repaired = report.command or "<empty>"
+        response = report.assistant_response.text if report.assistant_response else "None"
+        repair = report.speech_repair
+
+        self.voice_provider_value.setText(report.provider_name)
+        self.voice_raw_speech_value.setText(raw)
+        self.voice_cleaned_value.setText(cleaned)
+        self.voice_interpreted_value.setText(repaired)
+        self.voice_loop_last_command_value.setText(repaired)
+        self.voice_loop_last_response_value.setText(response)
+        self.voice_response_panel.setText(response)
+        self.voice_vad_value.setText("yes" if report.vad_crossed else "no")
+        self.voice_wake_only_value.setText("yes" if report.wake_only else "no")
+        self.voice_repair_strategy_value.setText(repair.strategy if repair else "--")
+        if repair is not None:
+            self.voice_repair_confidence_value.setText(f"{repair.confidence * 100:.0f}%")
+            self.voice_repair_confidence_bar.setValue(int(round(repair.confidence * 100)))
+
+        timing = report.timing
+        self.voice_timing_wake_capture_value.setText(f"{timing.vad_wait_ms:.0f} ms")
+        self.voice_timing_wake_transcribe_value.setText(f"{timing.audio_prepare_ms:.0f} ms")
+        self.voice_timing_command_capture_value.setText(f"{timing.capture_ms:.0f} ms")
+        self.voice_timing_command_transcribe_value.setText(f"{timing.transcribe_ms:.0f} ms")
+        self.voice_timing_openai_value.setText(f"{timing.openai_ms:.0f} ms")
+        self.voice_timing_tts_value.setText(f"{timing.tts_ms:.0f} ms")
+        self.voice_timing_total_value.setText(f"{timing.total_ms:.0f} ms")
+        self.voice_timing_slow_value.setText(
+            f"speech={timing.speech_ms:.0f}ms silence={timing.trailing_silence_ms:.0f}ms"
+        )
+
+        self._append_message("Heard", raw)
+        if report.assistant_response is not None:
+            self._append_message("Jarvis", response)
+        if report.errors:
+            self._handle_fast_voice_error("; ".join(report.errors))
 
     def _handle_voice_loop_status(self, status: str) -> None:
         status_map = {
@@ -1964,11 +2110,15 @@ class JarvisMainWindow(QMainWindow):
             self.stop_voice_loop_action.setEnabled(running)
         if running:
             self.voice_loop_status_value.setText("Running")
-            self.voice_detail_value.setText("Voice loop active")
-            self._set_mode("Voice Loop")
-        elif self.voice_loop_runner is None:
+            if self.fast_voice_runner is not None:
+                self.voice_detail_value.setText("Fast voice active")
+                self._set_mode("Fast Voice")
+            else:
+                self.voice_detail_value.setText("Voice loop active")
+                self._set_mode("Voice Loop")
+        elif self.voice_loop_runner is None and self.fast_voice_runner is None:
             self.voice_loop_status_value.setText("Idle")
-            self.voice_detail_value.setText("Waiting for wake phrase")
+            self.voice_detail_value.setText("Waiting to start voice")
             self._set_mode("Idle")
 
     def _set_reminder_watch_running(self, running: bool) -> None:
@@ -1993,8 +2143,10 @@ class JarvisMainWindow(QMainWindow):
         detail_map = {
             AssistantStatus.SLEEPING: "Waiting for wake phrase",
             AssistantStatus.LISTENING: "Listening through microphone",
+            AssistantStatus.TRANSCRIBING: "Transcribing speech",
             AssistantStatus.THINKING: "Processing command",
             AssistantStatus.SPEAKING: "Speaking response",
+            AssistantStatus.RESPONDING: "Response ready",
             AssistantStatus.FOLLOW_UP: "Listening for follow-up",
             AssistantStatus.WAKE_DETECTED: "Wake phrase detected",
             AssistantStatus.ERROR: "Attention needed",
@@ -2110,6 +2262,8 @@ class JarvisMainWindow(QMainWindow):
         return values
 
     def request_quit(self) -> None:
+        if self.fast_voice_runner is not None:
+            self.fast_voice_runner.request_stop()
         if self.voice_loop_runner is not None:
             self.voice_loop_runner.request_stop()
         if self.reminder_watch_runner is not None:
@@ -2122,6 +2276,8 @@ class JarvisMainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:  # noqa: N802 - Qt override
         if self._allow_close or not self.settings.minimize_to_tray:
+            if self.fast_voice_runner is not None:
+                self.fast_voice_runner.request_stop()
             if self.voice_loop_runner is not None:
                 self.voice_loop_runner.request_stop()
             if self.reminder_watch_runner is not None:

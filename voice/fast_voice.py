@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib
 import math
 import re
+import threading
 import time
 from collections import deque
 from collections.abc import Callable, Sequence
@@ -138,6 +139,8 @@ class FastVoiceRunner:
         input_func: Callable[[str], str] = input,
         output_func: Callable[[str], None] = print,
         clock: Callable[[], float] = time.perf_counter,
+        status_callback: Callable[[str], None] | None = None,
+        report_callback: Callable[[FastVoiceReport], None] | None = None,
     ) -> None:
         self.settings = settings
         self.assistant = assistant or AssistantCore(settings=settings)
@@ -148,12 +151,15 @@ class FastVoiceRunner:
         self.input_func = input_func
         self.output_func = output_func
         self.clock = clock
+        self.status_callback = status_callback
+        self.report_callback = report_callback
         self.log_file = self.settings.log_dir / "fast_voice.log"
         self.fast_logger = logger.bind(fast_voice=True)
         self._stt_warm_attempted = False
         self._audio_stream: Any | None = None
         self._audio_device_index: int | None = None
         self._audio_device_name = ""
+        self._stop_requested = threading.Event()
         add_managed_file_sink(
             self.log_file,
             level="DEBUG",
@@ -165,6 +171,7 @@ class FastVoiceRunner:
             self.output_func("Fast voice is disabled. Set FAST_VOICE_ENABLED=true to enable it.")
             return 1
 
+        self._stop_requested.clear()
         stt_warmup_ms = 0.0
         if self.settings.fast_voice_warm_stt_on_start:
             stt_warmup_ms = self._warm_stt()
@@ -189,7 +196,10 @@ class FastVoiceRunner:
         )
         try:
             completed = 0
-            while max_turns is None or completed < max_turns:
+            while (
+                not self._stop_requested.is_set()
+                and (max_turns is None or completed < max_turns)
+            ):
                 if activation == "enter":
                     action = self.input_func("Press Enter to speak, or type q to quit: ").strip().lower()
                     if action in {"q", "quit", "exit"}:
@@ -211,6 +221,45 @@ class FastVoiceRunner:
             return 0
         finally:
             self._close_audio_session()
+
+    def run_continuous(self, *, max_turns: int | None = None) -> int:
+        """Run callback-driven fast voice for GUI and other non-terminal clients."""
+        if not self.settings.fast_voice_enabled:
+            self._notify_status("Error")
+            return 1
+
+        self._stop_requested.clear()
+        if self.settings.fast_voice_warm_stt_on_start:
+            self._warm_stt()
+        failed = False
+        try:
+            if self.recorder is None:
+                self._open_audio_session()
+            completed = 0
+            while (
+                not self._stop_requested.is_set()
+                and (max_turns is None or completed < max_turns)
+            ):
+                report = self.run_once()
+                if self.report_callback is not None:
+                    self.report_callback(report)
+                completed += 1
+                if report.errors or not report.provider_available:
+                    failed = True
+                    self._notify_status("Error")
+                    return 1
+            return 0
+        except Exception:
+            failed = True
+            self._notify_status("Error")
+            raise
+        finally:
+            self._close_audio_session()
+            if not failed:
+                self._notify_status("Stopped")
+
+    def request_stop(self) -> None:
+        self._stop_requested.set()
 
     def run_once(self) -> FastVoiceReport:
         if self.settings.fast_voice_warm_stt_on_start:
@@ -251,6 +300,7 @@ class FastVoiceRunner:
                 capture_result=capture_result,
             )
 
+        self._notify_status("Listening")
         self.output_func("Listening...")
         capture_started = self.clock()
         try:
@@ -266,6 +316,7 @@ class FastVoiceRunner:
             samples = capture_result.samples
             input_device = capture_result.input_device
         except Exception as exc:
+            self._notify_status("Error")
             errors.append(f"Fast voice capture failed: {type(exc).__name__}: {exc}")
             samples = []
         capture_wall_ms = (self.clock() - capture_started) * 1000.0
@@ -278,6 +329,7 @@ class FastVoiceRunner:
         capture_ms = float(capture_result.audio_record_ms or 0.0)
 
         if samples:
+            self._notify_status("Transcribing")
             transcribe_started = self.clock()
             try:
                 transcription: TranscriptionResult = self.provider.transcribe(
@@ -286,6 +338,7 @@ class FastVoiceRunner:
                 )
                 raw_transcript = transcription.text.strip()
             except Exception as exc:
+                self._notify_status("Error")
                 errors.append(f"Fast voice transcription failed: {type(exc).__name__}: {exc}")
             transcribe_ms = (self.clock() - transcribe_started) * 1000.0
 
@@ -300,6 +353,7 @@ class FastVoiceRunner:
                 accepted=True,
                 source="fast_voice_empty_audio",
             )
+            self._notify_status("Responding")
             self.output_func(f"Jarvis: {assistant_response.text}")
             if self.settings.fast_voice_tts_enabled:
                 tts_started = self.clock()
@@ -344,6 +398,7 @@ class FastVoiceRunner:
                 accepted=True,
                 source="fast_voice_wake_only",
             )
+            self._notify_status("Responding")
             self.output_func(f"Jarvis: {assistant_response.text}")
             if self.settings.fast_voice_tts_enabled:
                 tts_started = self.clock()
@@ -377,6 +432,7 @@ class FastVoiceRunner:
         validation = self._validate(repair.repaired_transcript)
 
         if validation.accepted:
+            self._notify_status("Thinking")
             assistant_started = self.clock()
             try:
                 fast_handler = getattr(self.assistant, "handle_fast_voice_command", None)
@@ -387,10 +443,12 @@ class FastVoiceRunner:
                         repair.repaired_transcript
                     )
             except Exception as exc:
+                self._notify_status("Error")
                 errors.append(f"Assistant handling failed: {type(exc).__name__}: {exc}")
             openai_ms = (self.clock() - assistant_started) * 1000.0
 
             if assistant_response is not None:
+                self._notify_status("Responding")
                 self.output_func(f"Jarvis: {assistant_response.text}")
                 if assistant_response.accepted and self.settings.fast_voice_tts_enabled:
                     tts_started = self.clock()
@@ -471,7 +529,7 @@ class FastVoiceRunner:
         if self._audio_stream is None:
             sd.check_input_settings(device=device_index, samplerate=sample_rate, channels=channels)
         with self._active_input_stream(sd, device_index, sample_rate, channels) as stream:
-            while frames_read < max_frames:
+            while frames_read < max_frames and not self._stop_requested.is_set():
                 frames_to_read = min(chunk_frames, max_frames - frames_read)
                 read_started = self.clock()
                 recording, _overflowed = stream.read(frames_to_read)
@@ -671,6 +729,10 @@ class FastVoiceRunner:
                 type(exc).__name__,
                 exc,
             )
+
+    def _notify_status(self, status: str) -> None:
+        if self.status_callback is not None:
+            self.status_callback(status)
 
     def _wait_for_clap(self) -> bool:
         sd = self.sounddevice_module or _require_sounddevice()

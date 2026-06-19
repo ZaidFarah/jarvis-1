@@ -8,6 +8,7 @@ from config.settings import AppSettings
 def test_voice_settings_defaults_are_lightweight() -> None:
     settings = AppSettings(_env_file=None)
 
+    assert settings.gui_voice_engine == "fast"
     assert settings.voice_sample_rate == 16000
     assert settings.voice_channels == 1
     assert settings.voice_input_device == ""
@@ -131,6 +132,7 @@ def test_voice_settings_defaults_are_lightweight() -> None:
 
 
 def test_voice_settings_read_environment(monkeypatch) -> None:
+    monkeypatch.setenv("GUI_VOICE_ENGINE", "legacy")
     monkeypatch.setenv("VOICE_SAMPLE_RATE", "22050")
     monkeypatch.setenv("VOICE_INPUT_DEVICE", "  USB Microphone  ")
     monkeypatch.setenv("VOICE_HEALTH_SPEECH_SECONDS", "7.5")
@@ -160,6 +162,7 @@ def test_voice_settings_read_environment(monkeypatch) -> None:
 
     settings = AppSettings(_env_file=None)
 
+    assert settings.gui_voice_engine == "legacy"
     assert settings.voice_sample_rate == 22050
     assert settings.voice_input_device == "USB Microphone"
     assert settings.voice_health_speech_seconds == 7.5
@@ -205,6 +208,13 @@ def test_fast_voice_activation_aliases_and_validation() -> None:
     assert AppSettings(_env_file=None, fast_voice_activation="immediate").fast_voice_activation == "direct"
     with pytest.raises(ValueError, match="Unsupported fast voice activation"):
         AppSettings(_env_file=None, fast_voice_activation="wake")
+
+
+def test_gui_voice_engine_validation() -> None:
+    assert AppSettings(_env_file=None, gui_voice_engine=" FAST ").gui_voice_engine == "fast"
+    assert AppSettings(_env_file=None, gui_voice_engine="legacy").gui_voice_engine == "legacy"
+    with pytest.raises(ValueError, match="Unsupported GUI voice engine"):
+        AppSettings(_env_file=None, gui_voice_engine="hybrid")
 
 
 def test_stt_settings_read_environment(monkeypatch) -> None:

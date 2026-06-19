@@ -91,6 +91,10 @@ class AppSettings(BaseSettings):
     window_height: int = Field(default=620, ge=420, le=1400)
     always_on_top: bool = True
     minimize_to_tray: bool = True
+    gui_voice_engine: str = Field(
+        default="fast",
+        validation_alias=AliasChoices("GUI_VOICE_ENGINE", "JARVIS_GUI_VOICE_ENGINE"),
+    )
     voice_sample_rate: int = Field(
         default=16000,
         ge=8000,
@@ -937,6 +941,14 @@ class AppSettings(BaseSettings):
         cleaned = aliases.get(cleaned, cleaned)
         if cleaned not in {"enter", "clap", "direct"}:
             raise ValueError(f"Unsupported fast voice activation: {value}")
+        return cleaned
+
+    @field_validator("gui_voice_engine")
+    @classmethod
+    def normalize_gui_voice_engine(cls, value: str) -> str:
+        cleaned = value.strip().lower()
+        if cleaned not in {"fast", "legacy"}:
+            raise ValueError(f"Unsupported GUI voice engine: {value}")
         return cleaned
 
     @field_validator("weather_provider")

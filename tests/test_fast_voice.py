@@ -512,6 +512,37 @@ def test_fast_voice_loop_reuses_one_persistent_audio_stream(tmp_path: Path) -> N
     ) == 2
 
 
+def test_fast_voice_continuous_session_emits_gui_stages_and_report(tmp_path: Path) -> None:
+    settings = AppSettings(
+        _env_file=None,
+        log_dir=tmp_path / "logs",
+        voice_input_device="Microphone Array",
+        voice_vad_threshold=0.02,
+        fast_voice_silence_ms=160,
+        fast_voice_fast_stop_enabled=False,
+    )
+    sd = FakeSoundDevice([0.01, 0.01, 0.01, 0.2, 0.2, 0.2, 0.01, 0.01])
+    statuses: list[str] = []
+    reports = []
+    runner = FastVoiceRunner(
+        settings,
+        provider=FakeProvider("status report"),
+        assistant=SpyAssistant(),  # type: ignore[arg-type]
+        sounddevice_module=sd,
+        output_func=lambda _message: None,
+        status_callback=statuses.append,
+        report_callback=reports.append,
+    )
+
+    result = runner.run_continuous(max_turns=1)
+
+    assert result == 0
+    assert statuses == ["Listening", "Transcribing", "Thinking", "Responding", "Stopped"]
+    assert len(reports) == 1
+    assert reports[0].command == "status report"
+    assert sd.stream.close_count == 1
+
+
 def test_fast_command_capture_keeps_one_shot_stream_fallback(tmp_path: Path) -> None:
     settings = AppSettings(
         _env_file=None,
