@@ -100,7 +100,7 @@ class AppSettings(BaseSettings):
         validation_alias=AliasChoices("GUI_STREAM_RESPONSE", "JARVIS_GUI_STREAM_RESPONSE"),
     )
     gui_fast_voice_max_seconds: float = Field(
-        default=2.5,
+        default=2.0,
         ge=1.0,
         le=30.0,
         validation_alias=AliasChoices(
@@ -234,6 +234,10 @@ class AppSettings(BaseSettings):
     fast_voice_tts_enabled: bool = Field(
         default=False,
         validation_alias=AliasChoices("FAST_VOICE_TTS_ENABLED", "JARVIS_FAST_VOICE_TTS_ENABLED"),
+    )
+    fast_voice_tts_mode: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("FAST_VOICE_TTS_MODE", "JARVIS_FAST_VOICE_TTS_MODE"),
     )
     fast_voice_wake_only_response: str = Field(
         default="I'm listening.",
@@ -961,6 +965,17 @@ class AppSettings(BaseSettings):
         cleaned = aliases.get(cleaned, cleaned)
         if cleaned not in {"enter", "clap", "direct"}:
             raise ValueError(f"Unsupported fast voice activation: {value}")
+        return cleaned
+
+    @field_validator("fast_voice_tts_mode")
+    @classmethod
+    def normalize_fast_voice_tts_mode(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = value.strip().lower().replace("-", "_")
+        allowed = {"off", "final_response", "short_ack_only"}
+        if cleaned not in allowed:
+            raise ValueError(f"Unsupported fast voice TTS mode: {value}")
         return cleaned
 
     @field_validator("gui_voice_engine")

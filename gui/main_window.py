@@ -41,7 +41,12 @@ from services.startup_service import StartupService, format_startup_action_repor
 from gui.settings_window import SettingsWindow
 from gui.log_viewer import LogViewerWindow
 from voice.audio_diagnostics import AudioDiagnostics, format_microphone_test_summary
-from voice.fast_voice import FastVoiceProgress, FastVoiceReport, FastVoiceRunner
+from voice.fast_voice import (
+    FastVoiceProgress,
+    FastVoiceReport,
+    FastVoiceRunner,
+    resolve_fast_voice_tts_mode,
+)
 from voice.voice_command_test import (
     COMMAND_PROMPT,
     LISTENING_FOR_COMMAND_PROMPT,
@@ -79,6 +84,17 @@ class AssistantStatus(str, Enum):
     FOLLOW_UP = "Follow-up"
     WAKE_DETECTED = "Wake detected"
     ERROR = "Error"
+
+
+def _fast_voice_tts_status(settings: AppSettings, *, failed: bool = False) -> str:
+    mode = resolve_fast_voice_tts_mode(settings)
+    if mode == "off":
+        return "TTS OFF: text-only mode"
+    if mode == "short_ack_only":
+        label = "TTS ACK: short acknowledgements only"
+    else:
+        label = "TTS FINAL: full responses enabled"
+    return f"{label} (speech failed)" if failed else label
 
 
 STATUS_COLORS = {
@@ -435,11 +451,7 @@ class JarvisMainWindow(QMainWindow):
         self.voice_response_mode_value = QLabel(self.settings.voice_response_mode)
         self.voice_wake_ack_value = QLabel("On" if self.settings.voice_loop_speak_wake_ack else "Off")
         if self.settings.gui_voice_engine == "fast":
-            tts_status = (
-                "TTS ON: speaking enabled"
-                if self.settings.fast_voice_tts_enabled
-                else "TTS OFF: text-only mode"
-            )
+            tts_status = _fast_voice_tts_status(self.settings)
         else:
             tts_status = "On" if self.settings.voice_loop_speak_responses else "Off"
         self.voice_response_speech_value = QLabel(tts_status)
@@ -2079,13 +2091,12 @@ class JarvisMainWindow(QMainWindow):
             self.voice_repair_confidence_value.setText(f"{repair.confidence * 100:.0f}%")
             self.voice_repair_confidence_bar.setValue(int(round(repair.confidence * 100)))
 
-        if self.settings.fast_voice_tts_enabled:
-            if report.tts_result is not None and report.tts_result.error:
-                self.voice_response_speech_value.setText("TTS ON: speech failed")
-            else:
-                self.voice_response_speech_value.setText("TTS ON: speaking enabled")
-        else:
-            self.voice_response_speech_value.setText("TTS OFF: text-only mode")
+        self.voice_response_speech_value.setText(
+            _fast_voice_tts_status(
+                self.settings,
+                failed=bool(report.tts_result is not None and report.tts_result.error),
+            )
+        )
         if not report.command_accepted:
             reason = report.validation.rejection_reason or "unusable speech"
             self.voice_detail_value.setText(f"Command rejected: {reason}. Please try again.")

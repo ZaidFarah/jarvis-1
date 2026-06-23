@@ -157,7 +157,7 @@ def test_fast_voice_vad_with_empty_transcript_returns_clear_local_response(tmp_p
 
 @pytest.mark.parametrize(
     "transcript",
-    ["You", "Okay", "For me", "3 8 8 8 8 9", ""],
+    ["You", "Okay", "For me", "Tell me", "3 8 8 8 8 9", ""],
 )
 def test_gui_fast_voice_rejects_accidental_or_weak_transcripts(
     transcript: str,
@@ -296,6 +296,73 @@ def test_fast_voice_tts_is_controlled_by_fast_setting(tmp_path: Path) -> None:
     assert calls == ["Systems nominal."]
     assert report.tts_result is not None
     assert report.tts_result.spoken is True
+
+
+def test_fast_voice_explicit_tts_off_overrides_legacy_enable_flag(tmp_path: Path) -> None:
+    calls: list[str] = []
+    settings = AppSettings(
+        _env_file=None,
+        log_dir=tmp_path / "logs",
+        fast_voice_tts_enabled=True,
+        fast_voice_tts_mode="off",
+    )
+
+    report = FastVoiceRunner(
+        settings,
+        provider=FakeProvider("status report"),
+        assistant=SpyAssistant(),  # type: ignore[arg-type]
+        recorder=lambda: ([0.2] * 1600, "Microphone Array"),
+        tts_function=lambda text, *_args, **_kwargs: calls.append(text),  # type: ignore[arg-type]
+        output_func=lambda _message: None,
+    ).run_once()
+
+    assert calls == []
+    assert report.tts_result is None
+    assert report.timing.tts_ms == 0.0
+
+
+def test_fast_voice_short_ack_mode_skips_full_response_but_speaks_wake_ack(
+    tmp_path: Path,
+) -> None:
+    settings = AppSettings(
+        _env_file=None,
+        log_dir=tmp_path / "logs",
+        fast_voice_tts_mode="short_ack_only",
+    )
+    calls: list[str] = []
+
+    def fake_tts(text: str, settings: AppSettings, speak_requested: bool) -> TextToSpeechResult:
+        assert speak_requested is True
+        calls.append(text)
+        return TextToSpeechResult(
+            provider_name="fake_tts",
+            provider_available=True,
+            requested=True,
+            spoken=True,
+            log_file=settings.log_dir / "tts.log",
+        )
+
+    command_report = FastVoiceRunner(
+        settings,
+        provider=FakeProvider("status report"),
+        assistant=SpyAssistant(),  # type: ignore[arg-type]
+        recorder=lambda: ([0.2] * 1600, "Microphone Array"),
+        tts_function=fake_tts,
+        output_func=lambda _message: None,
+    ).run_once()
+    wake_report = FastVoiceRunner(
+        settings,
+        provider=FakeProvider("Hey Jarvis"),
+        assistant=SpyAssistant(),  # type: ignore[arg-type]
+        recorder=lambda: ([0.2] * 1600, "Microphone Array"),
+        tts_function=fake_tts,
+        output_func=lambda _message: None,
+    ).run_once()
+
+    assert command_report.tts_result is None
+    assert command_report.timing.tts_ms == 0.0
+    assert wake_report.tts_result is not None
+    assert calls == ["I'm listening."]
 
 
 class FakeInputStream:
@@ -560,6 +627,43 @@ def test_fast_capture_adapts_silence_to_command_length(
     assert select_fast_voice_silence_ms(settings, speech_ms) == expected_silence_ms
     assert sd.stream.read_count == pre_speech_chunks + speech_chunks + expected_silence_chunks
     assert capture.trailing_silence_ms == pytest.approx(expected_silence_chunks * 80.0)
+
+
+def test_gui_fast_capture_extends_active_long_question_past_soft_limit(
+    tmp_path: Path,
+) -> None:
+    settings = AppSettings(
+        _env_file=None,
+        log_dir=tmp_path / "logs",
+        voice_input_device="Microphone Array",
+        voice_vad_threshold=0.02,
+        fast_voice_record_seconds=4.0,
+        fast_voice_long_command_silence_ms=450,
+    )
+    pre_speech_chunks = 3
+    speech_chunks = 28
+    silence_chunks = 6
+    sd = FakeSoundDevice(
+        [0.01] * pre_speech_chunks
+        + [0.2] * speech_chunks
+        + [0.01] * silence_chunks
+    )
+    runner = FastVoiceRunner(
+        settings,
+        provider=FakeProvider("explain quantum computing briefly"),
+        assistant=SpyAssistant(),  # type: ignore[arg-type]
+        sounddevice_module=sd,
+        capture_max_seconds=2.0,
+        strict_command_validation=True,
+        output_func=lambda _message: None,
+    )
+
+    capture = runner._capture_until_silence()
+
+    assert sd.stream.read_count == pre_speech_chunks + speech_chunks + silence_chunks
+    assert capture.audio_record_ms is not None
+    assert capture.speech_ms > 2000.0
+    assert capture.trailing_silence_ms == pytest.approx(480.0)
 
 
 def test_fast_voice_uses_fast_specific_assistant_handler(tmp_path: Path) -> None:
@@ -858,6 +962,7 @@ def test_fast_command_capture_keeps_one_shot_stream_fallback(tmp_path: Path) -> 
 @pytest.mark.parametrize(
     "transcript",
     [
+        "Hey, John, of us.",
         "We cup out of his.",
         "Wake up out of his.",
         "Wake up jar of this.",
@@ -880,7 +985,8 @@ def test_fast_voice_repaired_wake_phrase_stays_local(
 
     assert report.wake_only is True
     assert report.speech_repair is not None
-    assert report.speech_repair.repaired_transcript == "wake up jarvis"
+    expected = "hey jarvis" if transcript == "Hey, John, of us." else "wake up jarvis"
+    assert report.speech_repair.repaired_transcript == expected
     assert report.assistant_response is not None
     assert report.assistant_response.text == "I'm listening."
     assert report.timing.openai_ms == 0.0

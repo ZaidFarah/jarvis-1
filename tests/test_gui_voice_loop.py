@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 from types import SimpleNamespace
 
+import pytest
+
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication
@@ -352,13 +354,13 @@ def test_fast_voice_gui_report_populates_existing_hud_panels() -> None:
         rejection_reason="likely misheard or incomplete command"
     )
     report.assistant_response = SimpleNamespace(
-        text="That sounded incomplete or misheard. Please try again and speak clearly."
+        text="I heard you, but I need a clearer command."
     )
     window._handle_fast_voice_report(report)  # type: ignore[arg-type]
     assert window.voice_detail_value.text() == (
         "Command rejected: likely misheard or incomplete command. Please try again."
     )
-    assert "misheard" in window.voice_response_panel.toPlainText()
+    assert window.voice_response_panel.toPlainText() == "I heard you, but I need a clearer command."
 
     window._allow_close = True
     window.close()
@@ -517,7 +519,33 @@ def test_fast_voice_gui_shows_tts_enabled_status() -> None:
         assistant=StubAssistant(),
     )
 
-    assert window.voice_response_speech_value.text() == "TTS ON: speaking enabled"
+    assert window.voice_response_speech_value.text() == "TTS FINAL: full responses enabled"
+
+    window._allow_close = True
+    window.close()
+    app.processEvents()
+
+
+@pytest.mark.parametrize(
+    ("tts_mode", "expected"),
+    [
+        ("off", "TTS OFF: text-only mode"),
+        ("short_ack_only", "TTS ACK: short acknowledgements only"),
+        ("final_response", "TTS FINAL: full responses enabled"),
+    ],
+)
+def test_fast_voice_gui_shows_tts_mode(tts_mode: str, expected: str) -> None:
+    app = _app()
+    window = JarvisMainWindow(
+        settings=AppSettings(
+            _env_file=None,
+            gui_voice_engine="fast",
+            fast_voice_tts_mode=tts_mode,
+        ),
+        assistant=StubAssistant(),
+    )
+
+    assert window.voice_response_speech_value.text() == expected
 
     window._allow_close = True
     window.close()
@@ -568,7 +596,7 @@ def test_gui_start_voice_selects_fast_engine_and_stop_requests_shutdown(monkeypa
     assert window.fast_voice_runner.kwargs["strict_command_validation"] is True
     assert callable(window.fast_voice_runner.kwargs["progress_callback"])
     assert callable(window.fast_voice_runner.kwargs["response_chunk_callback"])
-    assert window.fast_voice_runner.kwargs["capture_max_seconds"] == 2.5
+    assert window.fast_voice_runner.kwargs["capture_max_seconds"] == 2.0
 
     window._run_fast_voice_worker()
     assert window.fast_voice_runner.max_turns == 1

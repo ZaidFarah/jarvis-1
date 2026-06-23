@@ -154,6 +154,7 @@ class SpeechRepairer:
         raw_normalized = _normalize_for_match(raw)
         city = self.settings.weather_default_city
         wake_variants = {
+            "hey john of us",
             "we cup out of his",
             "wake up out of his",
             "wake up jar of this",
@@ -163,7 +164,7 @@ class SpeechRepairer:
             return SpeechRepairResult(
                 raw,
                 cleaned,
-                "wake up jarvis",
+                "hey jarvis" if normalized == "hey john of us" else "wake up jarvis",
                 0.96,
                 REPAIR_STRATEGY_COMMON_INTENT,
                 "repaired likely wake phrase transcription",

@@ -35,12 +35,11 @@ CLAP_WAIT_SECONDS = 15.0
 CLAP_MIN_RMS = 0.04
 CLAP_MIN_PEAK = 0.15
 SHORT_COMMAND_SPEECH_MS = 1000.0
-FAST_GUI_REJECTED_RESPONSE = "I heard sound, but it did not sound like a command."
-FAST_GUI_MISHEARD_RESPONSE = (
-    "That sounded incomplete or misheard. Please try again and speak clearly."
-)
+FAST_GUI_REJECTED_RESPONSE = "I heard you, but I need a clearer command."
+FAST_GUI_MISHEARD_RESPONSE = FAST_GUI_REJECTED_RESPONSE
 FAST_GUI_MIN_TRANSCRIPT_CONFIDENCE = 0.35
 FAST_GUI_WEAK_COMMANDS = {"you", "okay", "for me"}
+FAST_GUI_INCOMPLETE_COMMANDS = {"tell me"}
 
 
 @dataclass(frozen=True)
@@ -218,7 +217,7 @@ class FastVoiceRunner:
         activation = self.settings.fast_voice_activation
         self.output_func(
             f"Jarvis fast voice ready | activation={activation} | "
-            f"TTS={'on' if self.settings.fast_voice_tts_enabled else 'off'} | "
+            f"TTS={resolve_fast_voice_tts_mode(self.settings)} | "
             f"startup_stt_warmup_ms={stt_warmup_ms:.1f} | "
             f"audio_session_prepare_ms={audio_session_ms:.1f}"
         )
@@ -288,6 +287,30 @@ class FastVoiceRunner:
 
     def request_stop(self) -> None:
         self._stop_requested.set()
+
+    def _speak_response(
+        self,
+        text: str,
+        *,
+        response_kind: str,
+        errors: list[str],
+    ) -> tuple[TextToSpeechResult | None, float]:
+        mode = resolve_fast_voice_tts_mode(self.settings)
+        if mode == "off":
+            return None, 0.0
+        if mode == "short_ack_only" and response_kind != "ack":
+            return None, 0.0
+
+        tts_started = self.clock()
+        result = self.tts_function(
+            text,
+            self.settings,
+            speak_requested=True,
+        )
+        elapsed_ms = (self.clock() - tts_started) * 1000.0
+        if result.error:
+            errors.append(result.error)
+        return result, elapsed_ms
 
     def run_once(self) -> FastVoiceReport:
         if self.settings.fast_voice_warm_stt_on_start:
@@ -431,16 +454,11 @@ class FastVoiceRunner:
                 response=assistant_response.text,
             )
             self.output_func(f"Jarvis: {assistant_response.text}")
-            if self.settings.fast_voice_tts_enabled:
-                tts_started = self.clock()
-                tts_result = self.tts_function(
-                    assistant_response.text,
-                    self.settings,
-                    speak_requested=True,
-                )
-                tts_ms = (self.clock() - tts_started) * 1000.0
-                if tts_result.error:
-                    errors.append(tts_result.error)
+            tts_result, tts_ms = self._speak_response(
+                assistant_response.text,
+                response_kind="ack",
+                errors=errors,
+            )
             return self._report(
                 input_device,
                 raw_transcript,
@@ -487,16 +505,11 @@ class FastVoiceRunner:
                 response=assistant_response.text,
             )
             self.output_func(f"Jarvis: {assistant_response.text}")
-            if self.settings.fast_voice_tts_enabled:
-                tts_started = self.clock()
-                tts_result = self.tts_function(
-                    assistant_response.text,
-                    self.settings,
-                    speak_requested=True,
-                )
-                tts_ms = (self.clock() - tts_started) * 1000.0
-                if tts_result.error:
-                    errors.append(tts_result.error)
+            tts_result, tts_ms = self._speak_response(
+                assistant_response.text,
+                response_kind="ack",
+                errors=errors,
+            )
             return self._report(
                 input_device,
                 raw_transcript,
@@ -526,13 +539,8 @@ class FastVoiceRunner:
             )
 
         if not validation.accepted and self.strict_command_validation:
-            likely_misheard = "misheard" in (validation.rejection_reason or "").lower()
             assistant_response = AssistantResponse(
-                text=(
-                    FAST_GUI_MISHEARD_RESPONSE
-                    if likely_misheard
-                    else FAST_GUI_REJECTED_RESPONSE
-                ),
+                text=FAST_GUI_REJECTED_RESPONSE,
                 accepted=False,
                 source="fast_voice_rejected",
             )
@@ -548,6 +556,11 @@ class FastVoiceRunner:
                 response=assistant_response.text,
             )
             self.output_func(f"Jarvis: {assistant_response.text}")
+            tts_result, tts_ms = self._speak_response(
+                assistant_response.text,
+                response_kind="ack",
+                errors=errors,
+            )
             return self._report(
                 input_device,
                 raw_transcript,
@@ -620,16 +633,12 @@ class FastVoiceRunner:
                     response=assistant_response.text,
                 )
                 self.output_func(f"Jarvis: {assistant_response.text}")
-                if assistant_response.accepted and self.settings.fast_voice_tts_enabled:
-                    tts_started = self.clock()
-                    tts_result = self.tts_function(
+                if assistant_response.accepted:
+                    tts_result, tts_ms = self._speak_response(
                         assistant_response.text,
-                        self.settings,
-                        speak_requested=True,
+                        response_kind="final",
+                        errors=errors,
                     )
-                    tts_ms = (self.clock() - tts_started) * 1000.0
-                    if tts_result.error:
-                        errors.append(tts_result.error)
         else:
             self.output_func(
                 f"Command rejected: {validation.rejection_reason or 'no usable speech detected'}"
@@ -681,7 +690,13 @@ class FastVoiceRunner:
             self.settings.fast_voice_record_seconds,
             capture_max_seconds,
         )
-        max_frames = max(1, int(sample_rate * max_seconds))
+        soft_max_frames = max(1, int(sample_rate * max_seconds))
+        hard_max_seconds = (
+            self.settings.fast_voice_record_seconds
+            if self.strict_command_validation
+            else max_seconds
+        )
+        hard_max_frames = max(soft_max_frames, int(sample_rate * hard_max_seconds))
         selected_silence_ms = self.settings.fast_voice_silence_ms
         minimum_speech_frames = max(
             1,
@@ -707,8 +722,8 @@ class FastVoiceRunner:
         if self._audio_stream is None:
             sd.check_input_settings(device=device_index, samplerate=sample_rate, channels=channels)
         with self._active_input_stream(sd, device_index, sample_rate, channels) as stream:
-            while frames_read < max_frames and not self._stop_requested.is_set():
-                frames_to_read = min(chunk_frames, max_frames - frames_read)
+            while frames_read < hard_max_frames and not self._stop_requested.is_set():
+                frames_to_read = min(chunk_frames, hard_max_frames - frames_read)
                 read_started = self.clock()
                 recording, _overflowed = stream.read(frames_to_read)
                 audio_record_ms += (self.clock() - read_started) * 1000.0
@@ -744,7 +759,7 @@ class FastVoiceRunner:
                     preroll_samples.extend(chunk)
 
                 capture_elapsed_ms = (frames_read / sample_rate) * 1000.0
-                capture_progress = min(1.0, frames_read / max_frames)
+                capture_progress = min(1.0, frames_read / soft_max_frames)
                 speech_span_ms = (
                     ((last_speech_frame - trigger_start_frame) / sample_rate) * 1000.0
                     if trigger_start_frame is not None and last_speech_frame is not None
@@ -782,6 +797,19 @@ class FastVoiceRunner:
                         and trailing_silence_frames >= silence_frames_needed
                     ):
                         break
+                    if frames_read >= soft_max_frames:
+                        should_extend_active_speech = (
+                            self.strict_command_validation
+                            and elapsed_since_trigger >= minimum_speech_frames
+                            and (
+                                is_speech
+                                or trailing_silence_frames < silence_frames_needed
+                            )
+                        )
+                        if not should_extend_active_speech:
+                            break
+                elif frames_read >= soft_max_frames:
+                    break
 
         capture_work_ms = (self.clock() - capture_work_started) * 1000.0
         audio_prepare_ms = max(0.0, capture_work_ms - audio_record_ms)
@@ -799,12 +827,14 @@ class FastVoiceRunner:
         trailing_silence_ms = (trailing_silence_frames / sample_rate) * 1000.0
 
         self.fast_logger.info(
-            "Fast capture device={} samples={} triggered={} max_seconds={} silence_ms={} "
+            "Fast capture device={} samples={} triggered={} soft_max_seconds={} "
+            "hard_max_seconds={} silence_ms={} "
             "audio_record_ms={:.1f} audio_prepare_ms={:.1f}",
             device_name,
             len(samples),
             triggered,
             max_seconds,
+            hard_max_seconds,
             selected_silence_ms,
             audio_record_ms,
             audio_prepare_ms,
@@ -1140,6 +1170,12 @@ def validate_intentional_fast_command(
     compact = "".join(words)
     if normalized in FAST_GUI_WEAK_COMMANDS:
         return CommandValidationResult(False, command, f"weak GUI command: {normalized}")
+    if normalized in FAST_GUI_INCOMPLETE_COMMANDS:
+        return CommandValidationResult(
+            False,
+            command,
+            f"incomplete GUI command: {normalized}",
+        )
     if len(words) < 2 or len(compact) < 5:
         return CommandValidationResult(False, command, "GUI command is too short")
 
@@ -1165,6 +1201,15 @@ def validate_intentional_fast_command(
             f"low transcript confidence: {transcript_confidence:.2f}",
         )
     return base_validation
+
+
+def resolve_fast_voice_tts_mode(settings: AppSettings) -> str:
+    """Resolve the new TTS mode while preserving the legacy enable flag."""
+    if settings.fast_voice_tts_mode is not None:
+        return settings.fast_voice_tts_mode
+    if settings.fast_voice_tts_enabled:
+        return "final_response"
+    return "off"
 
 
 def format_fast_voice_report(report: FastVoiceReport) -> str:
