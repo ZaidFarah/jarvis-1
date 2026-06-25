@@ -359,6 +359,9 @@ def test_file_access_settings_defaults_are_safe() -> None:
     assert settings.file_access_allowed_folders_map["documents"].endswith("\\Documents")
     assert settings.file_access_allowed_folders_map["desktop"].endswith("\\Desktop")
     assert settings.file_access_allowed_folders_map["downloads"].endswith("\\Downloads")
+    assert settings.file_access_allowed_folders_map["pictures"].endswith("\\Pictures")
+    assert settings.file_access_allowed_folders_map["videos"].endswith("\\Videos")
+    assert settings.file_access_allowed_folders_map["music"].endswith("\\Music")
 
 
 def test_file_access_settings_read_environment(monkeypatch: pytest.MonkeyPatch) -> None:

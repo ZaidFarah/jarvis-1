@@ -1213,6 +1213,16 @@ Jarvis can open only sites listed in `WEBSITE_ALLOWED_SITES`. If a site is missi
 - Search queries are URL-encoded before launch.
 - Website logs are saved to `logs/website_launcher.log`.
 
+## Phase 13.3 Scope
+
+- Safe folder opening for whitelisted folders only.
+- Assistant commands: `open downloads`, `open documents`, `open desktop`, `open pictures`, `open videos`, `open music`, `open my jarvis folder`, `open jarvis project`, `open jarvis in vs code`, and `show recent downloads`.
+- Folder paths are restricted to the configured whitelist plus the Jarvis project root.
+- `open jarvis in vs code` reuses the safe VS Code launcher resolution path.
+- Recent downloads are read from the whitelisted Downloads folder and shown locally.
+- Folder logs are saved to `logs/folder_control.log`.
+- Folder access settings: `FILE_ACCESS_ENABLED=true`, `FILE_ACCESS_ALLOWED_FOLDERS=documents=%USERPROFILE%\Documents,desktop=%USERPROFILE%\Desktop,downloads=%USERPROFILE%\Downloads,pictures=%USERPROFILE%\Pictures,videos=%USERPROFILE%\Videos,music=%USERPROFILE%\Music`.
+
 ## Phase 19 Scope
 
 - Safe read-only file access for whitelisted folders only.

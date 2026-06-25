@@ -16,6 +16,11 @@ from security.permissions import PermissionBroker
 from tools.file_access import FileAccess, FileReadResult, FileSummaryResult
 from tools.browser_control import BrowserControl, BrowserSearchResult
 from tools.app_launcher import AppLauncher, canonical_app_name
+from tools.folder_control import (
+    FolderControl,
+    FolderOpenResult,
+    RecentDownloadsResult,
+)
 from tools.website_launcher import WebsiteLauncher
 from reminders.service import ReminderService
 from services.openai_service import OpenAIService
@@ -86,6 +91,10 @@ class AssistantCore:
             self.file_access = FileAccess(self.settings)
         else:
             self.file_access = None
+        if self.settings.file_access_enabled:
+            self.folder_control = FolderControl(self.settings, app_launcher=self.app_launcher)
+        else:
+            self.folder_control = None
         if reminder_service is not None:
             self.reminder_service = reminder_service
         elif self.settings.reminders_enabled:
@@ -217,6 +226,10 @@ class AssistantCore:
         app_launch_response = self._handle_app_launcher_command(cleaned)
         if app_launch_response is not None:
             return app_launch_response
+
+        folder_control_response = self._handle_folder_control_command(cleaned)
+        if folder_control_response is not None:
+            return folder_control_response
 
         browser_search_response = self._handle_browser_search_command(cleaned)
         if browser_search_response is not None:
@@ -875,6 +888,61 @@ class AssistantCore:
             error=result.safe_error,
         )
 
+    def _handle_folder_control_command(self, command: str) -> AssistantResponse | None:
+        normalized = " ".join(command.lower().strip().split())
+        if normalized not in {
+            "open downloads",
+            "open documents",
+            "open desktop",
+            "open pictures",
+            "open videos",
+            "open music",
+            "open my jarvis folder",
+            "open jarvis project",
+            "open jarvis in vs code",
+            "show recent downloads",
+        }:
+            return None
+
+        if self.folder_control is None:
+            return AssistantResponse(text="File access is disabled.", accepted=True, source="local")
+
+        if normalized == "show recent downloads":
+            result = self.folder_control.show_recent_downloads()
+            return AssistantResponse(
+                text=self._recent_downloads_response_text(result),
+                accepted=result.safe_error is None,
+                source="folder_control",
+                error=result.safe_error,
+            )
+
+        if normalized == "open jarvis in vs code":
+            result = self.folder_control.open_jarvis_in_vscode()
+            return AssistantResponse(
+                text=self._folder_open_response_text("jarvis project in VS Code", result),
+                accepted=result.opened,
+                source="folder_control",
+                error=result.safe_error,
+            )
+
+        folder_name = normalized.removeprefix("open ").strip()
+        if folder_name in {"my jarvis folder", "jarvis project"}:
+            result = self.folder_control.open_jarvis_project()
+            return AssistantResponse(
+                text=self._folder_open_response_text("jarvis project", result),
+                accepted=result.opened,
+                source="folder_control",
+                error=result.safe_error,
+            )
+
+        result = self.folder_control.open_folder(folder_name)
+        return AssistantResponse(
+            text=self._folder_open_response_text(folder_name, result),
+            accepted=result.opened,
+            source="folder_control",
+            error=result.safe_error,
+        )
+
     def _read_file(self, filename: str, folder_name: str) -> AssistantResponse:
         if not self.settings.file_access_enabled or self.file_access is None:
             return AssistantResponse(text="File access is disabled.", accepted=True, source="local")
@@ -1373,6 +1441,27 @@ class AssistantCore:
         if result.safe_error:
             return result.safe_error
         return f"Unable to search {provider} for {result.query}."
+
+    @staticmethod
+    def _folder_open_response_text(target_name: str, result: FolderOpenResult) -> str:
+        if result.opened:
+            if target_name == "jarvis project in VS Code":
+                return "Opened the Jarvis project in VS Code."
+            return f"Opened {target_name}."
+        if result.fallback_reason:
+            return result.fallback_reason
+        if result.safe_error:
+            return result.safe_error
+        return f"Unable to open {target_name}."
+
+    @staticmethod
+    def _recent_downloads_response_text(result: RecentDownloadsResult) -> str:
+        if result.safe_error:
+            return result.safe_error
+        if not result.recent_entries:
+            return "I couldn't find any recent downloads."
+        entries = ", ".join(result.recent_entries)
+        return f"Recent downloads: {entries}."
 
     @staticmethod
     def _looks_like_raw_url(value: str) -> bool:

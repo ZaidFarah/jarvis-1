@@ -697,7 +697,10 @@ class AppSettings(BaseSettings):
         default=(
             "documents=%USERPROFILE%\\Documents,"
             "desktop=%USERPROFILE%\\Desktop,"
-            "downloads=%USERPROFILE%\\Downloads"
+            "downloads=%USERPROFILE%\\Downloads,"
+            "pictures=%USERPROFILE%\\Pictures,"
+            "videos=%USERPROFILE%\\Videos,"
+            "music=%USERPROFILE%\\Music"
         ),
         validation_alias=AliasChoices("FILE_ACCESS_ALLOWED_FOLDERS", "JARVIS_FILE_ACCESS_ALLOWED_FOLDERS"),
     )
