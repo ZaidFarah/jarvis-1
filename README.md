@@ -252,6 +252,8 @@ Screenshot placeholder note: this repo does not bundle generated screenshots. Ad
   `what do you remember about ...`, `what is my name`,
   `what do you remember`, and `reset memory`.
 - Memory settings: `MEMORY_ENABLED=true`, `MEMORY_DB_PATH=memory.db`.
+- `MEMORY_CONFIRM_NAMES=true` asks for confirmation before storing short or
+  unusual names. Reply `yes` to save or `no` to discard the pending name.
 - Only explicit personal facts and preferences are stored.
 - Sensitive secrets such as API keys, passwords, and payment card details are rejected.
 - Memory persists across restarts because it is stored in SQLite.
@@ -1085,9 +1087,12 @@ py main.py --chat-session
 
 ```text
 You: My name is Zaid.
+Jarvis: I heard your name as Zaid. Should I remember that?
+You: Yes.
 You: What is my name?
 You: Remember that I prefer dark red UI.
 You: What do you remember about UI?
+You: Correct my name to Zaid.
 You: Forget my name.
 ```
 

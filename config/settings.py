@@ -580,6 +580,13 @@ class AppSettings(BaseSettings):
         default=True,
         validation_alias=AliasChoices("MEMORY_ENABLED", "JARVIS_MEMORY_ENABLED"),
     )
+    memory_confirm_names: bool = Field(
+        default=True,
+        validation_alias=AliasChoices(
+            "MEMORY_CONFIRM_NAMES",
+            "JARVIS_MEMORY_CONFIRM_NAMES",
+        ),
+    )
     memory_database_path: Path = Field(
         default=DEFAULT_CONFIG_PATHS.data_path / "jarvis_memory.db",
         validation_alias=AliasChoices(

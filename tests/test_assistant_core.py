@@ -442,6 +442,7 @@ def test_assistant_core_remembers_and_recalls_user_name_locally(tmp_path) -> Non
     settings = AppSettings(
         _env_file=None,
         memory_enabled=True,
+        memory_confirm_names=False,
         memory_database_path=tmp_path / "memory.db",
     )
     service = FakeOpenAIService(error=AssertionError("OpenAI should not be called for memory"))
@@ -525,18 +526,199 @@ def test_assistant_core_accepts_memory_punctuation_and_case_variants(
     )
 
     remember_response = assistant.handle_command(command)
+    confirmation_response = assistant.handle_command("yes")
     recall_response = assistant.handle_command("What is my name?")
 
-    assert remember_response.text == "I'll remember that: my name is Zaid"
+    assert remember_response.text == "I heard your name as Zaid. Should I remember that?"
+    assert confirmation_response.text == "I'll remember that: my name is Zaid"
     assert recall_response.text == "Your name is Zaid."
     assert store.find_by_key("name") is not None
     assert service.messages == []
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "Correct my name to Zaid",
+        "Change my name to Zaid",
+        "Update my name to Zaid",
+        "My name is actually Zaid",
+    ],
+)
+def test_assistant_core_name_correction_commands_update_immediately(
+    command: str,
+    tmp_path,
+) -> None:
+    settings = AppSettings(
+        _env_file=None,
+        memory_enabled=True,
+        memory_confirm_names=True,
+        memory_database_path=tmp_path / "memory.db",
+    )
+    service = FakeOpenAIService(
+        error=AssertionError("OpenAI should not be called for name correction")
+    )
+    store = SQLiteMemoryStore(settings.memory_database_path)
+    store.remember(
+        "my name is Zate",
+        key="name",
+        category="identity",
+        value="Zate",
+        source="test",
+    )
+    assistant = AssistantCore(
+        settings=settings,
+        openai_service=service,
+        memory_store=store,
+    )
+
+    response = assistant.handle_command(command)
+
+    assert response.text == "I'll remember that: my name is Zaid"
+    assert store.find_by_key("name").value == "Zaid"  # type: ignore[union-attr]
+    assert service.messages == []
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "What is my name?",
+        "Is my name?",
+        "What's my name?",
+        "Tell me my name",
+    ],
+)
+def test_assistant_core_handles_imperfect_name_recall_locally(
+    question: str,
+    tmp_path,
+) -> None:
+    settings = AppSettings(
+        _env_file=None,
+        memory_enabled=True,
+        memory_database_path=tmp_path / "memory.db",
+    )
+    service = FakeOpenAIService(
+        error=AssertionError("OpenAI should not be called for name recall")
+    )
+    store = SQLiteMemoryStore(settings.memory_database_path)
+    store.remember(
+        "my name is Zaid",
+        key="name",
+        category="identity",
+        value="Zaid",
+        source="test",
+    )
+    assistant = AssistantCore(
+        settings=settings,
+        openai_service=service,
+        memory_store=store,
+    )
+
+    response = assistant.handle_command(question)
+
+    assert response.text == "Your name is Zaid."
+    assert response.source == "local"
+    assert service.messages == []
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "What do you remember?",
+        "What do you remember about me?",
+        "Show my memories",
+    ],
+)
+def test_assistant_core_handles_memory_list_variants_locally(
+    question: str,
+    tmp_path,
+) -> None:
+    settings = AppSettings(
+        _env_file=None,
+        memory_enabled=True,
+        memory_database_path=tmp_path / "memory.db",
+    )
+    service = FakeOpenAIService(
+        error=AssertionError("OpenAI should not be called for memory listing")
+    )
+    store = SQLiteMemoryStore(settings.memory_database_path)
+    store.remember(
+        "my name is Zaid",
+        key="name",
+        category="identity",
+        value="Zaid",
+        source="test",
+    )
+    assistant = AssistantCore(
+        settings=settings,
+        openai_service=service,
+        memory_store=store,
+    )
+
+    response = assistant.handle_command(question)
+
+    assert "my name is Zaid" in response.text
+    assert response.source == "local"
+    assert service.messages == []
+
+
+def test_assistant_core_corrects_zate_and_confirms_before_storing_name(
+    tmp_path,
+) -> None:
+    settings = AppSettings(
+        _env_file=None,
+        memory_enabled=True,
+        memory_confirm_names=True,
+        memory_database_path=tmp_path / "memory.db",
+    )
+    service = FakeOpenAIService(
+        error=AssertionError("OpenAI should not be called for confirmation")
+    )
+    store = SQLiteMemoryStore(settings.memory_database_path)
+    assistant = AssistantCore(
+        settings=settings,
+        openai_service=service,
+        memory_store=store,
+    )
+
+    prompt = assistant.handle_command("Remember, my name is Zate.")
+    before_confirmation = store.find_by_key("name")
+    saved = assistant.handle_command("yes")
+
+    assert prompt.text == "I heard your name as Zaid. Should I remember that?"
+    assert before_confirmation is None
+    assert saved.text == "I'll remember that: my name is Zaid"
+    assert store.find_by_key("name").value == "Zaid"  # type: ignore[union-attr]
+
+
+def test_assistant_core_name_confirmation_can_be_declined(tmp_path) -> None:
+    settings = AppSettings(
+        _env_file=None,
+        memory_enabled=True,
+        memory_confirm_names=True,
+        memory_database_path=tmp_path / "memory.db",
+    )
+    store = SQLiteMemoryStore(settings.memory_database_path)
+    assistant = AssistantCore(
+        settings=settings,
+        openai_service=FakeOpenAIService(
+            error=AssertionError("OpenAI should not be called for confirmation")
+        ),
+        memory_store=store,
+    )
+
+    assistant.handle_command("My name is Zaid")
+    response = assistant.handle_command("no")
+
+    assert response.text == "Okay, I won't remember that name."
+    assert store.find_by_key("name") is None
 
 
 def test_assistant_core_supports_remember_my_and_targeted_recall(tmp_path) -> None:
     settings = AppSettings(
         _env_file=None,
         memory_enabled=True,
+        memory_confirm_names=False,
         memory_database_path=tmp_path / "memory.db",
     )
     assistant = AssistantCore(
@@ -555,6 +737,7 @@ def test_assistant_core_forgets_profile_memory_by_key(tmp_path) -> None:
     settings = AppSettings(
         _env_file=None,
         memory_enabled=True,
+        memory_confirm_names=False,
         memory_database_path=tmp_path / "memory.db",
     )
     assistant = AssistantCore(

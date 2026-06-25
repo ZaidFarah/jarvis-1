@@ -98,6 +98,7 @@ class AssistantCore:
             self.agent_runtime = self._create_agent_runtime()
         self._voice_mode_active = False
         self._voice_instruction_override: str | None = None
+        self._pending_name_confirmation: str | None = None
         if memory_store is not None:
             self.memory_store = memory_store
         elif self.settings.memory_enabled:
@@ -307,7 +308,54 @@ class AssistantCore:
         )
 
     def _handle_memory_command(self, command: str) -> AssistantResponse | None:
-        normalized = " ".join(command.lower().strip().split())
+        normalized = self._normalize_memory_command(command)
+
+        correction_match = re.match(
+            r"(?i)^(?:correct|change|update)\s+my name to\s+(.+?)[.!?]*$",
+            command.strip(),
+        )
+        if correction_match:
+            return self._remember_name(
+                correction_match.group(1),
+                source="explicit_correction",
+                require_confirmation=False,
+            )
+
+        actual_name_match = re.match(
+            r"(?i)^my name is actually\s+(.+?)[.!?]*$",
+            command.strip(),
+        )
+        if actual_name_match:
+            return self._remember_name(
+                actual_name_match.group(1),
+                source="explicit_correction",
+                require_confirmation=False,
+            )
+
+        if self._pending_name_confirmation is not None:
+            if normalized in {
+                "yes",
+                "yeah",
+                "yep",
+                "correct",
+                "thats right",
+                "that is right",
+                "confirmed",
+            }:
+                name = self._pending_name_confirmation
+                self._pending_name_confirmation = None
+                return self._remember_name(
+                    name,
+                    source="confirmed_name",
+                    require_confirmation=False,
+                )
+            if normalized in {"no", "nope", "cancel", "not that", "wrong"}:
+                self._pending_name_confirmation = None
+                return AssistantResponse(
+                    text="Okay, I won't remember that name.",
+                    accepted=True,
+                    source="local",
+                )
 
         implicit_name_match = re.match(
             r"(?i)^my name is(?:\s+(.+?))?[.!?]*$",
@@ -317,12 +365,10 @@ class AssistantCore:
             name = (implicit_name_match.group(1) or "").strip(" .!?")
             if not name:
                 return self._incomplete_memory_response()
-            return self._remember_structured(
-                text=f"my name is {name}",
-                key="name",
-                category="identity",
-                value=name,
+            return self._remember_name(
+                name,
                 source="implicit_profile",
+                require_confirmation=True,
             )
 
         remember_match = re.match(
@@ -336,7 +382,11 @@ class AssistantCore:
             )
         if re.match(r"(?i)^remember\s*,?\s*(?:that\s+)?$", command.strip()):
             return self._incomplete_memory_response()
-        if normalized == "what do you remember":
+        if normalized in {
+            "what do you remember",
+            "what do you remember about me",
+            "show my memories",
+        }:
             return self._list_memories()
         remember_about_match = re.match(
             r"(?i)^what do you remember about\s+(.+?)[?.!]*$",
@@ -344,10 +394,14 @@ class AssistantCore:
         )
         if remember_about_match:
             return self._recall_memories(remember_about_match.group(1))
-        my_fact_match = re.match(
-            r"(?i)^what(?:'s| is)\s+my\s+(.+?)[?.!]*$",
-            command.strip(),
-        )
+        if normalized in {
+            "what is my name",
+            "whats my name",
+            "is my name",
+            "tell me my name",
+        }:
+            return self._recall_profile_value("name")
+        my_fact_match = re.match(r"^what is my\s+(.+)$", normalized)
         if my_fact_match:
             return self._recall_profile_value(my_fact_match.group(1))
         forget_match = re.match(r"(?i)^forget that\s+(.+)$", command.strip())
@@ -969,13 +1023,10 @@ class AssistantCore:
 
         name_match = re.match(r"(?i)^my name is\s+(.+)$", text)
         if name_match:
-            name = name_match.group(1).strip()
-            return self._remember_structured(
-                text=f"my name is {name}",
-                key="name",
-                category="identity",
-                value=name,
+            return self._remember_name(
+                name_match.group(1),
                 source=source,
+                require_confirmation=True,
             )
 
         preference_match = re.match(r"(?i)^i prefer\s+(.+)$", text)
@@ -1018,6 +1069,37 @@ class AssistantCore:
             key=f"fact_{self._memory_key(text)}",
             category="fact",
             value=text,
+            source=source,
+        )
+
+    def _remember_name(
+        self,
+        name: str,
+        *,
+        source: str,
+        require_confirmation: bool,
+    ) -> AssistantResponse:
+        cleaned_name = self._correct_name_transcription(name)
+        if not cleaned_name:
+            return self._incomplete_memory_response()
+        if (
+            require_confirmation
+            and self.settings.memory_confirm_names
+            and self._name_needs_confirmation(cleaned_name)
+        ):
+            self._pending_name_confirmation = cleaned_name
+            return AssistantResponse(
+                text=f"I heard your name as {cleaned_name}. Should I remember that?",
+                accepted=True,
+                source="local",
+            )
+
+        self._pending_name_confirmation = None
+        return self._remember_structured(
+            text=f"my name is {cleaned_name}",
+            key="name",
+            category="identity",
+            value=cleaned_name,
             source=source,
         )
 
@@ -1163,6 +1245,34 @@ class AssistantCore:
     def _memory_key(value: str) -> str:
         cleaned = re.sub(r"[^a-z0-9]+", "_", value.casefold()).strip("_")
         return cleaned[:120] or "memory"
+
+    @staticmethod
+    def _correct_name_transcription(value: str) -> str:
+        cleaned = " ".join(value.strip().strip(" .,!?:;").split())
+        corrections = {
+            "zate": "Zaid",
+        }
+        corrected = corrections.get(cleaned.casefold())
+        if corrected is not None:
+            return corrected
+        return " ".join(
+            part if any(character.isupper() for character in part[1:]) else part.capitalize()
+            for part in cleaned.split()
+        )
+
+    @staticmethod
+    def _name_needs_confirmation(value: str) -> bool:
+        compact = re.sub(r"[^A-Za-z]", "", value)
+        if len(compact) <= 4:
+            return True
+        return re.fullmatch(r"[A-Za-z][A-Za-z' -]{1,60}", value) is None
+
+    @staticmethod
+    def _normalize_memory_command(value: str) -> str:
+        lowered = value.casefold().replace("’", "'")
+        without_apostrophes = lowered.replace("'", "")
+        without_punctuation = re.sub(r"[^a-z0-9\s]", " ", without_apostrophes)
+        return " ".join(without_punctuation.split())
 
     @staticmethod
     def _is_incomplete_memory_text(value: str) -> bool:

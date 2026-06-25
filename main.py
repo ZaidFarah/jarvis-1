@@ -766,14 +766,30 @@ def _run_memory_test(settings) -> int:
         print("Jarvis memory test", flush=True)
         print(f"memory database: {memory_path}", flush=True)
 
-        remember_response = assistant.handle_command("remember that the office code is blue")
-        print(f"remember: {remember_response.text}", flush=True)
+        name_response = assistant.handle_command("my name is Zaid")
+        print(f"remember name: {name_response.text}", flush=True)
+        if "Should I remember that?" in name_response.text:
+            confirm_response = assistant.handle_command("yes")
+            print(f"confirm name: {confirm_response.text}", flush=True)
+
+        preference_response = assistant.handle_command(
+            "remember that I prefer dark red UI"
+        )
+        print(f"remember preference: {preference_response.text}", flush=True)
+
+        recall_response = assistant.handle_command("what is my name")
+        print(f"recall name: {recall_response.text}", flush=True)
+
+        targeted_response = assistant.handle_command(
+            "what do you remember about UI"
+        )
+        print(targeted_response.text, flush=True)
 
         list_response = assistant.handle_command("what do you remember")
         print("remembered:", flush=True)
         print(list_response.text, flush=True)
 
-        forget_response = assistant.handle_command("forget that the office code is blue")
+        forget_response = assistant.handle_command("forget my name")
         print(f"forget: {forget_response.text}", flush=True)
 
         reset_response = assistant.handle_command("reset memory")
