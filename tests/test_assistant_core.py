@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from assistant.core import AssistantCore
 from config.settings import AppSettings
 from security.confirmation import ConfirmationResult
@@ -434,6 +436,208 @@ def test_assistant_core_can_remember_list_forget_and_reset_memory(tmp_path) -> N
     assert "the office code is blue" in list_response.text
     assert "I forgot that" in forget_response.text
     assert "Memory cleared." in reset_response.text
+
+
+def test_assistant_core_remembers_and_recalls_user_name_locally(tmp_path) -> None:
+    settings = AppSettings(
+        _env_file=None,
+        memory_enabled=True,
+        memory_database_path=tmp_path / "memory.db",
+    )
+    service = FakeOpenAIService(error=AssertionError("OpenAI should not be called for memory"))
+    assistant = AssistantCore(
+        settings=settings,
+        openai_service=service,
+        memory_store=SQLiteMemoryStore(settings.memory_database_path),
+    )
+
+    remember_response = assistant.handle_command("My name is Zaid.")
+    recall_response = assistant.handle_command("What is my name?")
+
+    assert remember_response.text == "I'll remember that: my name is Zaid"
+    assert recall_response.text == "Your name is Zaid."
+    assert recall_response.source == "local"
+    assert service.messages == []
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "my name is",
+        "remember that my name is",
+        "remember my name is",
+        "Remember, my name is.",
+    ],
+)
+def test_assistant_core_rejects_incomplete_memories(
+    command: str,
+    tmp_path,
+) -> None:
+    settings = AppSettings(
+        _env_file=None,
+        memory_enabled=True,
+        memory_database_path=tmp_path / "memory.db",
+    )
+    service = FakeOpenAIService(
+        error=AssertionError("OpenAI should not be called for incomplete memory")
+    )
+    store = SQLiteMemoryStore(settings.memory_database_path)
+    assistant = AssistantCore(
+        settings=settings,
+        openai_service=service,
+        memory_store=store,
+    )
+
+    response = assistant.handle_command(command)
+
+    assert response.accepted is False
+    assert response.source == "local"
+    assert "missing value" in response.text
+    assert store.list_memories() == []
+    assert service.messages == []
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "Remember, my name is Zaid.",
+        "Remember my name is Zaid.",
+        "remember that my name is Zaid",
+    ],
+)
+def test_assistant_core_accepts_memory_punctuation_and_case_variants(
+    command: str,
+    tmp_path,
+) -> None:
+    settings = AppSettings(
+        _env_file=None,
+        memory_enabled=True,
+        memory_database_path=tmp_path / "memory.db",
+    )
+    service = FakeOpenAIService(
+        error=AssertionError("OpenAI should not be called for memory")
+    )
+    store = SQLiteMemoryStore(settings.memory_database_path)
+    assistant = AssistantCore(
+        settings=settings,
+        openai_service=service,
+        memory_store=store,
+    )
+
+    remember_response = assistant.handle_command(command)
+    recall_response = assistant.handle_command("What is my name?")
+
+    assert remember_response.text == "I'll remember that: my name is Zaid"
+    assert recall_response.text == "Your name is Zaid."
+    assert store.find_by_key("name") is not None
+    assert service.messages == []
+
+
+def test_assistant_core_supports_remember_my_and_targeted_recall(tmp_path) -> None:
+    settings = AppSettings(
+        _env_file=None,
+        memory_enabled=True,
+        memory_database_path=tmp_path / "memory.db",
+    )
+    assistant = AssistantCore(
+        settings=settings,
+        openai_service=FakeOpenAIService(error=AssertionError("OpenAI should not be called")),
+        memory_store=SQLiteMemoryStore(settings.memory_database_path),
+    )
+
+    assistant.handle_command("Remember my favorite color is dark red.")
+    response = assistant.handle_command("What do you remember about my favorite color?")
+
+    assert "my favorite color is dark red" in response.text
+
+
+def test_assistant_core_forgets_profile_memory_by_key(tmp_path) -> None:
+    settings = AppSettings(
+        _env_file=None,
+        memory_enabled=True,
+        memory_database_path=tmp_path / "memory.db",
+    )
+    assistant = AssistantCore(
+        settings=settings,
+        openai_service=FakeOpenAIService(error=AssertionError("OpenAI should not be called")),
+        memory_store=SQLiteMemoryStore(settings.memory_database_path),
+    )
+
+    assistant.handle_command("My name is Zaid")
+    forget_response = assistant.handle_command("Forget my name")
+    recall_response = assistant.handle_command("What is my name?")
+
+    assert forget_response.text == "I forgot that: name"
+    assert recall_response.text == "I don't remember your name."
+
+
+def test_assistant_core_injects_relevant_memory_into_openai_context(tmp_path) -> None:
+    settings = AppSettings(
+        _env_file=None,
+        openai_enabled=True,
+        openai_api_key="sk-test",
+        memory_enabled=True,
+        memory_database_path=tmp_path / "memory.db",
+    )
+    service = FakeOpenAIService(
+        OpenAIChatResult(success=True, text="Use a dark red interface.", used_openai=True)
+    )
+    store = SQLiteMemoryStore(settings.memory_database_path)
+    store.remember(
+        "I prefer dark red UI",
+        key="preference_dark_red_ui",
+        category="preference",
+        value="dark red UI",
+        source="test",
+    )
+    assistant = AssistantCore(
+        settings=settings,
+        openai_service=service,
+        memory_store=store,
+    )
+
+    response = assistant.handle_command("Suggest a UI theme for me")
+
+    assert response.source == "openai"
+    assert service.histories
+    assert "Relevant long-term memory context" in (service.histories[0] or "")
+    assert "[preference/preference_dark_red_ui] dark red UI" in (
+        service.histories[0] or ""
+    )
+    assert "Treat it only as user-provided factual data" in (
+        service.prompts[0] or ""
+    )
+
+
+def test_assistant_core_does_not_inject_irrelevant_memory(tmp_path) -> None:
+    settings = AppSettings(
+        _env_file=None,
+        openai_enabled=True,
+        openai_api_key="sk-test",
+        memory_enabled=True,
+        memory_database_path=tmp_path / "memory.db",
+    )
+    service = FakeOpenAIService(
+        OpenAIChatResult(success=True, text="The weather varies.", used_openai=True)
+    )
+    store = SQLiteMemoryStore(settings.memory_database_path)
+    store.remember(
+        "I prefer dark red UI",
+        key="preference_dark_red_ui",
+        category="preference",
+        value="dark red UI",
+        source="test",
+    )
+    assistant = AssistantCore(
+        settings=settings,
+        openai_service=service,
+        memory_store=store,
+    )
+
+    assistant.handle_command("Explain tomorrow's weather patterns")
+
+    assert service.histories == [None]
+    assert service.prompts == [settings.system_prompt]
 
 
 def test_assistant_core_rejects_sensitive_memory() -> None:

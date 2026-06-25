@@ -20,6 +20,17 @@ REPAIR_STRATEGY_RULE = "rule"
 REPAIR_STRATEGY_CONTEXT = "context"
 REPAIR_STRATEGY_COMMON_INTENT = "common_intent"
 REPAIR_STRATEGY_OPENAI = "openai"
+HEY_JARVIS_VARIANTS = {
+    "hey jar of this",
+    "hey john this",
+    "hey john of us",
+}
+WAKE_UP_JARVIS_VARIANTS = {
+    "we cup out of his",
+    "wake up out of his",
+    "wake up jar of this",
+    "we got jarvis",
+}
 
 
 @dataclass(frozen=True)
@@ -67,6 +78,17 @@ class SpeechRepairer:
 
         if not self.settings.voice_speech_repair_enabled:
             return SpeechRepairResult(raw, cleaned, cleaned, 1.0, REPAIR_STRATEGY_DISABLED, "speech repair disabled")
+
+        wake_target = _wake_repair_target(raw, cleaned)
+        if wake_target is not None:
+            return SpeechRepairResult(
+                raw,
+                cleaned,
+                wake_target,
+                0.96,
+                REPAIR_STRATEGY_COMMON_INTENT,
+                "repaired likely wake phrase transcription",
+            )
 
         if _should_skip_repair(cleaned, reject_phrases=self.settings.voice_command_reject_phrase_list):
             return SpeechRepairResult(raw, cleaned, cleaned, 1.0, REPAIR_STRATEGY_SKIPPED, "speech is empty or filler")
@@ -151,24 +173,7 @@ class SpeechRepairer:
 
     def _repair_from_common_intents(self, raw: str, cleaned: str) -> SpeechRepairResult | None:
         normalized = _normalize_for_match(cleaned)
-        raw_normalized = _normalize_for_match(raw)
         city = self.settings.weather_default_city
-        wake_variants = {
-            "hey john of us",
-            "we cup out of his",
-            "wake up out of his",
-            "wake up jar of this",
-            "we got jarvis",
-        }
-        if normalized in wake_variants or raw_normalized in wake_variants:
-            return SpeechRepairResult(
-                raw,
-                cleaned,
-                "hey jarvis" if normalized == "hey john of us" else "wake up jarvis",
-                0.96,
-                REPAIR_STRATEGY_COMMON_INTENT,
-                "repaired likely wake phrase transcription",
-            )
         if normalized in {"thats report", "status reports", "start us report", "stat us report"}:
             return SpeechRepairResult(
                 raw,
@@ -315,6 +320,18 @@ def _normalize_for_match(value: str) -> str:
     without_apostrophes = lowered.replace("'", "")
     without_punctuation = re.sub(r"[^a-z0-9\s]", " ", without_apostrophes)
     return re.sub(r"\s+", " ", without_punctuation).strip()
+
+
+def _wake_repair_target(raw: str, cleaned: str) -> str | None:
+    normalized_values = {
+        _normalize_for_match(raw),
+        _normalize_for_match(cleaned),
+    }
+    if normalized_values.intersection(HEY_JARVIS_VARIANTS):
+        return "hey jarvis"
+    if normalized_values.intersection(WAKE_UP_JARVIS_VARIANTS):
+        return "wake up jarvis"
+    return None
 
 
 def repair_similarity(left: str, right: str) -> float:

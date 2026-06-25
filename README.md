@@ -242,14 +242,21 @@ Screenshot placeholder note: this repo does not bundle generated screenshots. Ad
 - `reset conversation` clears only the current short-term history.
 - Conversation history is not written to disk.
 
-## Phase 11 Scope
+## Phase 12.1 Long-Term Memory
 
-- SQLite-only persistent local memory.
-- Explicit memory commands only: `remember that ...`, `forget that ...`, `what do you remember`, and `reset memory`.
-- Memory settings: `MEMORY_ENABLED=true`, `MEMORY_DATABASE_PATH=data/jarvis_memory.db`.
-- Only user-approved facts are stored.
+- SQLite-only persistent long-term memory.
+- Structured entries store an id, key, category, value, source, creation time,
+  and update time.
+- Supported commands include `my name is ...`, `remember that ...`,
+  `remember my ...`, `forget that ...`, `forget my ...`,
+  `what do you remember about ...`, `what is my name`,
+  `what do you remember`, and `reset memory`.
+- Memory settings: `MEMORY_ENABLED=true`, `MEMORY_DB_PATH=memory.db`.
+- Only explicit personal facts and preferences are stored.
 - Sensitive secrets such as API keys, passwords, and payment card details are rejected.
 - Memory persists across restarts because it is stored in SQLite.
+- Relevant memories are added to OpenAI context as user-provided factual data,
+  not instructions. The current user message overrides conflicting memory.
 
 ## Phase 12 Scope
 
@@ -1066,7 +1073,23 @@ The chat session keeps a single in-memory conversation open across turns. It reu
 py main.py --memory-test
 ```
 
-The memory test uses an isolated SQLite database and exercises remember, list, forget, and reset flows without touching the main memory database.
+The memory test uses an isolated SQLite database and exercises structured name
+and preference storage, targeted recall, listing, forgetting, and reset without
+touching the main memory database.
+
+Manual memory examples:
+
+```powershell
+py main.py --chat-session
+```
+
+```text
+You: My name is Zaid.
+You: What is my name?
+You: Remember that I prefer dark red UI.
+You: What do you remember about UI?
+You: Forget my name.
+```
 
 ## Weather Check
 

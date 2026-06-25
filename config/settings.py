@@ -582,7 +582,12 @@ class AppSettings(BaseSettings):
     )
     memory_database_path: Path = Field(
         default=DEFAULT_CONFIG_PATHS.data_path / "jarvis_memory.db",
-        validation_alias=AliasChoices("MEMORY_DATABASE_PATH", "JARVIS_MEMORY_DATABASE_PATH"),
+        validation_alias=AliasChoices(
+            "MEMORY_DB_PATH",
+            "MEMORY_DATABASE_PATH",
+            "JARVIS_MEMORY_DB_PATH",
+            "JARVIS_MEMORY_DATABASE_PATH",
+        ),
     )
     reminders_enabled: bool = Field(
         default=True,

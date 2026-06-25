@@ -77,7 +77,9 @@ def test_speech_repair_repairs_status_report_variants(transcript: str) -> None:
 @pytest.mark.parametrize(
     ("transcript", "expected"),
     [
+        ("hey john this", "hey jarvis"),
         ("hey john of us", "hey jarvis"),
+        ("hey jar of this", "hey jarvis"),
         ("we cup out of his", "wake up jarvis"),
         ("wake up out of his", "wake up jarvis"),
         ("wake up jar of this", "wake up jarvis"),

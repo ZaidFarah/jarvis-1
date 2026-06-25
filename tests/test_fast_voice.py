@@ -1080,7 +1080,9 @@ def test_fast_command_capture_keeps_one_shot_stream_fallback(tmp_path: Path) -> 
 @pytest.mark.parametrize(
     "transcript",
     [
+        "Hey, John, this.",
         "Hey, John, of us.",
+        "Hey, Jar of this.",
         "We cup out of his.",
         "Wake up out of his.",
         "Wake up jar of this.",
@@ -1103,7 +1105,11 @@ def test_fast_voice_repaired_wake_phrase_stays_local(
 
     assert report.wake_only is True
     assert report.speech_repair is not None
-    expected = "hey jarvis" if transcript == "Hey, John, of us." else "wake up jarvis"
+    expected = (
+        "hey jarvis"
+        if transcript in {"Hey, John, this.", "Hey, John, of us.", "Hey, Jar of this."}
+        else "wake up jarvis"
+    )
     assert report.speech_repair.repaired_transcript == expected
     assert report.assistant_response is not None
     assert report.assistant_response.text == "I'm listening."

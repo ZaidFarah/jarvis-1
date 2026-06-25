@@ -135,12 +135,22 @@ def test_agent_settings_read_environment(monkeypatch: pytest.MonkeyPatch) -> Non
 
 def test_memory_settings_read_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MEMORY_ENABLED", "false")
-    monkeypatch.setenv("MEMORY_DATABASE_PATH", "data/custom_memory.db")
+    monkeypatch.setenv("MEMORY_DB_PATH", "data/custom_memory.db")
 
     settings = AppSettings(_env_file=None)
 
     assert settings.memory_enabled is False
     assert settings.memory_database_path.name == "custom_memory.db"
+
+
+def test_memory_settings_keep_legacy_database_path_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MEMORY_DATABASE_PATH", "data/legacy_memory.db")
+
+    settings = AppSettings(_env_file=None)
+
+    assert settings.memory_database_path.name == "legacy_memory.db"
 
 
 def test_weather_settings_defaults_are_safe() -> None:
