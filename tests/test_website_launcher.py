@@ -6,6 +6,7 @@ import pytest
 
 from assistant.core import AssistantCore
 from config.settings import AppSettings
+from tools.browser_control import BrowserControl
 from tools.website_launcher import (
     WebsiteLauncher,
     WebsiteLauncherCheckReport,
@@ -30,6 +31,8 @@ def test_website_launcher_allowed_site_lookup(tmp_path: Path) -> None:
 
     assert launcher.allowed_sites["google"] == "https://www.google.com"
     assert launcher.allowed_sites["outlook"] == "https://outlook.office.com"
+    assert launcher.allowed_sites["chatgpt"] == "https://chatgpt.com"
+    assert launcher.allowed_sites["calendar"] == "https://calendar.google.com"
 
 
 def test_website_launcher_unconfigured_site_rejected(tmp_path: Path) -> None:
@@ -142,14 +145,46 @@ def test_website_launcher_open_report_includes_resolved_url(tmp_path: Path) -> N
 
 def test_assistant_core_routes_website_commands(tmp_path: Path) -> None:
     settings = AppSettings(_env_file=None, log_dir=tmp_path)
-    assistant = AssistantCore(settings=settings, openai_service=FakeOpenAIService())
-    assistant.website_launcher = WebsiteLauncher(settings, browser_open=lambda *args, **kwargs: True)
+    browser_control = BrowserControl(settings, browser_open=lambda *args, **kwargs: True)
+    assistant = AssistantCore(settings=settings, openai_service=FakeOpenAIService(), browser_control=browser_control)
 
     response = assistant.handle_command("open google")
 
     assert response.source == "website"
     assert response.accepted is True
     assert "Opened google" in response.text
+
+
+@pytest.mark.parametrize(
+    ("command", "expected_phrase"),
+    [
+        ("search google for jarvis fast voice", "Searched Google for jarvis fast voice."),
+        ("search youtube for red hud gui", "Searched YouTube for red hud gui."),
+    ],
+)
+def test_assistant_core_routes_browser_search_commands_locally(
+    command: str,
+    expected_phrase: str,
+    tmp_path: Path,
+) -> None:
+    captured: list[tuple[str, dict[str, object]]] = []
+
+    def fake_open(url: str, **kwargs):
+        captured.append((url, kwargs))
+        return True
+
+    settings = AppSettings(_env_file=None, log_dir=tmp_path)
+    browser_control = BrowserControl(settings, browser_open=fake_open)
+    assistant = AssistantCore(settings=settings, openai_service=FakeOpenAIService(), browser_control=browser_control)
+
+    response = assistant.handle_command(command)
+
+    assert response.source == "browser"
+    assert response.accepted is True
+    assert response.text == expected_phrase
+    assert captured
+    assert " " not in captured[0][0].split("?", 1)[-1]
+    assert "+" in captured[0][0] or "%20" in captured[0][0]
 
 
 def test_assistant_core_rejects_raw_website_urls(tmp_path: Path) -> None:

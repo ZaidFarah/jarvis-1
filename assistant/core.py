@@ -14,6 +14,7 @@ from security.confirmation import ConfirmationResult
 from config.settings import AppSettings, load_settings
 from security.permissions import PermissionBroker
 from tools.file_access import FileAccess, FileReadResult, FileSummaryResult
+from tools.browser_control import BrowserControl, BrowserSearchResult
 from tools.app_launcher import AppLauncher, canonical_app_name
 from tools.website_launcher import WebsiteLauncher
 from reminders.service import ReminderService
@@ -47,6 +48,7 @@ class AssistantCore:
         gmail_service: GmailService | None = None,
         reminder_service: ReminderService | None = None,
         vision_service: VisionService | None = None,
+        browser_control: BrowserControl | None = None,
         confirmation_handler: Callable[[str, str, str], ConfirmationResult] | None = None,
     ) -> None:
         self.settings = settings or load_settings()
@@ -70,8 +72,14 @@ class AssistantCore:
             self.app_launcher = AppLauncher(self.settings)
         else:
             self.app_launcher = None
-        if self.settings.website_launcher_enabled:
-            self.website_launcher = WebsiteLauncher(self.settings)
+        if browser_control is not None:
+            self.browser_control = browser_control
+        elif self.settings.website_launcher_enabled:
+            self.browser_control = BrowserControl(self.settings)
+        else:
+            self.browser_control = None
+        if self.browser_control is not None:
+            self.website_launcher = self.browser_control.website_launcher
         else:
             self.website_launcher = None
         if self.settings.file_access_enabled:
@@ -209,6 +217,10 @@ class AssistantCore:
         app_launch_response = self._handle_app_launcher_command(cleaned)
         if app_launch_response is not None:
             return app_launch_response
+
+        browser_search_response = self._handle_browser_search_command(cleaned)
+        if browser_search_response is not None:
+            return browser_search_response
 
         website_response = self._handle_website_command(cleaned)
         if website_response is not None:
@@ -733,6 +745,39 @@ class AssistantCore:
         result = self.app_launcher.launch_app(app_name)
         return AssistantResponse(text=self._app_launcher_response_text(result), accepted=result.launched, source="launcher", error=result.safe_error)
 
+    def _handle_browser_search_command(self, command: str) -> AssistantResponse | None:
+        google_match = re.match(r"(?i)^search\s+google\s+for\s+(.+?)\s*[.!?]*$", command.strip())
+        if google_match:
+            query = google_match.group(1).strip()
+            if not query:
+                return AssistantResponse(text="Please provide something to search for.", accepted=False, source="local")
+            if self.browser_control is None:
+                return AssistantResponse(text="Website launcher is disabled.", accepted=True, source="local")
+            result = self.browser_control.search_google(query)
+            return AssistantResponse(
+                text=self._browser_search_response_text("google", result),
+                accepted=result.opened,
+                source="browser",
+                error=result.safe_error,
+            )
+
+        youtube_match = re.match(r"(?i)^search\s+youtube\s+for\s+(.+?)\s*[.!?]*$", command.strip())
+        if youtube_match:
+            query = youtube_match.group(1).strip()
+            if not query:
+                return AssistantResponse(text="Please provide something to search for.", accepted=False, source="local")
+            if self.browser_control is None:
+                return AssistantResponse(text="Website launcher is disabled.", accepted=True, source="local")
+            result = self.browser_control.search_youtube(query)
+            return AssistantResponse(
+                text=self._browser_search_response_text("youtube", result),
+                accepted=result.opened,
+                source="browser",
+                error=result.safe_error,
+            )
+
+        return None
+
     def _handle_website_command(self, command: str) -> AssistantResponse | None:
         match = re.match(r"(?i)^open\s+(.+)$", command.strip())
         if not match:
@@ -746,14 +791,12 @@ class AssistantCore:
                 source="local",
             )
 
-        if site_name not in self.settings.website_allowed_sites_map:
-            return AssistantResponse(text=f"Site '{site_name}' is not allowed.", accepted=True, source="local")
-
-        if not self.settings.website_launcher_enabled or self.website_launcher is None:
+        launcher = self.browser_control or self.website_launcher
+        if launcher is None:
             return AssistantResponse(text="Website launcher is disabled.", accepted=True, source="local")
 
         self.permission_broker.check("open whitelisted website", description=f"Open site {site_name}.")
-        result = self.website_launcher.open_site(site_name)
+        result = launcher.open_site(site_name)
         return AssistantResponse(
             text=self._website_launcher_response_text(result),
             accepted=result.opened,
@@ -1319,6 +1362,17 @@ class AssistantCore:
         if result.safe_error:
             return result.safe_error
         return f"Unable to open {result.site_name}."
+
+    @staticmethod
+    def _browser_search_response_text(provider: str, result: BrowserSearchResult) -> str:
+        if result.opened:
+            display_name = {"google": "Google", "youtube": "YouTube"}.get(provider, provider.title())
+            return f"Searched {display_name} for {result.query}."
+        if result.fallback_reason:
+            return result.fallback_reason
+        if result.safe_error:
+            return result.safe_error
+        return f"Unable to search {provider} for {result.query}."
 
     @staticmethod
     def _looks_like_raw_url(value: str) -> bool:

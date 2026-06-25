@@ -331,6 +331,8 @@ def test_website_launcher_settings_defaults_are_safe() -> None:
 
     assert settings.website_launcher_enabled is True
     assert settings.website_allowed_sites_map["google"] == "https://www.google.com"
+    assert settings.website_allowed_sites_map["chatgpt"] == "https://chatgpt.com"
+    assert settings.website_allowed_sites_map["calendar"] == "https://calendar.google.com"
     assert settings.website_allowed_sites_map["blackboard"] == ""
 
 

@@ -1205,10 +1205,12 @@ Jarvis can open only sites listed in `WEBSITE_ALLOWED_SITES`. If a site is missi
 ## Phase 18 Scope
 
 - Safe website launcher for whitelisted sites only.
+- Safe browser search for fixed providers only.
 - CLI commands: `py main.py --website-check` and `py main.py --open-site google`.
-- Assistant commands: `open google`, `open youtube`, `open github`, `open gmail`, `open outlook`, and `open blackboard`.
-- Website settings: `WEBSITE_LAUNCHER_ENABLED=true`, `WEBSITE_ALLOWED_SITES=google=https://www.google.com,youtube=https://www.youtube.com,github=https://github.com,gmail=https://mail.google.com,blackboard=,outlook=https://outlook.office.com`.
+- Assistant commands: `open google`, `open youtube`, `open github`, `open chatgpt`, `open gmail`, `open calendar`, `open outlook`, `search google for jarvis`, and `search youtube for jarvis`.
+- Website settings: `WEBSITE_LAUNCHER_ENABLED=true`, `WEBSITE_ALLOWED_SITES=google=https://www.google.com,youtube=https://www.youtube.com,github=https://github.com,chatgpt=https://chatgpt.com,gmail=https://mail.google.com,calendar=https://calendar.google.com,blackboard=,outlook=https://outlook.office.com`.
 - Raw URLs are rejected and sites without configured URLs fail safely.
+- Search queries are URL-encoded before launch.
 - Website logs are saved to `logs/website_launcher.log`.
 
 ## Phase 19 Scope

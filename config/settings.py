@@ -651,7 +651,9 @@ class AppSettings(BaseSettings):
             "google=https://www.google.com,"
             "youtube=https://www.youtube.com,"
             "github=https://github.com,"
+            "chatgpt=https://chatgpt.com,"
             "gmail=https://mail.google.com,"
+            "calendar=https://calendar.google.com,"
             "blackboard=,"
             "outlook=https://outlook.office.com"
         ),
