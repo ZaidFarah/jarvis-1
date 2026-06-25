@@ -11,6 +11,9 @@ def test_voice_settings_defaults_are_lightweight() -> None:
     assert settings.gui_voice_engine == "fast"
     assert settings.gui_stream_response is True
     assert settings.gui_fast_voice_max_seconds == 2.0
+    assert settings.gui_fast_voice_hard_max_seconds == 3.0
+    assert settings.gui_fast_voice_end_silence_ms == 350
+    assert settings.gui_fast_voice_noise_gate_multiplier == 1.8
     assert settings.voice_sample_rate == 16000
     assert settings.voice_channels == 1
     assert settings.voice_input_device == ""
@@ -139,6 +142,9 @@ def test_voice_settings_read_environment(monkeypatch) -> None:
     monkeypatch.setenv("GUI_VOICE_ENGINE", "legacy")
     monkeypatch.setenv("GUI_STREAM_RESPONSE", "false")
     monkeypatch.setenv("GUI_FAST_VOICE_MAX_SECONDS", "2.8")
+    monkeypatch.setenv("GUI_FAST_VOICE_HARD_MAX_SECONDS", "3.4")
+    monkeypatch.setenv("GUI_FAST_VOICE_END_SILENCE_MS", "420")
+    monkeypatch.setenv("GUI_FAST_VOICE_NOISE_GATE_MULTIPLIER", "2.2")
     monkeypatch.setenv("VOICE_SAMPLE_RATE", "22050")
     monkeypatch.setenv("VOICE_INPUT_DEVICE", "  USB Microphone  ")
     monkeypatch.setenv("VOICE_HEALTH_SPEECH_SECONDS", "7.5")
@@ -173,6 +179,9 @@ def test_voice_settings_read_environment(monkeypatch) -> None:
     assert settings.gui_voice_engine == "legacy"
     assert settings.gui_stream_response is False
     assert settings.gui_fast_voice_max_seconds == 2.8
+    assert settings.gui_fast_voice_hard_max_seconds == 3.4
+    assert settings.gui_fast_voice_end_silence_ms == 420
+    assert settings.gui_fast_voice_noise_gate_multiplier == 2.2
     assert settings.voice_sample_rate == 22050
     assert settings.voice_input_device == "USB Microphone"
     assert settings.voice_health_speech_seconds == 7.5

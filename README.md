@@ -120,7 +120,7 @@ The GUI now uses a tabbed dark interface with quick actions for voice, tools, re
 
 The main window is a premium dark red glassmorphism dashboard with a three-column HUD layout, a large animated circular core, angular control buttons, confidence meters, turn timing, provider indicators, and a compact command bar at the bottom. It uses a Segoe UI Variable-first font stack with Segoe UI fallback, and it is built entirely from PySide6 widgets, gradients, borders, and animations so it remains lightweight on Windows and does not require external artwork.
 
-The GUI `Start Listening` button uses the persistent fast voice engine by default. Each click captures one intentional command and stops automatically. It rejects empty audio, weak filler phrases, incomplete prompts such as `tell me`, random number sequences, and low-confidence speech without sending them to OpenAI; the HUD reports `I heard you, but I need a clearer command.` The terminal fast voice loop remains continuous and keeps its existing command validation behavior.
+The GUI `Start Listening` button uses the persistent fast voice engine by default. Each click captures one intentional command and stops automatically. A stronger post-trigger noise gate prevents steady background sound from extending speech indefinitely, while a separate 3-second hard limit bounds noisy captures. It rejects empty audio, weak filler phrases, incomplete prompts such as `tell me`, random number sequences, and low-confidence speech without sending them to OpenAI; the HUD reports `I heard you, but I need a clearer command.` The terminal fast voice loop remains continuous and keeps its existing command validation behavior.
 
 The GUI shows Listening, Transcribing, Thinking, Responding, and Error states and updates the existing HUD panels with raw, cleaned, and repaired speech, response text, transcript confidence, VAD/wake-only state, and timing. The legacy wake-based loop remains available through configuration:
 
@@ -138,11 +138,20 @@ Fast GUI voice can speak the completed response after text streaming finishes. T
 ```dotenv
 FAST_VOICE_TTS_MODE=final_response
 GUI_FAST_VOICE_MAX_SECONDS=2.0
+GUI_FAST_VOICE_HARD_MAX_SECONDS=3.0
+GUI_FAST_VOICE_END_SILENCE_MS=350
+GUI_FAST_VOICE_NOISE_GATE_MULTIPLIER=1.8
 ```
 
 Allowed TTS modes are `off`, `final_response`, and `short_ack_only`. When
 `FAST_VOICE_TTS_MODE` is unset, the legacy `FAST_VOICE_TTS_ENABLED=true`
 setting remains equivalent to `final_response`.
+
+While GUI fast voice is active, the stop control changes to `Stop Listening`
+during microphone capture and `Stop Speaking` during TTS. OpenAI TTS playback
+and local pyttsx3 playback expose best-effort interruption. A custom provider
+without a stop hook cannot be interrupted mid-playback; the HUD reports that
+limitation and stops the session after playback returns.
 
 ```dotenv
 GUI_VOICE_ENGINE=fast
@@ -584,7 +593,7 @@ Run a single full-path fast command test with:
 python main.py --fast-command-test
 ```
 
-Terminal fast voice uses the lower of the backwards-compatible `FAST_VOICE_RECORD_SECONDS` setting and `FAST_VOICE_MAX_SECONDS`. GUI fast voice treats `GUI_FAST_VOICE_MAX_SECONDS` as a soft limit: it stops there when no speech is active, but can continue active speech up to `FAST_VOICE_RECORD_SECONDS`. With fast-stop enabled, speech up to one second uses the short-command silence window; longer speech uses the long-command window. The minimum speech duration and pre-roll protect short commands and their first word. Disable fast-stop to use the fixed `FAST_VOICE_SILENCE_MS` value. If VAD hears sound but STT produces no transcript, Jarvis responds locally instead of sending an empty command.
+Terminal fast voice uses the lower of the backwards-compatible `FAST_VOICE_RECORD_SECONDS` setting and `FAST_VOICE_MAX_SECONDS`. GUI fast voice treats `GUI_FAST_VOICE_MAX_SECONDS` as a soft limit and `GUI_FAST_VOICE_HARD_MAX_SECONDS` as an absolute cap. After speech starts, `GUI_FAST_VOICE_NOISE_GATE_MULTIPLIER` applies a stronger adaptive continuation gate and `GUI_FAST_VOICE_END_SILENCE_MS` controls how quickly capture ends. With fast-stop enabled, speech up to one second uses the short-command silence window; longer speech uses the long-command window. The minimum speech duration and pre-roll protect short commands and their first word. Disable fast-stop to use the fixed `FAST_VOICE_SILENCE_MS` value. If VAD hears sound but STT produces no transcript, Jarvis responds locally instead of sending an empty command.
 
 Fast voice uses its own concise system instruction by default to reduce generated response length while leaving text chat and the full voice loop unchanged. Set `FAST_VOICE_CONCISE_RESPONSES=false` for normal-length answers.
 

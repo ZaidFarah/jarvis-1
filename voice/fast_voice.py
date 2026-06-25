@@ -26,7 +26,7 @@ from voice.command_validation import CommandValidationResult, validate_cleaned_c
 from voice.interfaces import TranscriptionResult
 from voice.speech_repair import SpeechRepairResult, SpeechRepairer
 from voice.stt import create_speech_to_text_provider
-from voice.tts import TextToSpeechResult, speak_text
+from voice.tts import TextToSpeechResult, interrupt_active_speech, speak_text
 from voice.wake import remove_wake_phrase_prefix
 
 
@@ -56,6 +56,7 @@ class FastCaptureResult:
 
 AudioRecorder = Callable[[], FastCaptureResult | tuple[list[float], str]]
 TtsFunction = Callable[..., TextToSpeechResult]
+TtsInterruptFunction = Callable[[], bool]
 
 
 @dataclass(frozen=True)
@@ -155,6 +156,7 @@ class FastVoiceRunner:
         sounddevice_module: Any | None = None,
         recorder: AudioRecorder | None = None,
         tts_function: TtsFunction = speak_text,
+        tts_interrupt_function: TtsInterruptFunction = interrupt_active_speech,
         input_func: Callable[[str], str] = input,
         output_func: Callable[[str], None] = print,
         clock: Callable[[], float] = time.perf_counter,
@@ -171,6 +173,7 @@ class FastVoiceRunner:
         self.sounddevice_module = sounddevice_module
         self.recorder = recorder
         self.tts_function = tts_function
+        self.tts_interrupt_function = tts_interrupt_function
         self.input_func = input_func
         self.output_func = output_func
         self.clock = clock
@@ -187,6 +190,8 @@ class FastVoiceRunner:
         self._audio_device_index: int | None = None
         self._audio_device_name = ""
         self._stop_requested = threading.Event()
+        self._capture_active = threading.Event()
+        self._speaking_active = threading.Event()
         add_managed_file_sink(
             self.log_file,
             level="DEBUG",
@@ -285,8 +290,22 @@ class FastVoiceRunner:
             if not failed:
                 self._notify_status("Stopped")
 
-    def request_stop(self) -> None:
+    def request_stop(self) -> bool:
         self._stop_requested.set()
+        if self._speaking_active.is_set():
+            try:
+                interrupted = bool(self.tts_interrupt_function())
+            except Exception:
+                interrupted = False
+            self._notify_status(
+                "Interrupted" if interrupted else "TTS interruption unavailable"
+            )
+            return interrupted
+        if self._capture_active.is_set():
+            self._notify_status("Capture cancelled")
+        else:
+            self._notify_status("Stopping")
+        return True
 
     def _speak_response(
         self,
@@ -300,14 +319,23 @@ class FastVoiceRunner:
             return None, 0.0
         if mode == "short_ack_only" and response_kind != "ack":
             return None, 0.0
+        if self._stop_requested.is_set():
+            return None, 0.0
 
         tts_started = self.clock()
-        result = self.tts_function(
-            text,
-            self.settings,
-            speak_requested=True,
-        )
+        self._speaking_active.set()
+        self._notify_status("Speaking")
+        try:
+            result = self.tts_function(
+                text,
+                self.settings,
+                speak_requested=True,
+            )
+        finally:
+            self._speaking_active.clear()
         elapsed_ms = (self.clock() - tts_started) * 1000.0
+        if result.interrupted:
+            self._notify_status("Interrupted")
         if result.error:
             errors.append(result.error)
         return result, elapsed_ms
@@ -357,6 +385,7 @@ class FastVoiceRunner:
         self._notify_progress("listening_started")
         self.output_func("Listening...")
         capture_started = self.clock()
+        self._capture_active.set()
         try:
             if self.recorder is not None:
                 recorded = self.recorder()
@@ -373,6 +402,8 @@ class FastVoiceRunner:
             self._notify_status("Error")
             errors.append(f"Fast voice capture failed: {type(exc).__name__}: {exc}")
             samples = []
+        finally:
+            self._capture_active.clear()
         capture_wall_ms = (self.clock() - capture_started) * 1000.0
         if capture_result.audio_record_ms is None:
             capture_result = replace(
@@ -389,6 +420,27 @@ class FastVoiceRunner:
             capture_elapsed_ms=capture_ms,
             capture_progress=1.0,
         )
+
+        if self._stop_requested.is_set():
+            self._notify_status("Stopped")
+            return self._report(
+                input_device,
+                raw_transcript,
+                cleaned_transcript,
+                repair,
+                validation,
+                assistant_response,
+                tts_result,
+                capture_ms,
+                transcribe_ms,
+                openai_ms,
+                tts_ms,
+                total_started,
+                errors,
+                stt_warmup_ms=stt_warmup_ms,
+                transcript_confidence=transcript_confidence,
+                capture_result=capture_result,
+            )
 
         if samples:
             self._notify_status("Transcribing")
@@ -605,7 +657,7 @@ class FastVoiceRunner:
                 ):
                     assistant_response = stream_handler(
                         repair.repaired_transcript,
-                        self.response_chunk_callback,
+                        self._emit_response_chunk,
                     )
                 else:
                     fast_handler = getattr(self.assistant, "handle_fast_voice_command", None)
@@ -692,10 +744,14 @@ class FastVoiceRunner:
         )
         soft_max_frames = max(1, int(sample_rate * max_seconds))
         hard_max_seconds = (
-            self.settings.fast_voice_record_seconds
+            min(
+                self.settings.fast_voice_record_seconds,
+                self.settings.gui_fast_voice_hard_max_seconds,
+            )
             if self.strict_command_validation
             else max_seconds
         )
+        hard_max_seconds = max(max_seconds, hard_max_seconds)
         hard_max_frames = max(soft_max_frames, int(sample_rate * hard_max_seconds))
         selected_silence_ms = self.settings.fast_voice_silence_ms
         minimum_speech_frames = max(
@@ -711,11 +767,14 @@ class FastVoiceRunner:
         preroll_samples: deque[float] = deque(maxlen=preroll_sample_limit)
         samples: list[float] = []
         levels: list[float] = []
+        post_trigger_levels: deque[float] = deque(maxlen=30)
         frames_read = 0
         triggered = False
         trigger_start_frame: int | None = None
         last_speech_frame: int | None = None
         trailing_silence_frames = 0
+        speech_peak_rms = 0.0
+        continuation_threshold = 0.0
 
         self._notify_progress("vad_waiting")
 
@@ -740,7 +799,28 @@ class FastVoiceRunner:
                     noise_floor,
                     noise_multiplier=self.settings.voice_vad_noise_multiplier,
                 )
-                is_speech = chunk_rms >= threshold
+                if triggered and self.strict_command_validation:
+                    post_trigger_levels.append(chunk_rms)
+                    speech_peak_rms = max(speech_peak_rms, chunk_rms)
+                    adaptive_floor = estimate_noise_floor(list(post_trigger_levels))
+                    adaptive_gate = (
+                        adaptive_floor
+                        * self.settings.gui_fast_voice_noise_gate_multiplier
+                    )
+                    peak_gate = speech_peak_rms * 0.18
+                    capped_adaptive_gate = min(
+                        adaptive_gate,
+                        speech_peak_rms * 0.45,
+                    )
+                    continuation_threshold = max(
+                        threshold,
+                        peak_gate,
+                        capped_adaptive_gate,
+                    )
+                    is_speech = chunk_rms >= continuation_threshold
+                else:
+                    continuation_threshold = threshold
+                    is_speech = chunk_rms >= threshold
                 just_triggered = False
                 if is_speech:
                     if not triggered:
@@ -748,6 +828,8 @@ class FastVoiceRunner:
                         triggered = True
                         just_triggered = True
                         trigger_start_frame = frames_read - frames_to_read
+                        speech_peak_rms = chunk_rms
+                        post_trigger_levels.append(chunk_rms)
                     samples.extend(chunk)
                     last_speech_frame = frames_read
                     trailing_silence_frames = 0
@@ -788,6 +870,10 @@ class FastVoiceRunner:
                         self.settings,
                         speech_span_ms,
                     )
+                    if self.strict_command_validation:
+                        selected_silence_ms = (
+                            self.settings.gui_fast_voice_end_silence_ms
+                        )
                     silence_frames_needed = max(
                         1,
                         int(sample_rate * selected_silence_ms / 1000.0),
@@ -828,7 +914,7 @@ class FastVoiceRunner:
 
         self.fast_logger.info(
             "Fast capture device={} samples={} triggered={} soft_max_seconds={} "
-            "hard_max_seconds={} silence_ms={} "
+            "hard_max_seconds={} silence_ms={} continuation_threshold={:.6f} "
             "audio_record_ms={:.1f} audio_prepare_ms={:.1f}",
             device_name,
             len(samples),
@@ -836,6 +922,7 @@ class FastVoiceRunner:
             max_seconds,
             hard_max_seconds,
             selected_silence_ms,
+            continuation_threshold,
             audio_record_ms,
             audio_prepare_ms,
         )
@@ -963,6 +1050,11 @@ class FastVoiceRunner:
     def _notify_status(self, status: str) -> None:
         if self.status_callback is not None:
             self.status_callback(status)
+
+    def _emit_response_chunk(self, chunk: str) -> None:
+        if self._stop_requested.is_set() or self.response_chunk_callback is None:
+            return
+        self.response_chunk_callback(chunk)
 
     def _notify_progress(
         self,
@@ -1151,7 +1243,7 @@ def is_wake_only_transcript(transcript: str, settings: AppSettings) -> bool:
     if not normalized:
         return False
     configured = [settings.wake_phrase, *settings.wake_alias_list]
-    phrases = {"wake up jarvis", "hey jarvis", "jarvis"}
+    phrases = {"wake up", "wake up jarvis", "hey jarvis", "jarvis"}
     phrases.update(_normalize_phrase(phrase) for phrase in configured)
     return normalized in phrases
 

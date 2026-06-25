@@ -108,6 +108,33 @@ class AppSettings(BaseSettings):
             "JARVIS_GUI_FAST_VOICE_MAX_SECONDS",
         ),
     )
+    gui_fast_voice_hard_max_seconds: float = Field(
+        default=3.0,
+        ge=1.0,
+        le=30.0,
+        validation_alias=AliasChoices(
+            "GUI_FAST_VOICE_HARD_MAX_SECONDS",
+            "JARVIS_GUI_FAST_VOICE_HARD_MAX_SECONDS",
+        ),
+    )
+    gui_fast_voice_end_silence_ms: int = Field(
+        default=350,
+        ge=120,
+        le=2500,
+        validation_alias=AliasChoices(
+            "GUI_FAST_VOICE_END_SILENCE_MS",
+            "JARVIS_GUI_FAST_VOICE_END_SILENCE_MS",
+        ),
+    )
+    gui_fast_voice_noise_gate_multiplier: float = Field(
+        default=1.8,
+        ge=1.0,
+        le=10.0,
+        validation_alias=AliasChoices(
+            "GUI_FAST_VOICE_NOISE_GATE_MULTIPLIER",
+            "JARVIS_GUI_FAST_VOICE_NOISE_GATE_MULTIPLIER",
+        ),
+    )
     voice_sample_rate: int = Field(
         default=16000,
         ge=8000,

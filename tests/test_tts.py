@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 
 from config.settings import AppSettings
 from voice.tts import (
     OpenAITextToSpeechProvider,
     Pyttsx3TextToSpeechProvider,
+    SpeechInterrupted,
     create_text_to_speech_provider,
     format_tts_result,
+    interrupt_active_speech,
     speak_text,
 )
 
@@ -53,6 +56,25 @@ class FakeOpenAITtsProvider:
         if self.error:
             raise self.error
         self.spoken.append(text)
+
+
+class InterruptibleTtsProvider:
+    name = "interruptible"
+    available = True
+
+    def __init__(self) -> None:
+        self.started = threading.Event()
+        self.stopped = threading.Event()
+
+    def speak(self, text: str) -> None:
+        assert text
+        self.started.set()
+        self.stopped.wait(timeout=2.0)
+        raise SpeechInterrupted("stopped")
+
+    def stop(self) -> bool:
+        self.stopped.set()
+        return True
 
 
 def settings_for_tts(tmp_path: Path, **overrides) -> AppSettings:
@@ -203,3 +225,24 @@ def test_openai_tts_errors_do_not_expose_api_keys(tmp_path: Path) -> None:
     assert "sk-secret" not in log_text
     assert "OPENAI_API_KEY" not in log_text
     assert "[redacted]" in text
+
+
+def test_active_tts_can_be_interrupted(tmp_path: Path) -> None:
+    provider = InterruptibleTtsProvider()
+    settings = settings_for_tts(tmp_path, tts_enabled=True)
+    results = []
+    worker = threading.Thread(
+        target=lambda: results.append(speak_text("Hello", settings, provider=provider)),
+        daemon=True,
+    )
+
+    worker.start()
+    assert provider.started.wait(timeout=1.0)
+    assert interrupt_active_speech() is True
+    worker.join(timeout=2.0)
+
+    assert worker.is_alive() is False
+    assert len(results) == 1
+    assert results[0].interrupted is True
+    assert results[0].spoken is False
+    assert results[0].error is None

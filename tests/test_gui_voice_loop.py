@@ -552,6 +552,32 @@ def test_fast_voice_gui_shows_tts_mode(tts_mode: str, expected: str) -> None:
     app.processEvents()
 
 
+def test_fast_voice_gui_updates_stop_button_for_capture_and_speech() -> None:
+    app = _app()
+    window = JarvisMainWindow(
+        settings=AppSettings(_env_file=None, gui_voice_engine="fast"),
+        assistant=StubAssistant(),
+    )
+    window.stop_voice_loop_button.setEnabled(True)
+
+    window._handle_fast_voice_status("Listening")
+    assert window.stop_voice_loop_button.text() == "Stop Listening"
+
+    window._handle_fast_voice_status("Speaking")
+    assert window.stop_voice_loop_button.text() == "Stop Speaking"
+
+    window._handle_fast_voice_status("TTS interruption unavailable")
+    assert "cannot stop active playback" in window.voice_detail_value.text()
+
+    window._handle_fast_voice_status("Interrupted")
+    assert window.stop_voice_loop_button.text() == "Stop Voice"
+    assert window.voice_detail_value.text() == "Spoken response interrupted"
+
+    window._allow_close = True
+    window.close()
+    app.processEvents()
+
+
 def test_gui_start_voice_selects_fast_engine_and_stop_requests_shutdown(monkeypatch) -> None:
     app = _app()
 

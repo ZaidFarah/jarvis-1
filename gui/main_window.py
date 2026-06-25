@@ -1916,7 +1916,13 @@ class JarvisMainWindow(QMainWindow):
 
     def stop_voice_loop(self) -> None:
         if self.fast_voice_runner is not None:
-            self._append_message("Jarvis", "Stopping fast voice session...")
+            if self.status == AssistantStatus.LISTENING:
+                message = "Cancelling microphone capture..."
+            elif self.status == AssistantStatus.SPEAKING:
+                message = "Interrupting spoken response..."
+            else:
+                message = "Stopping fast voice session..."
+            self._append_message("Jarvis", message)
             self.fast_voice_runner.request_stop()
             return
         if self.voice_loop_runner is None:
@@ -1977,11 +1983,32 @@ class JarvisMainWindow(QMainWindow):
             "Transcribing": AssistantStatus.TRANSCRIBING,
             "Thinking": AssistantStatus.THINKING,
             "Responding": AssistantStatus.RESPONDING,
+            "Speaking": AssistantStatus.SPEAKING,
+            "Stopping": AssistantStatus.RESPONDING,
+            "Capture cancelled": AssistantStatus.SLEEPING,
+            "Interrupted": AssistantStatus.SLEEPING,
+            "TTS interruption unavailable": AssistantStatus.SPEAKING,
             "Error": AssistantStatus.ERROR,
             "Stopped": AssistantStatus.SLEEPING,
         }
         self.voice_loop_status_value.setText(status)
         self.set_status(status_map.get(status, AssistantStatus.SLEEPING))
+        if status == "Listening":
+            self.stop_voice_loop_button.setText("Stop Listening")
+        elif status == "Speaking":
+            self.stop_voice_loop_button.setText("Stop Speaking")
+        elif status in {"Thinking", "Responding"}:
+            self.stop_voice_loop_button.setText("Interrupt")
+        else:
+            self.stop_voice_loop_button.setText("Stop Voice")
+        if status == "Capture cancelled":
+            self.voice_detail_value.setText("Microphone capture cancelled")
+        elif status == "Interrupted":
+            self.voice_detail_value.setText("Spoken response interrupted")
+        elif status == "TTS interruption unavailable":
+            self.voice_detail_value.setText(
+                "This TTS provider cannot stop active playback; it will stop afterward."
+            )
 
     def _handle_fast_voice_error(self, error: str) -> None:
         self.voice_loop_status_value.setText("Error")
@@ -2242,6 +2269,8 @@ class JarvisMainWindow(QMainWindow):
     def _set_voice_loop_running(self, running: bool) -> None:
         self.start_voice_loop_button.setEnabled(not running)
         self.stop_voice_loop_button.setEnabled(running)
+        if not running:
+            self.stop_voice_loop_button.setText("Stop Voice")
         if self.start_voice_loop_action is not None:
             self.start_voice_loop_action.setEnabled(not running)
         if self.stop_voice_loop_action is not None:

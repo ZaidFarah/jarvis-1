@@ -4,6 +4,7 @@ import ctypes
 import importlib
 import re
 import sys
+import threading
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
@@ -18,6 +19,12 @@ from voice.interfaces import TextToSpeechProvider
 
 _TTS_LOG_SINK_ID: int | None = None
 _TTS_LOG_FILE: Path | None = None
+_ACTIVE_TTS_LOCK = threading.Lock()
+_ACTIVE_TTS_PROVIDER: Any | None = None
+
+
+class SpeechInterrupted(RuntimeError):
+    """Raised when active speech playback is cancelled by the user."""
 
 
 class AudioPlayer(Protocol):
@@ -36,11 +43,16 @@ class TextToSpeechResult:
     fallback_used: bool = False
     fallback_reason: str | None = None
     audio_file: Path | None = None
+    interrupted: bool = False
     error: str | None = None
 
 
 class WindowsMciAudioPlayer:
     """Small blocking audio player for local generated audio on Windows."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._active_alias: str | None = None
 
     def play(self, path: Path, audio_format: str) -> None:
         if sys.platform != "win32":
@@ -53,10 +65,24 @@ class WindowsMciAudioPlayer:
         file_path = str(path.resolve()).replace('"', "")
         media_type = " type mpegvideo" if audio_format.lower() in {"mp3", "aac"} else ""
         self._mci(f'open "{file_path}"{media_type} alias {alias}')
+        with self._lock:
+            self._active_alias = alias
         try:
             self._mci(f"play {alias} wait")
         finally:
+            with self._lock:
+                if self._active_alias == alias:
+                    self._active_alias = None
             self._mci(f"close {alias}", raise_on_error=False)
+
+    def stop(self) -> bool:
+        with self._lock:
+            alias = self._active_alias
+        if not alias:
+            return False
+        self._mci(f"stop {alias}", raise_on_error=False)
+        self._mci(f"close {alias}", raise_on_error=False)
+        return True
 
     @staticmethod
     def _mci(command: str, raise_on_error: bool = True) -> None:
@@ -91,6 +117,9 @@ class Pyttsx3TextToSpeechProvider:
         self.last_audio_file: Path | None = None
         self._pyttsx3 = pyttsx3_module
         self._import_error = import_error
+        self._engine_lock = threading.Lock()
+        self._active_engine: Any | None = None
+        self._stop_requested = threading.Event()
 
         if self._pyttsx3 is None and self._import_error is None:
             try:
@@ -114,8 +143,32 @@ class Pyttsx3TextToSpeechProvider:
         self._configure_comtypes_cache()
         engine = self._pyttsx3.init()
         self._configure_engine(engine)
-        engine.say(cleaned)
-        engine.runAndWait()
+        with self._engine_lock:
+            self._active_engine = engine
+        try:
+            engine.say(cleaned)
+            engine.runAndWait()
+            if self._stop_requested.is_set():
+                raise SpeechInterrupted("TTS playback was interrupted.")
+        finally:
+            with self._engine_lock:
+                if self._active_engine is engine:
+                    self._active_engine = None
+
+    def stop(self) -> bool:
+        self._stop_requested.set()
+        with self._engine_lock:
+            engine = self._active_engine
+        if engine is None:
+            return False
+        try:
+            engine.stop()
+        except Exception:
+            return False
+        return True
+
+    def reset_interrupt(self) -> None:
+        self._stop_requested.clear()
 
     def _configure_comtypes_cache(self) -> None:
         if self.comtypes_cache_dir is None:
@@ -172,6 +225,7 @@ class OpenAITextToSpeechProvider:
         self.audio_player = audio_player or WindowsMciAudioPlayer()
         self.audio_dir = self.settings.log_dir / "audio"
         self.last_audio_file: Path | None = None
+        self._stop_requested = threading.Event()
 
     @property
     def available(self) -> bool:
@@ -204,9 +258,27 @@ class OpenAITextToSpeechProvider:
         self._write_response_to_file(response, audio_file)
         if not audio_file.exists() or audio_file.stat().st_size == 0:
             raise RuntimeError("OpenAI TTS returned an empty audio file.")
+        if self._stop_requested.is_set():
+            raise SpeechInterrupted("TTS playback was interrupted.")
 
         self.last_audio_file = audio_file
         self.audio_player.play(audio_file, self.settings.openai_tts_format)
+        if self._stop_requested.is_set():
+            raise SpeechInterrupted("TTS playback was interrupted.")
+
+    def stop(self) -> bool:
+        self._stop_requested.set()
+        stop = getattr(self.audio_player, "stop", None)
+        if not callable(stop):
+            return False
+        try:
+            stop()
+        except Exception:
+            return False
+        return True
+
+    def reset_interrupt(self) -> None:
+        self._stop_requested.clear()
 
     def _next_audio_file(self) -> Path:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -263,6 +335,19 @@ def create_pyttsx3_text_to_speech_provider(settings: AppSettings) -> Pyttsx3Text
 
 def should_speak(settings: AppSettings, speak_requested: bool = False) -> bool:
     return bool(speak_requested or settings.tts_enabled)
+
+
+def interrupt_active_speech() -> bool:
+    """Best-effort interruption for the provider currently speaking."""
+    with _ACTIVE_TTS_LOCK:
+        provider = _ACTIVE_TTS_PROVIDER
+    stop = getattr(provider, "stop", None)
+    if not callable(stop):
+        return False
+    try:
+        return bool(stop())
+    except Exception:
+        return False
 
 
 def speak_text(
@@ -345,9 +430,23 @@ def speak_text(
             error=f"{message} Install pyttsx3 and verify local audio output.",
         )
 
+    _reset_tts_provider_interrupt(tts_provider)
+    _set_active_tts_provider(tts_provider)
     try:
         tts_logger.info("Speaking response through provider={}", tts_provider.name)
         tts_provider.speak(cleaned)
+    except SpeechInterrupted:
+        tts_logger.info("TTS interrupted through provider={}", tts_provider.name)
+        return TextToSpeechResult(
+            provider_name=tts_provider.name,
+            provider_available=provider_available,
+            requested=True,
+            spoken=False,
+            log_file=log_file,
+            requested_provider_name=requested_provider_name,
+            audio_file=getattr(tts_provider, "last_audio_file", None),
+            interrupted=True,
+        )
     except Exception as exc:
         message = _format_safe_exception("TTS audio output failed", exc)
         if _can_fallback_to_pyttsx3(tts_provider, requested_provider_name):
@@ -372,6 +471,8 @@ def speak_text(
             audio_file=getattr(tts_provider, "last_audio_file", None),
             error=message,
         )
+    finally:
+        _clear_active_tts_provider(tts_provider)
 
     tts_logger.info("TTS completed through provider={}", tts_provider.name)
     return TextToSpeechResult(
@@ -413,7 +514,23 @@ def _speak_with_fallback(
         )
 
     try:
+        _reset_tts_provider_interrupt(provider)
+        _set_active_tts_provider(provider)
         provider.speak(text)
+    except SpeechInterrupted:
+        tts_logger.info("Fallback TTS interrupted through provider={}", provider.name)
+        return TextToSpeechResult(
+            provider_name=provider.name,
+            provider_available=True,
+            requested=True,
+            spoken=False,
+            log_file=log_file,
+            requested_provider_name=requested_provider_name,
+            fallback_used=True,
+            fallback_reason=fallback_reason,
+            audio_file=getattr(provider, "last_audio_file", None),
+            interrupted=True,
+        )
     except Exception as exc:
         fallback_error = _format_safe_exception("pyttsx3 fallback failed", exc)
         message = f"{fallback_reason}; {fallback_error}"
@@ -430,6 +547,8 @@ def _speak_with_fallback(
             audio_file=getattr(provider, "last_audio_file", None),
             error=message,
         )
+    finally:
+        _clear_active_tts_provider(provider)
 
     tts_logger.info("TTS completed through fallback provider={}", provider.name)
     return TextToSpeechResult(
@@ -455,6 +574,7 @@ def format_tts_result(result: TextToSpeechResult) -> str:
         f"fallback used: {_yes_no(result.fallback_used)}",
         f"requested: {_yes_no(result.requested)}",
         f"spoken: {_yes_no(result.spoken)}",
+        f"interrupted: {_yes_no(result.interrupted)}",
         f"diagnostic log: {result.log_file}",
     ]
     if result.audio_file:
@@ -490,6 +610,25 @@ def ensure_tts_log_sink(settings: AppSettings) -> Path:
     )
     _TTS_LOG_FILE = log_file
     return log_file
+
+
+def _set_active_tts_provider(provider: Any) -> None:
+    global _ACTIVE_TTS_PROVIDER
+    with _ACTIVE_TTS_LOCK:
+        _ACTIVE_TTS_PROVIDER = provider
+
+
+def _reset_tts_provider_interrupt(provider: Any) -> None:
+    reset = getattr(provider, "reset_interrupt", None)
+    if callable(reset):
+        reset()
+
+
+def _clear_active_tts_provider(provider: Any) -> None:
+    global _ACTIVE_TTS_PROVIDER
+    with _ACTIVE_TTS_LOCK:
+        if _ACTIVE_TTS_PROVIDER is provider:
+            _ACTIVE_TTS_PROVIDER = None
 
 
 def _can_fallback_to_pyttsx3(provider: TextToSpeechProvider, requested_provider_name: str) -> bool:
