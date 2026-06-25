@@ -12,6 +12,7 @@ from tools.app_launcher import (
     AppLauncher,
     AppLauncherCheckReport,
     AppResolutionResult,
+    canonical_app_name,
     format_app_launcher_error,
     format_app_launch_report,
     format_app_resolution_report,
@@ -30,6 +31,27 @@ def test_app_launcher_allowed_app_lookup(tmp_path: Path) -> None:
 
     assert launcher.allowed_apps["notepad"] == "notepad.exe"
     assert launcher.allowed_apps["calculator"] == "calc.exe"
+    assert launcher.allowed_apps["file explorer"] == "explorer.exe"
+    assert "spotify" in launcher.allowed_apps
+
+
+@pytest.mark.parametrize(
+    ("spoken_name", "canonical_name"),
+    [
+        ("vs code", "vscode"),
+        ("visual studio code", "vscode"),
+        ("file explorer", "file explorer"),
+        ("windows explorer", "file explorer"),
+        ("google chrome", "chrome"),
+        ("microsoft edge", "edge"),
+        ("calc", "calculator"),
+    ],
+)
+def test_app_launcher_normalizes_safe_aliases(
+    spoken_name: str,
+    canonical_name: str,
+) -> None:
+    assert canonical_app_name(spoken_name) == canonical_name
 
 
 def test_app_launcher_resolve_configured_executable(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -164,6 +186,66 @@ def test_assistant_core_routes_app_launcher_commands(monkeypatch: pytest.MonkeyP
     assert response.source == "launcher"
     assert response.accepted is True
     assert "Launched notepad" in response.text
+
+
+@pytest.mark.parametrize(
+    ("command", "expected_app"),
+    [
+        ("open chrome", "chrome"),
+        ("open edge", "edge"),
+        ("open notepad", "notepad"),
+        ("open calculator", "calculator"),
+        ("open file explorer", "file explorer"),
+        ("open vs code", "vscode"),
+        ("open spotify", "spotify"),
+    ],
+)
+def test_assistant_core_routes_whitelisted_desktop_apps_locally(
+    command: str,
+    expected_app: str,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        "tools.app_launcher.shutil.which",
+        lambda value: f"C:/Resolved/{value}",
+    )
+    launched: list[list[str]] = []
+    settings = AppSettings(_env_file=None, log_dir=tmp_path)
+    launcher = AppLauncher(
+        settings,
+        popen_factory=lambda command_parts, **_kwargs: launched.append(command_parts),
+    )
+    assistant = AssistantCore(settings=settings, openai_service=FakeOpenAIService())
+    assistant.app_launcher = launcher
+
+    response = assistant.handle_command(command)
+
+    assert response.source == "launcher"
+    assert response.accepted is True
+    assert response.text == f"Launched {expected_app}."
+    assert launched
+
+
+def test_spotify_missing_returns_clear_local_response(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr("tools.app_launcher.shutil.which", lambda _value: None)
+    monkeypatch.setattr("tools.app_launcher.Path.exists", lambda _path: False)
+    settings = AppSettings(_env_file=None, log_dir=tmp_path)
+    assistant = AssistantCore(settings=settings, openai_service=FakeOpenAIService())
+    assistant.app_launcher = AppLauncher(
+        settings,
+        popen_factory=lambda *_args, **_kwargs: pytest.fail("Spotify should not launch"),
+    )
+
+    response = assistant.handle_command("open spotify")
+
+    assert response.source == "launcher"
+    assert response.accepted is False
+    assert "spotify" in response.text.lower()
+    assert "not installed or could not be found" in response.text.lower()
 
 
 def test_assistant_core_disabled_app_launcher_fallback() -> None:

@@ -310,7 +310,10 @@ def test_app_launcher_settings_defaults_are_safe() -> None:
     assert settings.app_launcher_enabled is True
     assert settings.app_launcher_allowed_apps_map["notepad"] == "notepad.exe"
     assert settings.app_launcher_allowed_apps_map["calculator"] == "calc.exe"
+    assert settings.app_launcher_allowed_apps_map["file explorer"] == "explorer.exe"
     assert settings.app_launcher_allowed_apps_map["edge"] == ""
+    assert settings.app_launcher_allowed_apps_map["vscode"] == ""
+    assert settings.app_launcher_allowed_apps_map["spotify"] == ""
 
 
 def test_app_launcher_settings_read_environment(monkeypatch: pytest.MonkeyPatch) -> None:

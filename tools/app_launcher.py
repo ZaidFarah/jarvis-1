@@ -14,6 +14,21 @@ from config.settings import AppSettings
 
 
 _APP_LAUNCHER_LOG_SINK_ID: int | None = None
+APP_NAME_ALIASES = {
+    "calc": "calculator",
+    "code": "vscode",
+    "explorer": "file explorer",
+    "google chrome": "chrome",
+    "microsoft edge": "edge",
+    "visual studio code": "vscode",
+    "vs code": "vscode",
+    "windows explorer": "file explorer",
+}
+
+
+def canonical_app_name(app_name: str) -> str:
+    cleaned = " ".join(app_name.strip().split()).lower()
+    return APP_NAME_ALIASES.get(cleaned, cleaned)
 
 
 @dataclass(frozen=True)
@@ -108,7 +123,7 @@ class AppLauncher:
         if not allowed:
             safe_error = f"App '{cleaned_name}' is not allowed."
         elif resolved_path is None:
-            safe_error = f"App '{cleaned_name}' is not configured."
+            safe_error = f"App '{cleaned_name}' is not installed or could not be found."
         return AppResolutionResult(
             enabled=self.enabled,
             app_name=cleaned_name,
@@ -370,8 +385,7 @@ class AppLauncher:
 
     @staticmethod
     def _clean_app_name(app_name: str) -> str:
-        cleaned = " ".join(app_name.strip().split()).lower()
-        return cleaned
+        return canonical_app_name(app_name)
 
     def _resolve_command(self, app_name: str, configured_command: str) -> tuple[str | None, str | None]:
         candidates = self._resolution_candidates(app_name, configured_command)
@@ -381,11 +395,12 @@ class AppLauncher:
         for method, candidate in candidates:
             if not candidate:
                 continue
-            if os.path.isabs(candidate) and Path(candidate).exists():
-                return candidate, method
-            if os.path.sep in candidate and Path(candidate).exists():
-                return candidate, method
-            found = shutil.which(candidate)
+            expanded = os.path.expandvars(os.path.expanduser(candidate))
+            if os.path.isabs(expanded) and Path(expanded).exists():
+                return expanded, method
+            if any(separator in expanded for separator in ("\\", "/")) and Path(expanded).exists():
+                return expanded, method
+            found = shutil.which(expanded)
             if found:
                 return found, method
         return None, None
@@ -395,19 +410,52 @@ class AppLauncher:
         command = configured_command.strip()
         candidates: list[tuple[str, str]] = []
         if command:
-            if command.lower() == "notepad.exe":
-                candidates.append(("subprocess.Popen", command))
-            elif command.lower() == "calc.exe":
-                candidates.append(("subprocess.Popen", command))
-            else:
-                candidates.append(("subprocess.Popen", command))
+            candidates.append(("subprocess.Popen", command))
 
         if app_name == "edge":
-            candidates.extend([("shutil.which", "msedge.exe"), ("shutil.which", "msedge")])
+            candidates.extend(
+                [
+                    ("shutil.which", "msedge.exe"),
+                    ("shutil.which", "msedge"),
+                    ("known_path", r"%PROGRAMFILES(X86)%\Microsoft\Edge\Application\msedge.exe"),
+                    ("known_path", r"%PROGRAMFILES%\Microsoft\Edge\Application\msedge.exe"),
+                ]
+            )
         elif app_name == "chrome":
-            candidates.extend([("shutil.which", "chrome.exe"), ("shutil.which", "chrome")])
+            candidates.extend(
+                [
+                    ("shutil.which", "chrome.exe"),
+                    ("shutil.which", "chrome"),
+                    ("known_path", r"%PROGRAMFILES%\Google\Chrome\Application\chrome.exe"),
+                    ("known_path", r"%PROGRAMFILES(X86)%\Google\Chrome\Application\chrome.exe"),
+                    ("known_path", r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"),
+                ]
+            )
         elif app_name == "vscode":
-            candidates.extend([("shutil.which", "code.cmd"), ("shutil.which", "Code.exe"), ("shutil.which", "code")])
+            candidates.extend(
+                [
+                    ("shutil.which", "code.cmd"),
+                    ("shutil.which", "Code.exe"),
+                    ("shutil.which", "code"),
+                    ("known_path", r"%LOCALAPPDATA%\Programs\Microsoft VS Code\Code.exe"),
+                    ("known_path", r"%PROGRAMFILES%\Microsoft VS Code\Code.exe"),
+                ]
+            )
+        elif app_name == "spotify":
+            candidates.extend(
+                [
+                    ("shutil.which", "Spotify.exe"),
+                    ("known_path", r"%APPDATA%\Spotify\Spotify.exe"),
+                    ("known_path", r"%LOCALAPPDATA%\Microsoft\WindowsApps\Spotify.exe"),
+                ]
+            )
+        elif app_name == "file explorer":
+            candidates.extend(
+                [
+                    ("shutil.which", "explorer.exe"),
+                    ("known_path", r"%WINDIR%\explorer.exe"),
+                ]
+            )
         elif app_name == "docker":
             candidates.extend([("shutil.which", "Docker Desktop.exe"), ("shutil.which", "Docker Desktop"), ("shutil.which", "docker")])
         return candidates

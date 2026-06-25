@@ -14,7 +14,7 @@ from security.confirmation import ConfirmationResult
 from config.settings import AppSettings, load_settings
 from security.permissions import PermissionBroker
 from tools.file_access import FileAccess, FileReadResult, FileSummaryResult
-from tools.app_launcher import AppLauncher
+from tools.app_launcher import AppLauncher, canonical_app_name
 from tools.website_launcher import WebsiteLauncher
 from reminders.service import ReminderService
 from services.openai_service import OpenAIService
@@ -720,7 +720,7 @@ class AssistantCore:
             return None
 
         verb = match.group(1).strip().lower()
-        app_name = match.group(2).strip().lower()
+        app_name = canonical_app_name(match.group(2))
         if app_name not in self.settings.app_launcher_allowed_apps_map:
             if verb == "open":
                 return None

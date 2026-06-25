@@ -1144,13 +1144,21 @@ py main.py --notification-test "Hello from Jarvis"
 
 The notification test sends a one-off toast using the configured provider when notifications are enabled and the provider is available. On unsupported platforms or when the provider cannot load, Jarvis fails safely and reports the reason.
 
-## Phase 17 Scope
+## Phase 13.1 Desktop App Control
 
-- Safe local application launcher for whitelisted commands only.
+- Safe Windows desktop application launcher for whitelisted commands only.
 - CLI commands: `py main.py --app-launcher-check`, `py main.py --resolve-app notepad`, and `py main.py --launch-app notepad`.
-- Assistant commands: `open notepad`, `launch calculator`, `open edge`, `open vscode`, and `open docker`.
-- Launcher settings: `APP_LAUNCHER_ENABLED=true`, `APP_LAUNCHER_ALLOWED_APPS=notepad=notepad.exe,calculator=calc.exe,chrome=,edge=,vscode=,docker=`.
+- Assistant commands: `open chrome`, `open edge`, `open notepad`,
+  `open calculator`, `open file explorer`, `open vs code`, and
+  `open spotify`.
+- Natural aliases such as `visual studio code`, `windows explorer`,
+  `google chrome`, and `microsoft edge` map only to their whitelisted app.
+- Chrome, Edge, VS Code, and Spotify are resolved from PATH and common Windows
+  installation locations. Spotify is launched only when installed.
+- Launcher settings: `APP_LAUNCHER_ENABLED=true`,
+  `APP_LAUNCHER_ALLOWED_APPS=notepad=notepad.exe,calculator=calc.exe,file explorer=explorer.exe,chrome=,edge=,vscode=,spotify=,docker=`.
 - Launcher logs are saved to `logs/app_launcher.log`.
+- App-launch commands are handled locally and are never sent to OpenAI.
 
 ## App Launcher Check
 
@@ -1174,7 +1182,9 @@ Jarvis resolves the whitelisted app to a concrete executable path or reports tha
 py main.py --launch-app notepad
 ```
 
-Jarvis can launch only apps listed in `APP_LAUNCHER_ALLOWED_APPS`. If an app is missing or not configured, Jarvis refuses the request.
+Jarvis can launch only apps listed in `APP_LAUNCHER_ALLOWED_APPS`. If an app
+is missing, not installed, or cannot be resolved, Jarvis reports that locally
+and does not send the command to OpenAI.
 
 ## Website Check
 

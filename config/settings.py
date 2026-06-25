@@ -630,7 +630,16 @@ class AppSettings(BaseSettings):
         validation_alias=AliasChoices("APP_LAUNCHER_ENABLED", "JARVIS_APP_LAUNCHER_ENABLED"),
     )
     app_launcher_allowed_apps: str = Field(
-        default="notepad=notepad.exe,calculator=calc.exe,chrome=,edge=,vscode=,docker=",
+        default=(
+            "notepad=notepad.exe,"
+            "calculator=calc.exe,"
+            "file explorer=explorer.exe,"
+            "chrome=,"
+            "edge=,"
+            "vscode=,"
+            "spotify=,"
+            "docker="
+        ),
         validation_alias=AliasChoices("APP_LAUNCHER_ALLOWED_APPS", "JARVIS_APP_LAUNCHER_ALLOWED_APPS"),
     )
     website_launcher_enabled: bool = Field(
