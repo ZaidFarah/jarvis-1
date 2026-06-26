@@ -473,10 +473,15 @@ class AssistantCore:
 
     def _handle_vision_command(self, command: str) -> AssistantResponse | None:
         normalized = " ".join(command.lower().strip().split())
+        if normalized == "list screens":
+            return self._list_screens()
         if normalized == "take screenshot":
             return self._take_screenshot()
+        monitor_index = self._parse_screen_monitor_index(normalized)
         if normalized in {"read screen text", "read my screen", "read my screen text"}:
             return self._read_screen_text()
+        if normalized in {f"read screen {monitor_index}" for monitor_index in range(1, 10)}:
+            return self._read_screen_text(monitor=monitor_index)
         if normalized in {
             "analyze screenshot",
             "what is on my screen",
@@ -486,6 +491,12 @@ class AssistantCore:
             "what's on my screen",
         }:
             return self._analyze_or_capture_screen()
+        if normalized == "what is on my primary screen":
+            return self._analyze_or_capture_screen(monitor="primary")
+        if monitor_index is not None and normalized.startswith("what is on screen"):
+            return self._analyze_or_capture_screen(monitor=monitor_index)
+        if monitor_index is not None and normalized.startswith("describe screen"):
+            return self._analyze_or_capture_screen(monitor=monitor_index)
         return None
 
     def _take_screenshot(self) -> AssistantResponse:
@@ -500,11 +511,11 @@ class AssistantCore:
             error=result.safe_error,
         )
 
-    def _read_screen_text(self) -> AssistantResponse:
+    def _read_screen_text(self, monitor: str | int | None = None) -> AssistantResponse:
         if self.vision_service is None or not self._screen_vision_enabled():
             return AssistantResponse(text="Screen vision is disabled.", accepted=True, source="local")
 
-        result = self.vision_service.read_screen_text()
+        result = self.vision_service.read_screen_text(monitor=monitor)
         return AssistantResponse(
             text=result.text,
             accepted=result.success,
@@ -524,14 +535,14 @@ class AssistantCore:
             error=result.safe_error,
         )
 
-    def _analyze_or_capture_screen(self) -> AssistantResponse:
+    def _analyze_or_capture_screen(self, monitor: str | int | None = None) -> AssistantResponse:
         if self.vision_service is None or not self._screen_vision_enabled():
             return AssistantResponse(text="Screen vision is disabled.", accepted=True, source="local")
 
         if self.settings.screen_vision_analyze_default:
-            result = self.vision_service.analyze_screen()
+            result = self.vision_service.analyze_screen(monitor=monitor)
         else:
-            result = self.vision_service.read_screen_text()
+            result = self.vision_service.read_screen_text(monitor=monitor)
 
         return AssistantResponse(
             text=result.text,
@@ -539,6 +550,23 @@ class AssistantCore:
             source="vision" if result.success else "local",
             error=result.safe_error,
         )
+
+    def _list_screens(self) -> AssistantResponse:
+        if self.vision_service is None or not self._screen_vision_enabled():
+            return AssistantResponse(text="Screen vision is disabled.", accepted=True, source="local")
+
+        response_text = self.vision_service.list_screens_text()
+        return AssistantResponse(text=response_text, accepted=True, source="vision")
+
+    @staticmethod
+    def _parse_screen_monitor_index(normalized: str) -> int | None:
+        match = re.match(r"^(?:what is on|describe|read)\s+screen\s+(\d+)$", normalized)
+        if match:
+            return int(match.group(1))
+        match = re.match(r"^what is on my screen\s+(\d+)$", normalized)
+        if match:
+            return int(match.group(1))
+        return None
 
     def _handle_calendar_command(self, command: str) -> AssistantResponse | None:
         normalized = " ".join(command.lower().strip().split())

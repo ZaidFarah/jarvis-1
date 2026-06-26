@@ -1349,13 +1349,14 @@ Jarvis can open only sites listed in `WEBSITE_ALLOWED_SITES`. If a site is missi
 - Vision foundation for manual screenshot capture, OCR diagnostics, and screen capture storage.
 - Enable with `SCREEN_VISION_ENABLED=true`, `SCREENSHOT_ENABLED=true`, `OCR_ENABLED=true`, and `OPENAI_VISION_ENABLED=true` if you want screen summaries.
 - `SCREEN_VISION_ANALYZE_DEFAULT=true` makes screen-analysis commands prefer the OpenAI vision path when available.
+- `SCREEN_CAPTURE_MONITOR=primary` selects the default monitor, and `SCREEN_CAPTURE_ALL_MONITORS=false` keeps captures focused on one screen.
 - Screenshot files are saved under `SCREENSHOT_DIR=data/screenshots` by default.
 - OCR provider: `OCR_PROVIDER=tesseract`.
 - OCR output is capped by `OCR_MAX_OUTPUT_CHARS=4000`.
 - Run `py main.py --vision-check` to inspect screenshot/OCR readiness.
 - Run `py main.py --screenshot-test` to capture a screenshot after confirmation.
 - Run `py main.py --ocr-test "<image_path>"` to OCR a local image after confirmation.
-- Assistant commands: `take screenshot`, `read screen text`, `read my screen`, and `read my screen text`.
+- Assistant commands: `take screenshot`, `list screens`, `read screen text`, `read my screen`, `read my screen text`, `read screen 1`, and `read screen 2`.
 - Screenshot capture and OCR are high risk and require permission plus confirmation.
 - Jarvis does not click or type on the screen.
 - Vision logs are saved to `logs/vision.log`.
@@ -1367,7 +1368,7 @@ Jarvis can open only sites listed in `WEBSITE_ALLOWED_SITES`. If a site is missi
 - OpenAI vision model: `OPENAI_VISION_MODEL=gpt-4o-mini`.
 - Maximum image size: `OPENAI_VISION_MAX_IMAGE_BYTES=5000000`.
 - Run `py main.py --vision-analyze "<image_path>"` to analyze a whitelisted screenshot or test image after confirmation.
-- Assistant commands: `analyze screenshot`, `what is on my screen`, `look at my screen`, `describe my screen`, and `describe screen`.
+- Assistant commands: `analyze screenshot`, `what is on my screen`, `look at my screen`, `describe my screen`, `describe screen`, `what is on my primary screen`, `what is on screen 1`, and `what is on screen 2`.
 - If OpenAI vision is not configured, the command still captures a screenshot and returns OCR text when available, otherwise the saved path.
 - Screenshot capture and image upload to OpenAI are both high risk and each require confirmation.
 - Jarvis blocks obvious password, banking, and secret screens before upload.

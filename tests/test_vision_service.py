@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -15,6 +16,7 @@ from vision.vision_service import (
     format_vision_analysis_result,
     format_vision_check_report,
 )
+from vision.screenshot import MonitorInfo, list_monitors, resolve_monitor_target
 
 
 class FakeOpenAIService:
@@ -241,6 +243,60 @@ def test_read_screen_text_falls_back_to_screenshot_when_ocr_disabled(tmp_path: P
     assert captured
 
 
+def test_read_screen_text_falls_back_to_openai_when_ocr_fails(tmp_path: Path) -> None:
+    settings = AppSettings(
+        _env_file=None,
+        screen_vision_enabled=True,
+        screenshot_enabled=True,
+        ocr_enabled=True,
+        openai_vision_enabled=True,
+        openai_api_key="sk-test",
+        screenshot_save_dir=tmp_path / "shots",
+    )
+    captured: list[Path] = []
+
+    service = VisionService(
+        settings,
+        confirmation_handler=lambda *args: _approve(*args, log_file=tmp_path / "confirmations.log"),
+        screenshot_capturer=lambda: FakeScreenshotImage(captured),
+        ocr_reader=lambda _: (_ for _ in ()).throw(RuntimeError("OCR failed for the provided image.")),
+        openai_service=FakeOpenAIService(),
+    )
+
+    result = service.read_screen_text()
+
+    assert result.success is True
+    assert "OpenAI vision answer" in result.text
+    assert "Screenshot saved to" in result.text
+    assert result.provider_available is True
+    assert result.safe_error is not None
+    assert captured
+
+
+def test_monitor_selection_helpers_pick_primary_and_index() -> None:
+    monitors = list_monitors(
+        provider=lambda: [
+            MonitorInfo(index=7, left=1920, top=0, width=1920, height=1080, primary=False, name="Secondary"),
+            MonitorInfo(index=3, left=0, top=0, width=1920, height=1080, primary=True, name="Primary"),
+        ]
+    )
+
+    assert len(monitors) == 2
+    assert monitors[0].primary is True
+    assert monitors[0].index == 1
+    assert monitors[1].index == 2
+
+    primary, all_flag = resolve_monitor_target(monitors, monitor="primary")
+    assert all_flag is False
+    assert primary is not None
+    assert primary.primary is True
+
+    second, second_all = resolve_monitor_target(monitors, monitor=2)
+    assert second_all is False
+    assert second is not None
+    assert second.index == 2
+
+
 def test_openai_vision_disabled_fallback(tmp_path: Path) -> None:
     image_path = tmp_path / "screen.png"
     image_path.write_bytes(b"fake-image")
@@ -257,6 +313,28 @@ def test_openai_vision_disabled_fallback(tmp_path: Path) -> None:
 
     assert result.success is False
     assert "OpenAI vision is disabled" in result.text
+
+
+def test_list_screens_text_reports_monitors(monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = AppSettings(_env_file=None, screen_vision_enabled=True)
+    service = VisionService(
+        settings,
+        confirmation_handler=lambda *args: _approve(*args, log_file=Path("confirmations.log")),
+    )
+
+    monkeypatch.setattr(
+        "vision.vision_service.list_monitors",
+        lambda: [
+            MonitorInfo(index=1, left=0, top=0, width=1920, height=1080, primary=True, name="Primary"),
+            MonitorInfo(index=2, left=1920, top=0, width=1920, height=1080, primary=False, name="Secondary"),
+        ],
+    )
+
+    text = service.list_screens_text()
+
+    assert "Detected screens:" in text
+    assert "Primary screen" in text
+    assert "Screen 2" in text
 
 
 @pytest.mark.parametrize(
@@ -526,6 +604,70 @@ def test_assistant_core_routes_vision_commands(tmp_path: Path) -> None:
     assert assistant.openai_service.messages == []
     assert assistant.conversation_history.format_recent_history() == ""
     assert vision_service.openai_service.vision_requests
+
+
+class FakeScreenVisionService:
+    def __init__(self) -> None:
+        self.monitor_calls: list[tuple[str, str | int | None, bool | None]] = []
+
+    def list_screens_text(self) -> str:
+        return "Detected screens:\n1. Primary screen\n2. Screen 2"
+
+    def capture_screenshot(self, monitor: str | int | None = None, all_monitors: bool | None = None):
+        self.monitor_calls.append(("capture", monitor, all_monitors))
+        return SimpleNamespace(
+            success=True,
+            text="Screenshot saved to C:\\Temp\\screen.png.",
+            safe_error=None,
+            screenshot_path=Path("C:/Temp/screen.png"),
+            monitor_index=1 if monitor in {None, "primary", 1} else int(monitor),
+            monitor_label="Primary screen" if monitor in {None, "primary", 1} else f"Screen {monitor}",
+            all_monitors=bool(all_monitors),
+        )
+
+    def read_screen_text(self, monitor: str | int | None = None, all_monitors: bool | None = None):
+        self.monitor_calls.append(("read", monitor, all_monitors))
+        return SimpleNamespace(
+            success=True,
+            text=f"Read from {monitor}",
+            safe_error=None,
+            image_path=Path("C:/Temp/screen.png"),
+        )
+
+    def analyze_screen(self, monitor: str | int | None = None, all_monitors: bool | None = None):
+        self.monitor_calls.append(("analyze", monitor, all_monitors))
+        return SimpleNamespace(
+            success=True,
+            text=f"Analyze from {monitor}",
+            safe_error=None,
+            image_path=Path("C:/Temp/screen.png"),
+        )
+
+
+@pytest.mark.parametrize(
+    "command,expected_call",
+    [
+        ("list screens", ("list", None, None)),
+        ("what is on my primary screen", ("analyze", "primary", None)),
+        ("what is on screen 1", ("analyze", 1, None)),
+        ("what is on screen 2", ("analyze", 2, None)),
+        ("read screen 1", ("read", 1, None)),
+        ("read screen 2", ("read", 2, None)),
+    ],
+)
+def test_screen_specific_commands_route_locally(command: str, expected_call: tuple[str, str | int | None, bool | None]) -> None:
+    settings = AppSettings(_env_file=None, screen_vision_enabled=True, screenshot_enabled=True)
+    assistant = AssistantCore(settings=settings, openai_service=FakeOpenAIService(), vision_service=FakeScreenVisionService())
+
+    response = assistant.handle_command(command)
+
+    if command == "list screens":
+        assert "Detected screens:" in response.text
+        return
+
+    assert response.accepted is True
+    assert expected_call[0] in response.text.lower() or "Screenshot saved to" in response.text or "Read from" in response.text or "Analyze from" in response.text
+    assert assistant.vision_service.monitor_calls[0] == expected_call  # type: ignore[attr-defined]
 
 
 @pytest.mark.parametrize(

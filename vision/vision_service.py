@@ -10,8 +10,13 @@ from config.settings import AppSettings
 from security.confirmation import ConfirmationResult
 from security.permissions import PermissionBroker
 from services.openai_service import OpenAIService, OpenAIVisionResult
-from vision.ocr import OCRExtractionResult, extract_text_from_image
-from vision.screenshot import ScreenshotCaptureError, capture_screenshot_image
+from vision.ocr import extract_text_from_image
+from vision.screenshot import (
+    MonitorInfo,
+    ScreenshotCaptureError,
+    capture_screenshot_details,
+    list_monitors,
+)
 
 
 _VISION_LOG_SINK_ID: int | None = None
@@ -59,6 +64,10 @@ class ScreenshotResult:
     request_attempted: bool
     screenshot_enabled: bool
     screenshot_path: Path | None = None
+    monitor_index: int | None = None
+    monitor_label: str | None = None
+    all_monitors: bool = False
+    image_size: tuple[int, int] | None = None
     safe_error: str | None = None
     log_file: Path | None = None
     errors: list[str] = field(default_factory=list)
@@ -77,6 +86,11 @@ class VisionOCRResult:
     request_attempted: bool
     ocr_enabled: bool
     image_path: Path | None = None
+    screenshot_path: Path | None = None
+    monitor_index: int | None = None
+    monitor_label: str | None = None
+    image_size: tuple[int, int] | None = None
+    tesseract_path: str | None = None
     output_truncated: bool = False
     provider_available: bool = False
     safe_error: str | None = None
@@ -97,6 +111,10 @@ class VisionAnalysisResult:
     request_attempted: bool
     openai_vision_enabled: bool
     image_path: Path | None = None
+    screenshot_path: Path | None = None
+    monitor_index: int | None = None
+    monitor_label: str | None = None
+    image_size: tuple[int, int] | None = None
     provider_available: bool = False
     safe_error: str | None = None
     log_file: Path | None = None
@@ -192,7 +210,7 @@ class VisionService:
             request_attempted=False,
         )
 
-    def capture_screenshot(self) -> ScreenshotResult:
+    def capture_screenshot(self, monitor: str | int | None = None, all_monitors: bool | None = None) -> ScreenshotResult:
         if not self._screen_vision_enabled() or not self._screenshot_ready():
             message = self._screenshot_disabled_message()
             return self._screenshot_result(
@@ -228,14 +246,32 @@ class VisionService:
             return self._screenshot_result(success=False, text=reason, request_attempted=False, safe_error=reason)
 
         try:
-            image_path = capture_screenshot_image(self.settings.screenshot_save_dir, capturer=self.screenshot_capturer)
+            capture_all = self.settings.screen_capture_all_monitors if all_monitors is None else all_monitors
+            target_monitor = self.settings.screen_capture_monitor if monitor is None else monitor
+            details = capture_screenshot_details(
+                self.settings.screenshot_save_dir,
+                capturer=self.screenshot_capturer,
+                monitor=target_monitor,
+                all_monitors=capture_all,
+            )
+            image_path = details.image_path
             text = f"Screenshot saved to {image_path}."
-            self.vision_logger.info("Screenshot captured path={}", image_path)
+            self.vision_logger.info(
+                "Screenshot captured path={} monitor={} all_monitors={} size={}",
+                image_path,
+                details.monitor.label if details.monitor else "all monitors",
+                details.all_monitors,
+                details.image_size,
+            )
             return self._screenshot_result(
                 success=True,
                 text=text,
                 request_attempted=True,
                 screenshot_path=image_path,
+                monitor_index=details.monitor.index if details.monitor else None,
+                monitor_label=details.monitor.label if details.monitor else ("All monitors" if details.all_monitors else None),
+                all_monitors=details.all_monitors,
+                image_size=details.image_size,
             )
         except Exception as exc:
             safe_error = format_vision_error(exc)
@@ -247,79 +283,136 @@ class VisionService:
                 safe_error=safe_error,
             )
 
+    def list_screens(self) -> list[MonitorInfo]:
+        return list_monitors()
+
     def ocr_image(self, image_path: str | Path) -> VisionOCRResult:
         return self._ocr_image_with_gates(Path(image_path))
 
-    def read_screen_text(self) -> VisionOCRResult:
-        screenshot_result = self.capture_screenshot()
+    def read_screen_text(self, monitor: str | int | None = None, all_monitors: bool | None = None) -> VisionOCRResult:
+        screenshot_result = self.capture_screenshot(monitor=monitor, all_monitors=all_monitors)
         if not screenshot_result.success or screenshot_result.screenshot_path is None:
             return self._ocr_result_from_screenshot_failure(screenshot_result)
-        if not self.settings.ocr_enabled:
-            return self._ocr_result(
-                success=True,
-                text=screenshot_result.text,
-                image_path=screenshot_result.screenshot_path,
-                request_attempted=True,
-                provider_available=False,
-            )
-        try:
-            extracted = extract_text_from_image(
-                screenshot_result.screenshot_path,
-                self.settings.ocr_max_output_chars,
-                reader=self.ocr_reader,
-            )
-            if not extracted.success:
+        if self.settings.ocr_enabled:
+            try:
+                extracted = extract_text_from_image(
+                    screenshot_result.screenshot_path,
+                    self.settings.ocr_max_output_chars,
+                    reader=self.ocr_reader,
+                )
+                if extracted.success:
+                    cleaned = extracted.text.strip()
+                    if cleaned:
+                        self.vision_logger.info(
+                            "Screen OCR completed path={} truncated={} tesseract_path={}",
+                            screenshot_result.screenshot_path,
+                            extracted.output_truncated,
+                            extracted.tesseract_path,
+                        )
+                        return self._ocr_result(
+                            success=True,
+                            text=cleaned,
+                            image_path=screenshot_result.screenshot_path,
+                            screenshot_path=screenshot_result.screenshot_path,
+                            monitor_index=screenshot_result.monitor_index,
+                            monitor_label=screenshot_result.monitor_label,
+                            image_size=extracted.image_size,
+                            tesseract_path=extracted.tesseract_path,
+                            request_attempted=True,
+                            provider_available=True,
+                            output_truncated=extracted.output_truncated,
+                        )
+                else:
+                    self.vision_logger.warning(
+                        "Screen OCR failed path={} error={}",
+                        screenshot_result.screenshot_path,
+                        extracted.safe_error,
+                    )
+                    if extracted.safe_error is not None:
+                        fallback_text = self._openai_extract_screen_text(
+                            screenshot_result.screenshot_path,
+                            screenshot_result,
+                        )
+                        if fallback_text is not None:
+                            return self._ocr_result(
+                                success=True,
+                                text=fallback_text,
+                                image_path=screenshot_result.screenshot_path,
+                                screenshot_path=screenshot_result.screenshot_path,
+                                monitor_index=screenshot_result.monitor_index,
+                                monitor_label=screenshot_result.monitor_label,
+                                image_size=extracted.image_size,
+                                tesseract_path=extracted.tesseract_path,
+                                request_attempted=True,
+                                provider_available=True,
+                                safe_error=extracted.safe_error,
+                            )
+            except Exception as exc:
+                safe_error = format_vision_error(exc)
+                self.vision_logger.error("Screen OCR fallback failed: {}", safe_error)
+                openai_text = self._openai_extract_screen_text(screenshot_result.screenshot_path, screenshot_result)
+                if openai_text is not None:
+                    return self._ocr_result(
+                        success=True,
+                        text=openai_text,
+                        image_path=screenshot_result.screenshot_path,
+                        screenshot_path=screenshot_result.screenshot_path,
+                        monitor_index=screenshot_result.monitor_index,
+                        monitor_label=screenshot_result.monitor_label,
+                        request_attempted=True,
+                        provider_available=True,
+                        image_size=screenshot_result.image_size,
+                        safe_error=safe_error,
+                    )
                 return self._ocr_result(
                     success=True,
                     text=screenshot_result.text,
                     image_path=screenshot_result.screenshot_path,
+                    screenshot_path=screenshot_result.screenshot_path,
+                    monitor_index=screenshot_result.monitor_index,
+                    monitor_label=screenshot_result.monitor_label,
                     request_attempted=True,
                     provider_available=False,
-                    safe_error=extracted.safe_error,
+                    image_size=screenshot_result.image_size,
+                    safe_error=safe_error,
                 )
-            cleaned = extracted.text.strip()
-            if not cleaned:
-                text = f"I couldn't find readable text on the screen. Screenshot saved to {screenshot_result.screenshot_path}."
-                return self._ocr_result(
-                    success=True,
-                    text=text,
-                    image_path=screenshot_result.screenshot_path,
-                    request_attempted=True,
-                    provider_available=True,
-                    output_truncated=extracted.output_truncated,
-                )
-            self.vision_logger.info("Screen OCR completed path={} truncated={}", screenshot_result.screenshot_path, extracted.output_truncated)
+
+        openai_text = self._openai_extract_screen_text(screenshot_result.screenshot_path, screenshot_result)
+        if openai_text is not None:
             return self._ocr_result(
                 success=True,
-                text=cleaned,
+                text=openai_text,
                 image_path=screenshot_result.screenshot_path,
+                screenshot_path=screenshot_result.screenshot_path,
+                monitor_index=screenshot_result.monitor_index,
+                monitor_label=screenshot_result.monitor_label,
                 request_attempted=True,
                 provider_available=True,
-                output_truncated=extracted.output_truncated,
+                image_size=screenshot_result.image_size,
             )
-        except Exception as exc:
-            safe_error = format_vision_error(exc)
-            self.vision_logger.error("Screen OCR fallback failed: {}", safe_error)
-            return self._ocr_result(
-                success=True,
-                text=screenshot_result.text,
-                image_path=screenshot_result.screenshot_path,
-                request_attempted=True,
-                provider_available=False,
-                safe_error=safe_error,
-            )
+        return self._ocr_result(
+            success=True,
+            text=screenshot_result.text,
+            image_path=screenshot_result.screenshot_path,
+            screenshot_path=screenshot_result.screenshot_path,
+            monitor_index=screenshot_result.monitor_index,
+            monitor_label=screenshot_result.monitor_label,
+            request_attempted=True,
+            provider_available=False,
+            image_size=screenshot_result.image_size,
+        )
 
     def analyze_image(self, image_path: str | Path) -> VisionAnalysisResult:
         return self._analyze_image_with_gates(Path(image_path))
 
-    def analyze_screenshot(self) -> VisionAnalysisResult:
-        screenshot_result = self.capture_screenshot()
+    def analyze_screenshot(self, monitor: str | int | None = None, all_monitors: bool | None = None) -> VisionAnalysisResult:
+        screenshot_result = self.capture_screenshot(monitor=monitor, all_monitors=all_monitors)
         if not screenshot_result.success or screenshot_result.screenshot_path is None:
             return self._analysis_result_from_screenshot_failure(screenshot_result)
         return self._analyze_image_with_gates(screenshot_result.screenshot_path, already_confirmed=False)
 
-    def analyze_screen(self) -> VisionAnalysisResult:
-        screenshot_result = self.capture_screenshot()
+    def analyze_screen(self, monitor: str | int | None = None, all_monitors: bool | None = None) -> VisionAnalysisResult:
+        screenshot_result = self.capture_screenshot(monitor=monitor, all_monitors=all_monitors)
         if not screenshot_result.success or screenshot_result.screenshot_path is None:
             return self._analysis_result_from_screenshot_failure(screenshot_result)
 
@@ -332,6 +425,10 @@ class VisionService:
                     success=True,
                     text=text,
                     image_path=screenshot_result.screenshot_path,
+                    screenshot_path=screenshot_result.screenshot_path,
+                    monitor_index=screenshot_result.monitor_index,
+                    monitor_label=screenshot_result.monitor_label,
+                    image_size=screenshot_result.image_size,
                     request_attempted=True,
                     provider_available=True,
                     openai_vision_enabled=self.settings.openai_vision_enabled,
@@ -341,6 +438,10 @@ class VisionService:
                 success=True,
                 text=fallback_text,
                 image_path=screenshot_result.screenshot_path,
+                screenshot_path=screenshot_result.screenshot_path,
+                monitor_index=screenshot_result.monitor_index,
+                monitor_label=screenshot_result.monitor_label,
+                image_size=screenshot_result.image_size,
                 request_attempted=True,
                 provider_available=bool(ocr_text),
                 openai_vision_enabled=self.settings.openai_vision_enabled,
@@ -352,10 +453,25 @@ class VisionService:
             success=True,
             text=fallback_text,
             image_path=screenshot_result.screenshot_path,
+            screenshot_path=screenshot_result.screenshot_path,
+            monitor_index=screenshot_result.monitor_index,
+            monitor_label=screenshot_result.monitor_label,
+            image_size=screenshot_result.image_size,
             request_attempted=True,
             provider_available=bool(ocr_text),
             openai_vision_enabled=self.settings.openai_vision_enabled,
         )
+
+    def list_screens_text(self) -> str:
+        screens = self.list_screens()
+        if not screens:
+            return "I couldn't detect any screens."
+        lines = ["Detected screens:"]
+        for screen in screens:
+            lines.append(
+                f"{screen.index}. {screen.label} - {screen.width}x{screen.height} at ({screen.left}, {screen.top})"
+            )
+        return "\n".join(lines)
 
     def _ocr_image_with_gates(self, image_path: Path, already_confirmed: bool = False) -> VisionOCRResult:
         if not self._screen_vision_enabled() or not self.settings.ocr_enabled:
@@ -460,6 +576,10 @@ class VisionService:
             image_path=screenshot_result.screenshot_path,
             request_attempted=screenshot_result.request_attempted,
             provider_available=False,
+            screenshot_path=screenshot_result.screenshot_path,
+            monitor_index=screenshot_result.monitor_index,
+            monitor_label=screenshot_result.monitor_label,
+            image_size=screenshot_result.image_size,
             safe_error=screenshot_result.safe_error,
         )
 
@@ -471,11 +591,35 @@ class VisionService:
             request_attempted=screenshot_result.request_attempted,
             provider_available=False,
             openai_vision_enabled=self.settings.openai_vision_enabled,
+            screenshot_path=screenshot_result.screenshot_path,
+            monitor_index=screenshot_result.monitor_index,
+            monitor_label=screenshot_result.monitor_label,
+            image_size=screenshot_result.image_size,
             safe_error=screenshot_result.safe_error,
         )
 
     def _analyze_captured_screenshot(self, image_path: Path) -> VisionAnalysisResult:
         return self._analyze_image_with_gates(image_path, already_confirmed=False)
+
+    def _openai_extract_screen_text(self, image_path: Path, screenshot_result: ScreenshotResult) -> str | None:
+        if not self.settings.openai_vision_enabled or not self.settings.has_openai_api_key:
+            return None
+        try:
+            result = self.openai_service.analyze_image(
+                image_path,
+                prompt="Extract the visible text from this screen as faithfully as possible. Preserve line breaks when helpful.",
+                system_prompt=self.settings.system_prompt,
+            )
+        except Exception as exc:
+            safe_error = format_vision_error(exc)
+            self.vision_logger.error("OpenAI vision text extraction failed: {}", safe_error)
+            return None
+        if not result.success or not result.text.strip():
+            return None
+        lines = [result.text.strip(), f"Screenshot saved to {image_path}."]
+        if screenshot_result.monitor_label:
+            lines.append(f"Captured from {screenshot_result.monitor_label}.")
+        return "\n\n".join(lines)
 
     def _read_screen_text_from_image(self, image_path: Path) -> str:
         if not self.settings.ocr_enabled:
@@ -690,6 +834,10 @@ class VisionService:
         text: str,
         request_attempted: bool,
         screenshot_path: Path | None = None,
+        monitor_index: int | None = None,
+        monitor_label: str | None = None,
+        all_monitors: bool = False,
+        image_size: tuple[int, int] | None = None,
         safe_error: str | None = None,
     ) -> ScreenshotResult:
         errors = [safe_error] if safe_error else []
@@ -701,6 +849,10 @@ class VisionService:
             request_attempted=request_attempted,
             screenshot_enabled=self._screenshot_ready(),
             screenshot_path=screenshot_path,
+            monitor_index=monitor_index,
+            monitor_label=monitor_label,
+            all_monitors=all_monitors,
+            image_size=image_size,
             safe_error=safe_error,
             log_file=self.log_file,
             errors=errors,
@@ -714,6 +866,11 @@ class VisionService:
         request_attempted: bool,
         provider_available: bool,
         output_truncated: bool = False,
+        screenshot_path: Path | None = None,
+        monitor_index: int | None = None,
+        monitor_label: str | None = None,
+        image_size: tuple[int, int] | None = None,
+        tesseract_path: str | None = None,
         safe_error: str | None = None,
     ) -> VisionOCRResult:
         errors = [safe_error] if safe_error else []
@@ -725,6 +882,11 @@ class VisionService:
             request_attempted=request_attempted,
             ocr_enabled=self.settings.ocr_enabled,
             image_path=image_path,
+            screenshot_path=screenshot_path,
+            monitor_index=monitor_index,
+            monitor_label=monitor_label,
+            image_size=image_size,
+            tesseract_path=tesseract_path,
             output_truncated=output_truncated,
             provider_available=provider_available,
             safe_error=safe_error,
@@ -740,6 +902,10 @@ class VisionService:
         request_attempted: bool,
         provider_available: bool,
         openai_vision_enabled: bool,
+        screenshot_path: Path | None = None,
+        monitor_index: int | None = None,
+        monitor_label: str | None = None,
+        image_size: tuple[int, int] | None = None,
         safe_error: str | None = None,
     ) -> VisionAnalysisResult:
         errors = [safe_error] if safe_error else []
@@ -751,6 +917,10 @@ class VisionService:
             request_attempted=request_attempted,
             openai_vision_enabled=openai_vision_enabled,
             image_path=image_path,
+            screenshot_path=screenshot_path,
+            monitor_index=monitor_index,
+            monitor_label=monitor_label,
+            image_size=image_size,
             provider_available=provider_available,
             safe_error=safe_error,
             log_file=self.log_file,
@@ -961,6 +1131,10 @@ def format_screenshot_result(result: ScreenshotResult) -> str:
         lines.extend(["", "Error:", f"  {result.safe_error}"])
     if result.screenshot_path:
         lines.extend(["", f"Screenshot path: {result.screenshot_path}"])
+    if result.monitor_label:
+        lines.extend(["", f"Monitor: {result.monitor_label}"])
+    if result.image_size:
+        lines.extend(["", f"Image size: {result.image_size[0]}x{result.image_size[1]}"])
     return "\n".join(lines)
 
 
@@ -976,6 +1150,12 @@ def format_ocr_result(result: VisionOCRResult) -> str:
         f"Output truncated: {'yes' if result.output_truncated else 'no'}",
         f"Diagnostic log: {result.log_file}",
     ]
+    if result.tesseract_path:
+        lines.append(f"Tesseract path: {result.tesseract_path}")
+    if result.image_size:
+        lines.append(f"Image size: {result.image_size[0]}x{result.image_size[1]}")
+    if result.monitor_label:
+        lines.append(f"Monitor: {result.monitor_label}")
     if result.text:
         lines.extend(["", "Result:", f"  {result.text}"])
     if result.safe_error:
@@ -996,6 +1176,10 @@ def format_vision_analysis_result(result: VisionAnalysisResult) -> str:
         f"Provider available: {'yes' if result.provider_available else 'no'}",
         f"Diagnostic log: {result.log_file}",
     ]
+    if result.monitor_label:
+        lines.append(f"Monitor: {result.monitor_label}")
+    if result.image_size:
+        lines.append(f"Image size: {result.image_size[0]}x{result.image_size[1]}")
     if result.text:
         lines.extend(["", "Result:", f"  {result.text}"])
     if result.safe_error:

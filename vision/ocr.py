@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -16,6 +17,9 @@ class OCRExtractionResult:
     image_path: Path
     output_truncated: bool
     provider_available: bool
+    tesseract_path: str | None = None
+    image_size: tuple[int, int] | None = None
+    image_mode: str | None = None
     safe_error: str | None = None
 
 
@@ -33,8 +37,11 @@ def extract_text_from_image(
             image_path=image_path,
             output_truncated=False,
             provider_available=False,
+            tesseract_path=_tesseract_path(),
             safe_error="Image file does not exist.",
         )
+
+    image_size, image_mode = _inspect_image(image_path)
 
     try:
         raw_text = reader(image_path) if reader is not None else _default_reader(image_path)
@@ -47,6 +54,9 @@ def extract_text_from_image(
             image_path=image_path,
             output_truncated=False,
             provider_available=False,
+            tesseract_path=_tesseract_path(),
+            image_size=image_size,
+            image_mode=image_mode,
             safe_error=safe_error,
         )
 
@@ -65,6 +75,9 @@ def extract_text_from_image(
         image_path=image_path,
         output_truncated=truncated,
         provider_available=True,
+        tesseract_path=_tesseract_path(),
+        image_size=image_size,
+        image_mode=image_mode,
     )
 
 
@@ -82,6 +95,30 @@ def _default_reader(image_path: Path) -> str:
             return pytesseract.image_to_string(image)
     except Exception as exc:
         raise RuntimeError("OCR failed for the provided image.") from exc
+
+
+def _inspect_image(image_path: Path) -> tuple[tuple[int, int] | None, str | None]:
+    try:
+        from PIL import Image
+    except Exception:
+        return None, None
+
+    try:
+        with Image.open(image_path) as image:
+            return image.size, image.mode
+    except Exception:
+        return None, None
+
+
+def _tesseract_path() -> str | None:
+    try:
+        import pytesseract
+    except Exception:
+        return shutil.which("tesseract")
+    configured = getattr(pytesseract.pytesseract, "tesseract_cmd", "") or ""
+    if configured:
+        return configured
+    return shutil.which("tesseract")
 
 
 def _normalize_text(text: str) -> str:

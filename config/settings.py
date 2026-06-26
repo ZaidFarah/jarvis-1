@@ -836,6 +836,20 @@ class AppSettings(BaseSettings):
             "JARVIS_SCREEN_VISION_ANALYZE_DEFAULT",
         ),
     )
+    screen_capture_monitor: str = Field(
+        default="primary",
+        validation_alias=AliasChoices(
+            "SCREEN_CAPTURE_MONITOR",
+            "JARVIS_SCREEN_CAPTURE_MONITOR",
+        ),
+    )
+    screen_capture_all_monitors: bool = Field(
+        default=False,
+        validation_alias=AliasChoices(
+            "SCREEN_CAPTURE_ALL_MONITORS",
+            "JARVIS_SCREEN_CAPTURE_ALL_MONITORS",
+        ),
+    )
     screenshot_save_dir: Path = Field(
         default=DEFAULT_CONFIG_PATHS.data_path / "screenshots",
         validation_alias=AliasChoices("SCREENSHOT_DIR", "SCREENSHOT_SAVE_DIR", "JARVIS_SCREENSHOT_DIR", "JARVIS_SCREENSHOT_SAVE_DIR"),
@@ -1049,6 +1063,12 @@ class AppSettings(BaseSettings):
         if cleaned not in {"fast", "legacy"}:
             raise ValueError(f"Unsupported GUI voice engine: {value}")
         return cleaned
+
+    @field_validator("screen_capture_monitor")
+    @classmethod
+    def normalize_screen_capture_monitor(cls, value: str) -> str:
+        cleaned = value.strip().lower()
+        return cleaned or "primary"
 
     @field_validator("weather_provider")
     @classmethod
