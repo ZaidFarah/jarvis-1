@@ -475,14 +475,21 @@ class AssistantCore:
         normalized = " ".join(command.lower().strip().split())
         if normalized == "take screenshot":
             return self._take_screenshot()
-        if normalized == "read screen text":
+        if normalized in {"read screen text", "read my screen", "read my screen text"}:
             return self._read_screen_text()
-        if normalized in {"analyze screenshot", "what is on my screen", "describe screen"}:
-            return self._analyze_screenshot()
+        if normalized in {
+            "analyze screenshot",
+            "what is on my screen",
+            "look at my screen",
+            "describe my screen",
+            "describe screen",
+            "what's on my screen",
+        }:
+            return self._analyze_or_capture_screen()
         return None
 
     def _take_screenshot(self) -> AssistantResponse:
-        if self.vision_service is None or not self.settings.vision_enabled or not self.settings.screenshot_enabled:
+        if self.vision_service is None or not self._screen_vision_enabled():
             return AssistantResponse(text="Screenshot capture is disabled.", accepted=True, source="local")
 
         result = self.vision_service.capture_screenshot()
@@ -494,8 +501,17 @@ class AssistantCore:
         )
 
     def _read_screen_text(self) -> AssistantResponse:
-        if self.vision_service is None or not self.settings.vision_enabled or not self.settings.ocr_enabled:
-            return AssistantResponse(text="OCR is disabled.", accepted=True, source="local")
+        if self.vision_service is None or not self._screen_vision_enabled():
+            return AssistantResponse(text="Screen vision is disabled.", accepted=True, source="local")
+
+        if not self.settings.ocr_enabled:
+            screenshot_result = self.vision_service.capture_screenshot()
+            return AssistantResponse(
+                text=screenshot_result.text,
+                accepted=screenshot_result.success,
+                source="vision" if screenshot_result.success else "local",
+                error=screenshot_result.safe_error,
+            )
 
         result = self.vision_service.read_screen_text()
         return AssistantResponse(
@@ -515,6 +531,23 @@ class AssistantCore:
             accepted=result.success,
             source="vision" if result.success else "local",
             error=result.safe_error,
+        )
+
+    def _analyze_or_capture_screen(self) -> AssistantResponse:
+        if self.vision_service is None or not self._screen_vision_enabled():
+            return AssistantResponse(text="Screen vision is disabled.", accepted=True, source="local")
+
+        if self.settings.openai_vision_enabled and self.settings.has_openai_api_key:
+            result = self.vision_service.analyze_screenshot()
+            if result.success:
+                return AssistantResponse(text=result.text, accepted=True, source="vision", error=result.safe_error)
+
+        screenshot_result = self.vision_service.capture_screenshot()
+        return AssistantResponse(
+            text=screenshot_result.text,
+            accepted=screenshot_result.success,
+            source="vision" if screenshot_result.success else "local",
+            error=screenshot_result.safe_error,
         )
 
     def _handle_calendar_command(self, command: str) -> AssistantResponse | None:
@@ -1462,6 +1495,9 @@ class AssistantCore:
             return "I couldn't find any recent downloads."
         entries = ", ".join(result.recent_entries)
         return f"Recent downloads: {entries}."
+
+    def _screen_vision_enabled(self) -> bool:
+        return bool(self.settings.vision_enabled or getattr(self.settings, "screen_vision_enabled", False))
 
     @staticmethod
     def _looks_like_raw_url(value: str) -> bool:

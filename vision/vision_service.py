@@ -133,9 +133,10 @@ class VisionService:
     def run_check(self) -> VisionCheckReport:
         screenshot_support = self._screenshot_dependency_available()
         ocr_support = self._ocr_dependency_available()
+        screen_vision_ready = self._screen_vision_enabled()
 
-        if not self.settings.vision_enabled:
-            text = "Vision is disabled. Enable VISION_ENABLED to capture screenshots or read screen text."
+        if not screen_vision_ready:
+            text = "Vision is disabled. Enable SCREEN_VISION_ENABLED to capture screenshots or read screen text."
             return self._check_report(
                 success=False,
                 text=text,
@@ -149,7 +150,7 @@ class VisionService:
 
         openai_vision_support = self.settings.openai_vision_enabled and self.settings.has_openai_api_key
 
-        if not self.settings.screenshot_enabled and not self.settings.ocr_enabled:
+        if not self._screenshot_ready() and not self.settings.ocr_enabled:
             if not openai_vision_support:
                 text = "Vision is enabled, but screenshot, OCR, and OpenAI vision are disabled."
             else:
@@ -167,7 +168,7 @@ class VisionService:
 
         openai_key_ready = not self.settings.openai_vision_enabled or self.settings.has_openai_api_key
         success = (
-            (not self.settings.screenshot_enabled or screenshot_support)
+            (self._screenshot_ready() and screenshot_support)
             and (not self.settings.ocr_enabled or ocr_support)
             and openai_key_ready
         )
@@ -192,7 +193,7 @@ class VisionService:
         )
 
     def capture_screenshot(self) -> ScreenshotResult:
-        if not self.settings.vision_enabled or not self.settings.screenshot_enabled:
+        if not self._screen_vision_enabled() or not self._screenshot_ready():
             message = self._screenshot_disabled_message()
             return self._screenshot_result(
                 success=False,
@@ -265,7 +266,7 @@ class VisionService:
         return self._analyze_image_with_gates(screenshot_result.screenshot_path, already_confirmed=False)
 
     def _ocr_image_with_gates(self, image_path: Path, already_confirmed: bool = False) -> VisionOCRResult:
-        if not self.settings.vision_enabled or not self.settings.ocr_enabled:
+        if not self._screen_vision_enabled() or not self.settings.ocr_enabled:
             message = self._ocr_disabled_message()
             return self._ocr_result(
                 success=False,
@@ -382,7 +383,7 @@ class VisionService:
         )
 
     def _analyze_image_with_gates(self, image_path: Path, already_confirmed: bool = False) -> VisionAnalysisResult:
-        if not self.settings.vision_enabled or not self.settings.openai_vision_enabled:
+        if not self._screen_vision_enabled() or not self.settings.openai_vision_enabled:
             message = self._analysis_disabled_message()
             return self._analysis_result(
                 success=False,
@@ -563,12 +564,12 @@ class VisionService:
     ) -> ScreenshotResult:
         errors = [safe_error] if safe_error else []
         return ScreenshotResult(
-            enabled=self.settings.vision_enabled,
+            enabled=self._screen_vision_enabled(),
             success=success,
             text=text,
             provider="pillow",
             request_attempted=request_attempted,
-            screenshot_enabled=self.settings.screenshot_enabled,
+            screenshot_enabled=self._screenshot_ready(),
             screenshot_path=screenshot_path,
             safe_error=safe_error,
             log_file=self.log_file,
@@ -587,7 +588,7 @@ class VisionService:
     ) -> VisionOCRResult:
         errors = [safe_error] if safe_error else []
         return VisionOCRResult(
-            enabled=self.settings.vision_enabled,
+            enabled=self._screen_vision_enabled(),
             success=success,
             text=text,
             provider=self.settings.ocr_provider,
@@ -613,7 +614,7 @@ class VisionService:
     ) -> VisionAnalysisResult:
         errors = [safe_error] if safe_error else []
         return VisionAnalysisResult(
-            enabled=self.settings.vision_enabled,
+            enabled=self._screen_vision_enabled(),
             success=success,
             text=text,
             provider=self.settings.openai_vision_model,
@@ -627,17 +628,23 @@ class VisionService:
         )
 
     def _screenshot_disabled_message(self) -> str:
-        return "Screenshot capture is disabled. Enable VISION_ENABLED and SCREENSHOT_ENABLED first."
+        return "Screenshot capture is disabled. Enable SCREEN_VISION_ENABLED and SCREENSHOT_ENABLED first."
 
     def _ocr_disabled_message(self) -> str:
-        return "OCR is disabled. Enable VISION_ENABLED and OCR_ENABLED first."
+        return "OCR is disabled. Enable SCREEN_VISION_ENABLED and OCR_ENABLED first."
 
     def _analysis_disabled_message(self) -> str:
-        if not self.settings.vision_enabled:
-            return "Vision is disabled. Enable VISION_ENABLED first."
+        if not self._screen_vision_enabled():
+            return "Vision is disabled. Enable SCREEN_VISION_ENABLED first."
         if not self.settings.openai_vision_enabled:
             return "OpenAI vision is disabled. Enable OPENAI_VISION_ENABLED first."
         return "Vision analysis is disabled."
+
+    def _screen_vision_enabled(self) -> bool:
+        return bool(self.settings.vision_enabled or getattr(self.settings, "screen_vision_enabled", False))
+
+    def _screenshot_ready(self) -> bool:
+        return bool(self.settings.screenshot_enabled or getattr(self.settings, "screen_vision_enabled", False))
 
     @staticmethod
     def _screenshot_dependency_available() -> bool:

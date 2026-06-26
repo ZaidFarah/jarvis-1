@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from assistant.core import AssistantCore
 from config.settings import AppSettings
 from security.confirmation import ConfirmationResult
@@ -289,6 +291,7 @@ def test_assistant_core_routes_vision_commands(tmp_path: Path) -> None:
     settings = AppSettings(
         _env_file=None,
         openai_enabled=False,
+        openai_api_key="sk-test",
         vision_enabled=True,
         screenshot_enabled=True,
         ocr_enabled=True,
@@ -341,6 +344,59 @@ def test_assistant_core_routes_vision_commands(tmp_path: Path) -> None:
     assert vision_service.openai_service.vision_requests
 
 
+@pytest.mark.parametrize(
+    "command",
+    [
+        "what is on my screen",
+        "look at my screen",
+        "describe my screen",
+        "describe screen",
+    ],
+)
+def test_assistant_core_screen_analysis_falls_back_to_screenshot_when_openai_vision_disabled(
+    command: str,
+    tmp_path: Path,
+) -> None:
+    settings = AppSettings(
+        _env_file=None,
+        screen_vision_enabled=True,
+        screenshot_enabled=True,
+        openai_vision_enabled=False,
+        screenshot_save_dir=tmp_path / "shots",
+    )
+    confirmations: list[str] = []
+
+    def approve(action_name: str, risk_level: str, description: str) -> ConfirmationResult:
+        confirmations.append(action_name)
+        return ConfirmationResult(
+            approved=True,
+            denied=False,
+            timed_out=False,
+            reason="Approved.",
+            log_file=tmp_path / "confirmations.log",
+        )
+
+    captured: list[Path] = []
+    vision_service = VisionService(
+        settings,
+        confirmation_handler=approve,
+        screenshot_capturer=lambda: FakeScreenshotImage(captured),
+        ocr_reader=lambda _: "screen text",
+        openai_service=FakeOpenAIService(),
+        allowed_image_roots={tmp_path},
+    )
+    assistant = AssistantCore(settings=settings, openai_service=FakeOpenAIService(), vision_service=vision_service)
+
+    response = assistant.handle_command(command)
+
+    assert response.source == "vision"
+    assert response.accepted is True
+    assert "Screenshot saved to" in response.text
+    assert captured
+    assert confirmations.count("take screenshot") == 1
+    assert confirmations.count("send image to openai") == 0
+
+
 def test_vision_no_openai_upload(tmp_path: Path) -> None:
     settings = AppSettings(_env_file=None, vision_enabled=True, screenshot_enabled=True, ocr_enabled=True, openai_vision_enabled=True)
     openai_service = FakeOpenAIService()
@@ -359,8 +415,8 @@ def test_vision_no_openai_upload(tmp_path: Path) -> None:
 
     assert response.source == "vision"
     assert openai_service.messages == []
-    assert openai_service.vision_requests
-    assert "OpenAI vision answer" in response.text
+    assert openai_service.vision_requests == []
+    assert "Screenshot saved to" in response.text
     assert assistant.conversation_history.format_recent_history() == ""
 
 

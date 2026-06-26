@@ -815,7 +815,11 @@ class AppSettings(BaseSettings):
     )
     vision_enabled: bool = Field(
         default=False,
-        validation_alias=AliasChoices("VISION_ENABLED", "JARVIS_VISION_ENABLED"),
+        validation_alias=AliasChoices("VISION_ENABLED", "SCREEN_VISION_ENABLED", "JARVIS_VISION_ENABLED", "JARVIS_SCREEN_VISION_ENABLED"),
+    )
+    screen_vision_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("SCREEN_VISION_ENABLED", "JARVIS_SCREEN_VISION_ENABLED"),
     )
     screenshot_enabled: bool = Field(
         default=False,
@@ -826,8 +830,8 @@ class AppSettings(BaseSettings):
         validation_alias=AliasChoices("OCR_ENABLED", "JARVIS_OCR_ENABLED"),
     )
     screenshot_save_dir: Path = Field(
-        default=DEFAULT_CONFIG_PATHS.logs_path / "screenshots",
-        validation_alias=AliasChoices("SCREENSHOT_SAVE_DIR", "JARVIS_SCREENSHOT_SAVE_DIR"),
+        default=DEFAULT_CONFIG_PATHS.data_path / "screenshots",
+        validation_alias=AliasChoices("SCREENSHOT_DIR", "SCREENSHOT_SAVE_DIR", "JARVIS_SCREENSHOT_DIR", "JARVIS_SCREENSHOT_SAVE_DIR"),
     )
     ocr_provider: str = Field(
         default="tesseract",
