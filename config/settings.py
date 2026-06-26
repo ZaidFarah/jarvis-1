@@ -829,6 +829,13 @@ class AppSettings(BaseSettings):
         default=False,
         validation_alias=AliasChoices("OCR_ENABLED", "JARVIS_OCR_ENABLED"),
     )
+    screen_vision_analyze_default: bool = Field(
+        default=True,
+        validation_alias=AliasChoices(
+            "SCREEN_VISION_ANALYZE_DEFAULT",
+            "JARVIS_SCREEN_VISION_ANALYZE_DEFAULT",
+        ),
+    )
     screenshot_save_dir: Path = Field(
         default=DEFAULT_CONFIG_PATHS.data_path / "screenshots",
         validation_alias=AliasChoices("SCREENSHOT_DIR", "SCREENSHOT_SAVE_DIR", "JARVIS_SCREENSHOT_DIR", "JARVIS_SCREENSHOT_SAVE_DIR"),

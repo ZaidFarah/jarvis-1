@@ -504,15 +504,6 @@ class AssistantCore:
         if self.vision_service is None or not self._screen_vision_enabled():
             return AssistantResponse(text="Screen vision is disabled.", accepted=True, source="local")
 
-        if not self.settings.ocr_enabled:
-            screenshot_result = self.vision_service.capture_screenshot()
-            return AssistantResponse(
-                text=screenshot_result.text,
-                accepted=screenshot_result.success,
-                source="vision" if screenshot_result.success else "local",
-                error=screenshot_result.safe_error,
-            )
-
         result = self.vision_service.read_screen_text()
         return AssistantResponse(
             text=result.text,
@@ -522,7 +513,7 @@ class AssistantCore:
         )
 
     def _analyze_screenshot(self) -> AssistantResponse:
-        if self.vision_service is None or not self.settings.vision_enabled or not self.settings.openai_vision_enabled:
+        if self.vision_service is None or not self._screen_vision_enabled() or not self.settings.openai_vision_enabled:
             return AssistantResponse(text="OpenAI vision analysis is disabled.", accepted=True, source="local")
 
         result = self.vision_service.analyze_screenshot()
@@ -537,17 +528,16 @@ class AssistantCore:
         if self.vision_service is None or not self._screen_vision_enabled():
             return AssistantResponse(text="Screen vision is disabled.", accepted=True, source="local")
 
-        if self.settings.openai_vision_enabled and self.settings.has_openai_api_key:
-            result = self.vision_service.analyze_screenshot()
-            if result.success:
-                return AssistantResponse(text=result.text, accepted=True, source="vision", error=result.safe_error)
+        if self.settings.screen_vision_analyze_default:
+            result = self.vision_service.analyze_screen()
+        else:
+            result = self.vision_service.read_screen_text()
 
-        screenshot_result = self.vision_service.capture_screenshot()
         return AssistantResponse(
-            text=screenshot_result.text,
-            accepted=screenshot_result.success,
-            source="vision" if screenshot_result.success else "local",
-            error=screenshot_result.safe_error,
+            text=result.text,
+            accepted=result.success,
+            source="vision" if result.success else "local",
+            error=result.safe_error,
         )
 
     def _handle_calendar_command(self, command: str) -> AssistantResponse | None:

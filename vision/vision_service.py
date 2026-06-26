@@ -108,7 +108,7 @@ class VisionAnalysisResult:
 
 
 class VisionService:
-    """Safe vision foundation with manual screenshot and OCR diagnostics only."""
+    """Safe vision foundation for screenshots, OCR, and OpenAI vision."""
 
     def __init__(
         self,
@@ -254,7 +254,60 @@ class VisionService:
         screenshot_result = self.capture_screenshot()
         if not screenshot_result.success or screenshot_result.screenshot_path is None:
             return self._ocr_result_from_screenshot_failure(screenshot_result)
-        return self._ocr_image_with_gates(screenshot_result.screenshot_path, already_confirmed=False)
+        if not self.settings.ocr_enabled:
+            return self._ocr_result(
+                success=True,
+                text=screenshot_result.text,
+                image_path=screenshot_result.screenshot_path,
+                request_attempted=True,
+                provider_available=False,
+            )
+        try:
+            extracted = extract_text_from_image(
+                screenshot_result.screenshot_path,
+                self.settings.ocr_max_output_chars,
+                reader=self.ocr_reader,
+            )
+            if not extracted.success:
+                return self._ocr_result(
+                    success=True,
+                    text=screenshot_result.text,
+                    image_path=screenshot_result.screenshot_path,
+                    request_attempted=True,
+                    provider_available=False,
+                    safe_error=extracted.safe_error,
+                )
+            cleaned = extracted.text.strip()
+            if not cleaned:
+                text = f"I couldn't find readable text on the screen. Screenshot saved to {screenshot_result.screenshot_path}."
+                return self._ocr_result(
+                    success=True,
+                    text=text,
+                    image_path=screenshot_result.screenshot_path,
+                    request_attempted=True,
+                    provider_available=True,
+                    output_truncated=extracted.output_truncated,
+                )
+            self.vision_logger.info("Screen OCR completed path={} truncated={}", screenshot_result.screenshot_path, extracted.output_truncated)
+            return self._ocr_result(
+                success=True,
+                text=cleaned,
+                image_path=screenshot_result.screenshot_path,
+                request_attempted=True,
+                provider_available=True,
+                output_truncated=extracted.output_truncated,
+            )
+        except Exception as exc:
+            safe_error = format_vision_error(exc)
+            self.vision_logger.error("Screen OCR fallback failed: {}", safe_error)
+            return self._ocr_result(
+                success=True,
+                text=screenshot_result.text,
+                image_path=screenshot_result.screenshot_path,
+                request_attempted=True,
+                provider_available=False,
+                safe_error=safe_error,
+            )
 
     def analyze_image(self, image_path: str | Path) -> VisionAnalysisResult:
         return self._analyze_image_with_gates(Path(image_path))
@@ -264,6 +317,45 @@ class VisionService:
         if not screenshot_result.success or screenshot_result.screenshot_path is None:
             return self._analysis_result_from_screenshot_failure(screenshot_result)
         return self._analyze_image_with_gates(screenshot_result.screenshot_path, already_confirmed=False)
+
+    def analyze_screen(self) -> VisionAnalysisResult:
+        screenshot_result = self.capture_screenshot()
+        if not screenshot_result.success or screenshot_result.screenshot_path is None:
+            return self._analysis_result_from_screenshot_failure(screenshot_result)
+
+        ocr_text = self._read_screen_text_from_image(screenshot_result.screenshot_path)
+        if self.settings.openai_vision_enabled and self.settings.has_openai_api_key:
+            result = self._analyze_captured_screenshot(screenshot_result.screenshot_path)
+            if result.success:
+                text = self._combine_screen_summary(result.text, ocr_text)
+                return self._analysis_result(
+                    success=True,
+                    text=text,
+                    image_path=screenshot_result.screenshot_path,
+                    request_attempted=True,
+                    provider_available=True,
+                    openai_vision_enabled=self.settings.openai_vision_enabled,
+                )
+            fallback_text = self._screen_fallback_text(screenshot_result.screenshot_path, ocr_text, result.safe_error)
+            return self._analysis_result(
+                success=True,
+                text=fallback_text,
+                image_path=screenshot_result.screenshot_path,
+                request_attempted=True,
+                provider_available=bool(ocr_text),
+                openai_vision_enabled=self.settings.openai_vision_enabled,
+                safe_error=result.safe_error,
+            )
+
+        fallback_text = self._screen_fallback_text(screenshot_result.screenshot_path, ocr_text, None)
+        return self._analysis_result(
+            success=True,
+            text=fallback_text,
+            image_path=screenshot_result.screenshot_path,
+            request_attempted=True,
+            provider_available=bool(ocr_text),
+            openai_vision_enabled=self.settings.openai_vision_enabled,
+        )
 
     def _ocr_image_with_gates(self, image_path: Path, already_confirmed: bool = False) -> VisionOCRResult:
         if not self._screen_vision_enabled() or not self.settings.ocr_enabled:
@@ -381,6 +473,44 @@ class VisionService:
             openai_vision_enabled=self.settings.openai_vision_enabled,
             safe_error=screenshot_result.safe_error,
         )
+
+    def _analyze_captured_screenshot(self, image_path: Path) -> VisionAnalysisResult:
+        return self._analyze_image_with_gates(image_path, already_confirmed=False)
+
+    def _read_screen_text_from_image(self, image_path: Path) -> str:
+        if not self.settings.ocr_enabled:
+            return ""
+
+        try:
+            extracted = extract_text_from_image(
+                image_path,
+                self.settings.ocr_max_output_chars,
+                reader=self.ocr_reader,
+            )
+        except Exception:
+            return ""
+
+        if not extracted.success:
+            return ""
+        return extracted.text.strip()
+
+    @staticmethod
+    def _combine_screen_summary(summary: str, ocr_text: str) -> str:
+        summary_text = summary.strip()
+        ocr_clean = ocr_text.strip()
+        if not ocr_clean:
+            return summary_text
+        if ocr_clean.lower() in summary_text.lower():
+            return summary_text
+        return f"{summary_text}\n\nOCR text:\n{ocr_clean}"
+
+    @staticmethod
+    def _screen_fallback_text(image_path: Path, ocr_text: str, error: str | None) -> str:
+        if ocr_text.strip():
+            return f"{ocr_text.strip()}\n\nScreenshot saved to {image_path}."
+        if error:
+            return f"OpenAI vision was unavailable, so I saved a screenshot to {image_path}."
+        return f"Screenshot saved to {image_path}."
 
     def _analyze_image_with_gates(self, image_path: Path, already_confirmed: bool = False) -> VisionAnalysisResult:
         if not self._screen_vision_enabled() or not self.settings.openai_vision_enabled:
@@ -535,7 +665,7 @@ class VisionService:
     ) -> VisionCheckReport:
         errors = [safe_error] if safe_error else []
         return VisionCheckReport(
-            enabled=self.settings.vision_enabled,
+            enabled=self._screen_vision_enabled(),
             screenshot_enabled=self.settings.screenshot_enabled,
             ocr_enabled=self.settings.ocr_enabled,
             openai_vision_enabled=openai_vision_enabled,

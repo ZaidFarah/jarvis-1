@@ -1347,7 +1347,8 @@ Jarvis can open only sites listed in `WEBSITE_ALLOWED_SITES`. If a site is missi
 ## Phase 30 Scope
 
 - Vision foundation for manual screenshot capture, OCR diagnostics, and screen capture storage.
-- Enable with `SCREEN_VISION_ENABLED=true`, `SCREENSHOT_ENABLED=true`, and `OCR_ENABLED=true`.
+- Enable with `SCREEN_VISION_ENABLED=true`, `SCREENSHOT_ENABLED=true`, `OCR_ENABLED=true`, and `OPENAI_VISION_ENABLED=true` if you want screen summaries.
+- `SCREEN_VISION_ANALYZE_DEFAULT=true` makes screen-analysis commands prefer the OpenAI vision path when available.
 - Screenshot files are saved under `SCREENSHOT_DIR=data/screenshots` by default.
 - OCR provider: `OCR_PROVIDER=tesseract`.
 - OCR output is capped by `OCR_MAX_OUTPUT_CHARS=4000`.
@@ -1367,7 +1368,7 @@ Jarvis can open only sites listed in `WEBSITE_ALLOWED_SITES`. If a site is missi
 - Maximum image size: `OPENAI_VISION_MAX_IMAGE_BYTES=5000000`.
 - Run `py main.py --vision-analyze "<image_path>"` to analyze a whitelisted screenshot or test image after confirmation.
 - Assistant commands: `analyze screenshot`, `what is on my screen`, `look at my screen`, `describe my screen`, and `describe screen`.
-- If OpenAI vision is not configured, the command still captures a screenshot and returns the saved path.
+- If OpenAI vision is not configured, the command still captures a screenshot and returns OCR text when available, otherwise the saved path.
 - Screenshot capture and image upload to OpenAI are both high risk and each require confirmation.
 - Jarvis blocks obvious password, banking, and secret screens before upload.
 - Jarvis does not click, type, or control the screen.

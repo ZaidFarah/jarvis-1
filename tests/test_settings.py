@@ -190,6 +190,7 @@ def test_vision_settings_defaults_are_safe() -> None:
     assert settings.screen_vision_enabled is False
     assert settings.screenshot_enabled is False
     assert settings.ocr_enabled is False
+    assert settings.screen_vision_analyze_default is True
     assert settings.openai_vision_enabled is False
     assert settings.openai_vision_model == "gpt-4o-mini"
     assert settings.openai_vision_max_image_bytes == 5000000
@@ -203,6 +204,7 @@ def test_vision_settings_read_environment(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setenv("VISION_ENABLED", "true")
     monkeypatch.setenv("SCREENSHOT_ENABLED", "true")
     monkeypatch.setenv("SCREEN_VISION_ENABLED", "true")
+    monkeypatch.setenv("SCREEN_VISION_ANALYZE_DEFAULT", "true")
     monkeypatch.setenv("OCR_ENABLED", "true")
     monkeypatch.setenv("OPENAI_VISION_ENABLED", "true")
     monkeypatch.setenv("OPENAI_VISION_MODEL", "gpt-4o-mini")
@@ -217,6 +219,7 @@ def test_vision_settings_read_environment(monkeypatch: pytest.MonkeyPatch) -> No
     assert settings.screen_vision_enabled is True
     assert settings.screenshot_enabled is True
     assert settings.ocr_enabled is True
+    assert settings.screen_vision_analyze_default is True
     assert settings.openai_vision_enabled is True
     assert settings.openai_vision_model == "gpt-4o-mini"
     assert settings.openai_vision_max_image_bytes == 123456

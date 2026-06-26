@@ -41,6 +41,22 @@ class FakeOpenAIService:
         )
 
 
+class FailingOpenAIService(FakeOpenAIService):
+    def analyze_image(self, image_path: Path, prompt: str, system_prompt: str | None = None):
+        self.vision_requests.append(Path(image_path))
+        del prompt, system_prompt
+        return OpenAIVisionResult(
+            success=False,
+            text="OpenAI vision is unavailable right now.",
+            used_openai=False,
+            image_path=Path(image_path),
+            model="gpt-4o-mini",
+            request_attempted=True,
+            provider_available=False,
+            safe_error="OpenAI vision request failed.",
+        )
+
+
 class FakeScreenshotImage:
     def __init__(self, captured_paths: list[Path]) -> None:
         self.captured_paths = captured_paths
@@ -174,6 +190,57 @@ def test_ocr_output_truncation(tmp_path: Path) -> None:
     assert "truncated" in format_ocr_result(result).lower()
 
 
+def test_read_screen_text_returns_ocr_text_when_available(tmp_path: Path) -> None:
+    settings = AppSettings(
+        _env_file=None,
+        screen_vision_enabled=True,
+        screenshot_enabled=True,
+        ocr_enabled=True,
+        screenshot_save_dir=tmp_path / "shots",
+    )
+    captured: list[Path] = []
+
+    service = VisionService(
+        settings,
+        confirmation_handler=lambda *args: _approve(*args, log_file=tmp_path / "confirmations.log"),
+        screenshot_capturer=lambda: FakeScreenshotImage(captured),
+        ocr_reader=lambda _: "Hello from screen",
+    )
+
+    result = service.read_screen_text()
+
+    assert result.success is True
+    assert result.text == "Hello from screen"
+    assert result.image_path is not None
+    assert result.image_path.exists()
+    assert captured
+
+
+def test_read_screen_text_falls_back_to_screenshot_when_ocr_disabled(tmp_path: Path) -> None:
+    settings = AppSettings(
+        _env_file=None,
+        screen_vision_enabled=True,
+        screenshot_enabled=True,
+        ocr_enabled=False,
+        screenshot_save_dir=tmp_path / "shots",
+    )
+    captured: list[Path] = []
+
+    service = VisionService(
+        settings,
+        confirmation_handler=lambda *args: _approve(*args, log_file=tmp_path / "confirmations.log"),
+        screenshot_capturer=lambda: FakeScreenshotImage(captured),
+    )
+
+    result = service.read_screen_text()
+
+    assert result.success is True
+    assert "Screenshot saved to" in result.text
+    assert result.image_path is not None
+    assert result.image_path.exists()
+    assert captured
+
+
 def test_openai_vision_disabled_fallback(tmp_path: Path) -> None:
     image_path = tmp_path / "screen.png"
     image_path.write_bytes(b"fake-image")
@@ -190,6 +257,124 @@ def test_openai_vision_disabled_fallback(tmp_path: Path) -> None:
 
     assert result.success is False
     assert "OpenAI vision is disabled" in result.text
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "what is on my screen",
+        "look at my screen",
+        "describe my screen",
+        "describe screen",
+    ],
+)
+def test_screen_analysis_uses_openai_vision_and_includes_ocr_when_useful(
+    command: str,
+    tmp_path: Path,
+) -> None:
+    settings = AppSettings(
+        _env_file=None,
+        screen_vision_enabled=True,
+        screen_vision_analyze_default=True,
+        screenshot_enabled=True,
+        ocr_enabled=True,
+        openai_vision_enabled=True,
+        openai_api_key="sk-test",
+        screenshot_save_dir=tmp_path / "shots",
+    )
+    confirmations: list[str] = []
+
+    def approve(action_name: str, risk_level: str, description: str) -> ConfirmationResult:
+        confirmations.append(action_name)
+        return ConfirmationResult(
+            approved=True,
+            denied=False,
+            timed_out=False,
+            reason="Approved.",
+            log_file=tmp_path / "confirmations.log",
+        )
+
+    captured: list[Path] = []
+    openai_service = FakeOpenAIService()
+    vision_service = VisionService(
+        settings,
+        confirmation_handler=approve,
+        screenshot_capturer=lambda: FakeScreenshotImage(captured),
+        ocr_reader=lambda _: "Clock 10:30\nNotes visible",
+        openai_service=openai_service,
+        allowed_image_roots={tmp_path},
+    )
+    assistant = AssistantCore(settings=settings, openai_service=openai_service, vision_service=vision_service)
+
+    response = assistant.handle_command(command)
+
+    assert response.source == "vision"
+    assert response.accepted is True
+    assert "OpenAI vision answer" in response.text
+    assert "Clock 10:30" in response.text
+    assert confirmations.count("take screenshot") == 1
+    assert confirmations.count("send image to openai") == 1
+    assert openai_service.vision_requests
+    assert captured
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "what is on my screen",
+        "look at my screen",
+        "describe my screen",
+        "describe screen",
+    ],
+)
+def test_screen_analysis_falls_back_to_ocr_when_openai_vision_fails(
+    command: str,
+    tmp_path: Path,
+) -> None:
+    settings = AppSettings(
+        _env_file=None,
+        screen_vision_enabled=True,
+        screen_vision_analyze_default=True,
+        screenshot_enabled=True,
+        ocr_enabled=True,
+        openai_vision_enabled=True,
+        openai_api_key="sk-test",
+        screenshot_save_dir=tmp_path / "shots",
+    )
+    confirmations: list[str] = []
+
+    def approve(action_name: str, risk_level: str, description: str) -> ConfirmationResult:
+        confirmations.append(action_name)
+        return ConfirmationResult(
+            approved=True,
+            denied=False,
+            timed_out=False,
+            reason="Approved.",
+            log_file=tmp_path / "confirmations.log",
+        )
+
+    captured: list[Path] = []
+    openai_service = FailingOpenAIService()
+    vision_service = VisionService(
+        settings,
+        confirmation_handler=approve,
+        screenshot_capturer=lambda: FakeScreenshotImage(captured),
+        ocr_reader=lambda _: "Visible fallback text",
+        openai_service=openai_service,
+        allowed_image_roots={tmp_path},
+    )
+    assistant = AssistantCore(settings=settings, openai_service=openai_service, vision_service=vision_service)
+
+    response = assistant.handle_command(command)
+
+    assert response.source == "vision"
+    assert response.accepted is True
+    assert "Visible fallback text" in response.text
+    assert "Screenshot saved to" in response.text
+    assert confirmations.count("take screenshot") == 1
+    assert confirmations.count("send image to openai") == 1
+    assert openai_service.vision_requests
+    assert captured
 
 
 def test_confirmation_denied_before_screenshot(tmp_path: Path) -> None:
@@ -336,7 +521,6 @@ def test_assistant_core_routes_vision_commands(tmp_path: Path) -> None:
     assert analyze_response.accepted is True
     assert "OpenAI vision answer" in analyze_response.text
     assert confirmations.count("take screenshot") == 3
-    assert confirmations.count("read screen text") == 1
     assert confirmations.count("send image to openai") == 1
     assert captured
     assert assistant.openai_service.messages == []
