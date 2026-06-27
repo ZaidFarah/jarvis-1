@@ -359,6 +359,7 @@ class OpenAIService:
                     }
                 ],
                 max_output_tokens=300,
+                timeout=self.settings.openai_vision_timeout_seconds,
             )
             text = self._extract_response_text(response)
             if not text:
@@ -376,9 +377,14 @@ class OpenAIService:
         except Exception as exc:
             safe_error = format_openai_error(exc)
             self.chat_logger.error("OpenAI vision request failed: {}", safe_error)
+            text = (
+                "OpenAI vision request timed out."
+                if _is_timeout_error_text(safe_error)
+                else "OpenAI vision is unavailable right now."
+            )
             return OpenAIVisionResult(
                 success=False,
-                text="OpenAI vision is unavailable right now.",
+                text=text,
                 used_openai=False,
                 image_path=path,
                 model=self.settings.openai_vision_model,
@@ -535,6 +541,11 @@ def _redact_secret_like_text(text: str) -> str:
         else:
             redacted_words.append(word)
     return " ".join(redacted_words)
+
+
+def _is_timeout_error_text(text: str) -> bool:
+    normalized = text.lower()
+    return "timeout" in normalized or "timed out" in normalized
 
 
 def _yes_no(value: bool) -> str:

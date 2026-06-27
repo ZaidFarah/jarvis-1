@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 
 from config.settings import AppSettings
@@ -236,3 +237,37 @@ def test_openai_chat_stream_falls_back_when_streaming_is_unsupported() -> None:
     assert result.text == "Jarvis OpenAI check OK."
     assert calls == [True, False]
     assert chunks == []
+
+
+def test_openai_vision_uses_configured_request_timeout(tmp_path: Path) -> None:
+    image_path = tmp_path / "screen.jpg"
+    image_path.write_bytes(b"fake-jpeg")
+    captured: dict[str, object] = {}
+
+    class VisionResponses:
+        def create(self, **kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(output_text="Vision OK.")
+
+    class VisionClient:
+        responses = VisionResponses()
+
+    settings = AppSettings(
+        _env_file=None,
+        openai_vision_enabled=True,
+        openai_api_key="sk-secret",
+        openai_vision_model="gpt-vision-test",
+        openai_vision_timeout_seconds=8.5,
+    )
+    result = OpenAIService(settings, client_factory=lambda api_key: VisionClient()).analyze_image(
+        image_path,
+        prompt="Describe it.",
+    )
+
+    assert result.success is True
+    assert captured["model"] == "gpt-vision-test"
+    assert captured["timeout"] == 8.5
+    assert "api_key" not in captured
+    content = captured["input"][0]["content"]  # type: ignore[index]
+    assert content[0]["type"] == "input_text"
+    assert content[1]["type"] == "input_image"

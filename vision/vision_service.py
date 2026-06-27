@@ -29,6 +29,14 @@ ConfirmationHandler = Callable[[str, str, str], ConfirmationResult]
 
 
 @dataclass(frozen=True)
+class PreparedVisionImage:
+    original_path: Path
+    request_path: Path
+    image_size: tuple[int, int] | None
+    converted: bool
+
+
+@dataclass(frozen=True)
 class VisionCheckReport:
     enabled: bool
     screenshot_enabled: bool
@@ -605,8 +613,17 @@ class VisionService:
         if not self.settings.openai_vision_enabled or not self.settings.has_openai_api_key:
             return None
         try:
+            prepared_image = self._prepare_openai_vision_image(image_path)
+            request_path = prepared_image.request_path
+            if request_path.stat().st_size > self.settings.openai_vision_max_image_bytes:
+                self.vision_logger.warning(
+                    "OpenAI vision text extraction skipped because prepared image is too large path={} bytes={}",
+                    request_path,
+                    request_path.stat().st_size,
+                )
+                return None
             result = self.openai_service.analyze_image(
-                image_path,
+                request_path,
                 prompt="Extract the visible text from this screen as faithfully as possible. Preserve line breaks when helpful.",
                 system_prompt=self.settings.system_prompt,
             )
@@ -650,6 +667,11 @@ class VisionService:
 
     @staticmethod
     def _screen_fallback_text(image_path: Path, ocr_text: str, error: str | None) -> str:
+        if _is_vision_timeout_error(error):
+            timeout_text = f"Vision analysis timed out. Screenshot saved here: {image_path}."
+            if ocr_text.strip():
+                return f"{ocr_text.strip()}\n\n{timeout_text}"
+            return timeout_text
         if ocr_text.strip():
             return f"{ocr_text.strip()}\n\nScreenshot saved to {image_path}."
         if error:
@@ -684,18 +706,6 @@ class VisionService:
 
         if not self._is_supported_image(normalized_path):
             message = "Only image files can be analyzed."
-            return self._analysis_result(
-                success=False,
-                text=message,
-                image_path=normalized_path,
-                request_attempted=False,
-                provider_available=False,
-                openai_vision_enabled=self.settings.openai_vision_enabled,
-                safe_error=message,
-            )
-
-        if normalized_path.stat().st_size > self.settings.openai_vision_max_image_bytes:
-            message = "The image is too large to analyze safely."
             return self._analysis_result(
                 success=False,
                 text=message,
@@ -759,22 +769,48 @@ class VisionService:
                 )
 
         try:
+            prepared_image = self._prepare_openai_vision_image(normalized_path)
+            request_path = prepared_image.request_path
+            if request_path.stat().st_size > self.settings.openai_vision_max_image_bytes:
+                message = "The prepared image is too large to analyze safely."
+                return self._analysis_result(
+                    success=False,
+                    text=message,
+                    image_path=normalized_path,
+                    request_attempted=False,
+                    provider_available=False,
+                    openai_vision_enabled=self.settings.openai_vision_enabled,
+                    image_size=prepared_image.image_size,
+                    safe_error=message,
+                )
+
             result = self.openai_service.analyze_image(
-                normalized_path,
+                request_path,
                 prompt="Describe the visible screen or image content clearly and concisely.",
                 system_prompt=self.settings.system_prompt,
             )
             if not result.success:
+                response_text = (
+                    f"Vision analysis timed out. Screenshot saved here: {normalized_path}."
+                    if _is_vision_timeout_error(result.safe_error)
+                    else result.text
+                )
                 return self._analysis_result(
                     success=False,
-                    text=result.text,
+                    text=response_text,
                     image_path=normalized_path,
                     request_attempted=result.request_attempted,
                     provider_available=result.provider_available,
                     openai_vision_enabled=self.settings.openai_vision_enabled,
+                    image_size=prepared_image.image_size,
                     safe_error=result.safe_error,
                 )
-            self.vision_logger.info("OpenAI vision analysis completed path={}", normalized_path)
+            self.vision_logger.info(
+                "OpenAI vision analysis completed source_path={} request_path={} converted={}",
+                normalized_path,
+                request_path,
+                prepared_image.converted,
+            )
             return self._analysis_result(
                 success=True,
                 text=result.text,
@@ -782,19 +818,81 @@ class VisionService:
                 request_attempted=True,
                 provider_available=True,
                 openai_vision_enabled=self.settings.openai_vision_enabled,
+                image_size=prepared_image.image_size,
             )
         except Exception as exc:
             safe_error = format_vision_error(exc)
             self.vision_logger.error("OpenAI vision analysis failed: {}", safe_error)
+            response_text = (
+                f"Vision analysis timed out. Screenshot saved here: {normalized_path}."
+                if _is_vision_timeout_error(safe_error)
+                else "OpenAI vision is unavailable right now."
+            )
             return self._analysis_result(
                 success=False,
-                text="OpenAI vision is unavailable right now.",
+                text=response_text,
                 image_path=normalized_path,
                 request_attempted=True,
                 provider_available=False,
                 openai_vision_enabled=self.settings.openai_vision_enabled,
                 safe_error=safe_error,
             )
+
+    def _prepare_openai_vision_image(self, image_path: Path) -> PreparedVisionImage:
+        source_path = Path(image_path)
+        try:
+            from PIL import Image, ImageOps
+        except Exception as exc:
+            self.vision_logger.warning(
+                "Pillow unavailable for OpenAI vision image preparation: {}",
+                format_vision_error(exc),
+            )
+            return PreparedVisionImage(source_path, source_path, None, False)
+
+        try:
+            with Image.open(source_path) as image:
+                image.load()
+                image = ImageOps.exif_transpose(image)
+                original_size = image.size
+                prepared = image
+                if prepared.width > self.settings.openai_vision_max_width:
+                    ratio = self.settings.openai_vision_max_width / float(prepared.width)
+                    target_size = (
+                        self.settings.openai_vision_max_width,
+                        max(1, int(round(prepared.height * ratio))),
+                    )
+                    prepared = prepared.resize(target_size, _pil_lanczos(Image))
+
+                converted = source_path.suffix.lower() not in {".jpg", ".jpeg"} or prepared.size != original_size
+                if not converted:
+                    return PreparedVisionImage(source_path, source_path, original_size, False)
+
+                prepared_rgb = _image_to_rgb(prepared, Image)
+                request_dir = self.settings.screenshot_save_dir / "openai-vision"
+                request_dir.mkdir(parents=True, exist_ok=True)
+                request_path = request_dir / f"{source_path.stem}-openai.jpg"
+                prepared_rgb.save(
+                    request_path,
+                    format="JPEG",
+                    quality=self.settings.openai_vision_jpeg_quality,
+                    optimize=True,
+                )
+                self.vision_logger.info(
+                    "Prepared OpenAI vision image source_path={} request_path={} original_size={} request_size={} bytes={}",
+                    source_path,
+                    request_path,
+                    original_size,
+                    prepared_rgb.size,
+                    request_path.stat().st_size,
+                )
+                return PreparedVisionImage(source_path, request_path, prepared_rgb.size, True)
+        except Exception as exc:
+            self.vision_logger.warning(
+                "OpenAI vision image preparation failed path={} error={}",
+                source_path,
+                format_vision_error(exc),
+            )
+            return PreparedVisionImage(source_path, source_path, None, False)
 
     def _check_report(
         self,
@@ -1193,3 +1291,26 @@ def format_vision_error(error: Exception) -> str:
     error_type = type(error).__name__
     message = str(error).strip() or "No error details provided."
     return f"{error_type}: {message}"
+
+
+def _pil_lanczos(image_module: Any) -> Any:
+    resampling = getattr(image_module, "Resampling", image_module)
+    return getattr(resampling, "LANCZOS", getattr(image_module, "BICUBIC"))
+
+
+def _image_to_rgb(image: Any, image_module: Any) -> Any:
+    if image.mode == "RGB":
+        return image.copy()
+    if image.mode in {"RGBA", "LA"}:
+        background = image_module.new("RGB", image.size, (255, 255, 255))
+        alpha = image.getchannel("A")
+        background.paste(image, mask=alpha)
+        return background
+    return image.convert("RGB")
+
+
+def _is_vision_timeout_error(error: str | None) -> bool:
+    if not error:
+        return False
+    normalized = error.lower()
+    return "timeout" in normalized or "timed out" in normalized

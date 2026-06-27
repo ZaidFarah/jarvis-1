@@ -894,6 +894,33 @@ class AppSettings(BaseSettings):
             "JARVIS_OPENAI_VISION_MAX_IMAGE_BYTES",
         ),
     )
+    openai_vision_timeout_seconds: float = Field(
+        default=15.0,
+        ge=1.0,
+        le=120.0,
+        validation_alias=AliasChoices(
+            "OPENAI_VISION_TIMEOUT_SECONDS",
+            "JARVIS_OPENAI_VISION_TIMEOUT_SECONDS",
+        ),
+    )
+    openai_vision_max_width: int = Field(
+        default=1280,
+        ge=320,
+        le=4096,
+        validation_alias=AliasChoices(
+            "OPENAI_VISION_MAX_WIDTH",
+            "JARVIS_OPENAI_VISION_MAX_WIDTH",
+        ),
+    )
+    openai_vision_jpeg_quality: int = Field(
+        default=75,
+        ge=30,
+        le=95,
+        validation_alias=AliasChoices(
+            "OPENAI_VISION_JPEG_QUALITY",
+            "JARVIS_OPENAI_VISION_JPEG_QUALITY",
+        ),
+    )
     openai_enabled: bool = Field(
         default=False,
         validation_alias=AliasChoices("OPENAI_ENABLED", "JARVIS_OPENAI_ENABLED"),

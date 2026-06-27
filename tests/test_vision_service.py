@@ -59,6 +59,22 @@ class FailingOpenAIService(FakeOpenAIService):
         )
 
 
+class TimeoutOpenAIService(FakeOpenAIService):
+    def analyze_image(self, image_path: Path, prompt: str, system_prompt: str | None = None):
+        self.vision_requests.append(Path(image_path))
+        del prompt, system_prompt
+        return OpenAIVisionResult(
+            success=False,
+            text="OpenAI vision request timed out.",
+            used_openai=False,
+            image_path=Path(image_path),
+            model="gpt-4o-mini",
+            request_attempted=True,
+            provider_available=False,
+            safe_error="APITimeoutError: Request timed out.",
+        )
+
+
 class FakeScreenshotImage:
     def __init__(self, captured_paths: list[Path]) -> None:
         self.captured_paths = captured_paths
@@ -488,6 +504,87 @@ def test_confirmation_denied_before_openai_upload(tmp_path: Path) -> None:
 
     assert result.success is False
     assert "Denied." in result.text
+
+
+def test_openai_vision_resizes_and_compresses_request_image(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(VisionService, "_ocr_dependency_available", staticmethod(lambda: False))
+    image_path = tmp_path / "wide-screen.png"
+    from PIL import Image
+
+    image = Image.new("RGB", (2048, 1024), color=(32, 64, 96))
+    image.save(image_path, compress_level=0)
+    settings = AppSettings(
+        _env_file=None,
+        vision_enabled=True,
+        openai_vision_enabled=True,
+        openai_api_key="sk-test",
+        screenshot_save_dir=tmp_path / "shots",
+        openai_vision_max_width=1280,
+        openai_vision_jpeg_quality=75,
+    )
+    openai_service = FakeOpenAIService()
+    service = VisionService(
+        settings,
+        confirmation_handler=lambda *args: _approve(*args, log_file=tmp_path / "confirmations.log"),
+        openai_service=openai_service,
+        allowed_image_roots={tmp_path},
+    )
+
+    result = service.analyze_image(image_path)
+
+    assert result.success is True
+    assert result.image_path == image_path.resolve()
+    assert openai_service.vision_requests
+    request_path = openai_service.vision_requests[0]
+    assert request_path.suffix == ".jpg"
+    assert request_path.parent == settings.screenshot_save_dir / "openai-vision"
+    assert request_path.exists()
+    with Image.open(request_path) as prepared:
+        assert prepared.format == "JPEG"
+        assert prepared.size == (1280, 640)
+        assert prepared.mode == "RGB"
+    assert request_path.stat().st_size < image_path.stat().st_size
+
+
+def test_screen_analysis_timeout_returns_ocr_and_saved_screenshot(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(VisionService, "_ocr_dependency_available", staticmethod(lambda: False))
+    settings = AppSettings(
+        _env_file=None,
+        screen_vision_enabled=True,
+        screen_vision_analyze_default=True,
+        screenshot_enabled=True,
+        ocr_enabled=True,
+        openai_vision_enabled=True,
+        openai_api_key="sk-test",
+        screenshot_save_dir=tmp_path / "shots",
+    )
+    captured: list[Path] = []
+    openai_service = TimeoutOpenAIService()
+    service = VisionService(
+        settings,
+        confirmation_handler=lambda *args: _approve(*args, log_file=tmp_path / "confirmations.log"),
+        screenshot_capturer=lambda: FakeScreenshotImage(captured),
+        ocr_reader=lambda _: "Visible OCR fallback text",
+        openai_service=openai_service,
+        allowed_image_roots={tmp_path},
+    )
+
+    result = service.analyze_screen(monitor=1)
+
+    assert result.success is True
+    assert "Visible OCR fallback text" in result.text
+    assert "Vision analysis timed out. Screenshot saved here:" in result.text
+    assert captured
+    assert str(captured[0]) in result.text
+    assert result.safe_error == "APITimeoutError: Request timed out."
+    assert openai_service.vision_requests
+    assert openai_service.vision_requests[0].suffix == ".jpg"
 
 
 def test_oversized_image_rejected(tmp_path: Path) -> None:
