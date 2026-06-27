@@ -652,8 +652,16 @@ class FakeScreenVisionService:
         ("what is on my primary screen", ("analyze", "primary", None)),
         ("what is on screen 1", ("analyze", 1, None)),
         ("what is on screen 2", ("analyze", 2, None)),
+        ("what's on the screen one", ("analyze", 1, None)),
+        ("whats on screen one", ("analyze", 1, None)),
+        ("what's on screen one", ("analyze", 1, None)),
+        ("what is on screen one", ("analyze", 1, None)),
+        ("what is on the first screen", ("analyze", 1, None)),
+        ("what is on the second screen", ("analyze", 2, None)),
+        ("screen one", ("analyze", 1, None)),
         ("read screen 1", ("read", 1, None)),
         ("read screen 2", ("read", 2, None)),
+        ("read screen two", ("read", 2, None)),
     ],
 )
 def test_screen_specific_commands_route_locally(command: str, expected_call: tuple[str, str | int | None, bool | None]) -> None:

@@ -77,6 +77,27 @@ def test_speech_repair_repairs_status_report_variants(transcript: str) -> None:
 @pytest.mark.parametrize(
     ("transcript", "expected"),
     [
+        ("One's what's on the screen on", "what is on screen 1"),
+        ("what's on the screen one", "what is on screen 1"),
+        ("what's on screen one", "what is on screen 1"),
+        ("what is on screen one", "what is on screen 1"),
+        ("screen one", "screen 1"),
+        ("screen two", "screen 2"),
+        ("describe screen two", "describe screen 2"),
+        ("read the second screen", "read screen 2"),
+    ],
+)
+def test_speech_repair_repairs_screen_vision_variants(transcript: str, expected: str) -> None:
+    result = SpeechRepairer(AppSettings(_env_file=None)).repair(transcript)
+
+    assert result.repaired_transcript == expected
+    assert result.confidence == 0.94
+    assert result.strategy == REPAIR_STRATEGY_COMMON_INTENT
+
+
+@pytest.mark.parametrize(
+    ("transcript", "expected"),
+    [
         ("hey john this", "hey jarvis"),
         ("hey john of us", "hey jarvis"),
         ("hey jar of this", "hey jarvis"),

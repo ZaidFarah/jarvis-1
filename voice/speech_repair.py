@@ -31,6 +31,12 @@ WAKE_UP_JARVIS_VARIANTS = {
     "wake up jar of this",
     "we got jarvis",
 }
+SCREEN_WORD_NUMBERS = {
+    "one": "1",
+    "first": "1",
+    "two": "2",
+    "second": "2",
+}
 
 
 @dataclass(frozen=True)
@@ -173,6 +179,17 @@ class SpeechRepairer:
 
     def _repair_from_common_intents(self, raw: str, cleaned: str) -> SpeechRepairResult | None:
         normalized = _normalize_for_match(cleaned)
+        screen_repair = _repair_screen_vision_intent(normalized)
+        if screen_repair is not None:
+            return SpeechRepairResult(
+                raw,
+                cleaned,
+                screen_repair,
+                0.94,
+                REPAIR_STRATEGY_COMMON_INTENT,
+                "repaired likely screen vision command",
+            )
+
         city = self.settings.weather_default_city
         if normalized in {"thats report", "status reports", "start us report", "stat us report"}:
             return SpeechRepairResult(
@@ -313,6 +330,52 @@ def _looks_like_weather_command(normalized: str) -> bool:
     if "whether in" in normalized or "whether for" in normalized:
         return True
     return any(word in normalized.split() for word in ("forecast", "temperature", "rain"))
+
+
+def _repair_screen_vision_intent(normalized: str) -> str | None:
+    exact_repairs = {
+        "ones whats on the screen on": "what is on screen 1",
+        "whats on the screen one": "what is on screen 1",
+        "whats on screen one": "what is on screen 1",
+        "what is on screen one": "what is on screen 1",
+        "what is on the screen one": "what is on screen 1",
+        "what is on the first screen": "what is on screen 1",
+        "whats on the first screen": "what is on screen 1",
+        "whats on first screen": "what is on screen 1",
+        "what is on first screen": "what is on screen 1",
+        "screen one": "screen 1",
+        "screen first": "screen 1",
+        "whats on the screen two": "what is on screen 2",
+        "whats on screen two": "what is on screen 2",
+        "what is on screen two": "what is on screen 2",
+        "what is on the screen two": "what is on screen 2",
+        "what is on the second screen": "what is on screen 2",
+        "whats on the second screen": "what is on screen 2",
+        "whats on second screen": "what is on screen 2",
+        "what is on second screen": "what is on screen 2",
+        "screen two": "screen 2",
+        "screen second": "screen 2",
+    }
+    if normalized in exact_repairs:
+        return exact_repairs[normalized]
+
+    match = re.match(
+        r"^(?P<action>what is on|whats on|describe|read)\s+(?:the\s+)?screen\s+(?P<number>one|first|two|second)$",
+        normalized,
+    )
+    if match:
+        action = "what is on" if match.group("action") == "whats on" else match.group("action")
+        return f"{action} screen {SCREEN_WORD_NUMBERS[match.group('number')]}"
+
+    match = re.match(
+        r"^(?P<action>what is on|whats on|describe|read)\s+(?:the\s+)?(?P<number>first|second)\s+screen$",
+        normalized,
+    )
+    if match:
+        action = "what is on" if match.group("action") == "whats on" else match.group("action")
+        return f"{action} screen {SCREEN_WORD_NUMBERS[match.group('number')]}"
+
+    return None
 
 
 def _normalize_for_match(value: str) -> str:

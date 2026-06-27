@@ -29,6 +29,14 @@ from services.openai_service import OpenAIService
 from vision.vision_service import ScreenshotResult, VisionAnalysisResult, VisionOCRResult, VisionService
 
 
+SCREEN_NUMBER_WORDS = {
+    "one": "1",
+    "first": "1",
+    "two": "2",
+    "second": "2",
+}
+
+
 @dataclass(frozen=True)
 class AssistantResponse:
     text: str
@@ -488,7 +496,7 @@ class AssistantCore:
         return response
 
     def _handle_vision_command(self, command: str) -> AssistantResponse | None:
-        normalized = " ".join(command.lower().strip().split())
+        normalized = self._normalize_vision_command(command)
         if normalized == "list screens":
             return self._list_screens()
         if normalized == "take screenshot":
@@ -512,6 +520,8 @@ class AssistantCore:
         if monitor_index is not None and normalized.startswith("what is on screen"):
             return self._analyze_or_capture_screen(monitor=monitor_index)
         if monitor_index is not None and normalized.startswith("describe screen"):
+            return self._analyze_or_capture_screen(monitor=monitor_index)
+        if monitor_index is not None and normalized.startswith("screen"):
             return self._analyze_or_capture_screen(monitor=monitor_index)
         return None
 
@@ -665,7 +675,24 @@ class AssistantCore:
         match = re.match(r"^what is on my screen\s+(\d+)$", normalized)
         if match:
             return int(match.group(1))
+        match = re.match(r"^screen\s+(\d+)$", normalized)
+        if match:
+            return int(match.group(1))
         return None
+
+    @staticmethod
+    def _normalize_vision_command(command: str) -> str:
+        normalized = command.lower().replace("’", "'")
+        normalized = re.sub(r"[^a-z0-9'\s]", " ", normalized)
+        normalized = re.sub(r"\bwhat'?s\b", "what is", normalized)
+        normalized = re.sub(r"\s+", " ", normalized).strip()
+
+        for word, digit in SCREEN_NUMBER_WORDS.items():
+            normalized = re.sub(rf"\bthe {word} screen\b", f"screen {digit}", normalized)
+            normalized = re.sub(rf"\b{word} screen\b", f"screen {digit}", normalized)
+            normalized = re.sub(rf"\bscreen {word}\b", f"screen {digit}", normalized)
+        normalized = re.sub(r"\bthe screen\b", "screen", normalized)
+        return re.sub(r"\s+", " ", normalized).strip()
 
     def _handle_calendar_command(self, command: str) -> AssistantResponse | None:
         normalized = " ".join(command.lower().strip().split())

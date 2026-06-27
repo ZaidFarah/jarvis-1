@@ -59,6 +59,7 @@ dist\Jarvis\Jarvis.exe --runtime-check
 ## Recommended `.env`
 
 Use `.env.example` as the source of truth. For a stable local v0.2.0-style checkpoint, these are the practical defaults to review first:
+For GUI voice testing, keep `FAST_VOICE_TTS_MODE=off` unless you are explicitly testing spoken output.
 
 ```dotenv
 APP_NAME=Jarvis
@@ -252,6 +253,7 @@ If microphone or STT is not working:
 - Confirm the Windows default input device and `VOICE_INPUT_DEVICE`.
 - Use `WHISPER_DEVICE=cpu` and `WHISPER_COMPUTE_TYPE=int8` for the safest CPU path.
 - Install or repair Faster Whisper dependencies if `--transcribe-test` cannot load the model.
+- Keep `FAST_VOICE_TTS_MODE=off` while testing command routing to avoid slow TTS masking routing issues.
 
 If wake word is unreliable:
 

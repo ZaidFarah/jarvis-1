@@ -101,6 +101,28 @@ def test_fast_voice_runs_one_repaired_command_through_assistant(tmp_path: Path) 
         assert field in text
 
 
+def test_fast_voice_repairs_screen_vision_transcript_before_assistant(tmp_path: Path) -> None:
+    settings = AppSettings(
+        _env_file=None,
+        log_dir=tmp_path / "logs",
+        fast_voice_tts_enabled=False,
+    )
+    assistant = SpyAssistant()
+
+    report = FastVoiceRunner(
+        settings,
+        provider=FakeProvider("One's what's on the screen on"),
+        assistant=assistant,  # type: ignore[arg-type]
+        recorder=lambda: ([0.2] * 1600, "Microphone Array"),
+        output_func=lambda _message: None,
+    ).run_once()
+
+    assert report.command == "what is on screen 1"
+    assert report.speech_repair is not None
+    assert report.speech_repair.repair_reason == "repaired likely screen vision command"
+    assert assistant.commands == ["what is on screen 1"]
+
+
 @pytest.mark.parametrize(
     "transcript",
     ["Wake up.", "Wake up, Jarvis.", "Hey Jarvis", "Jarvis"],
@@ -299,6 +321,40 @@ def test_fast_voice_tts_is_controlled_by_fast_setting(tmp_path: Path) -> None:
     assert calls == ["Systems nominal."]
     assert report.tts_result is not None
     assert report.tts_result.spoken is True
+
+
+def test_fast_voice_legacy_full_tts_does_not_speak_wake_only_ack(tmp_path: Path) -> None:
+    settings = AppSettings(
+        _env_file=None,
+        log_dir=tmp_path / "logs",
+        fast_voice_tts_enabled=True,
+    )
+    calls: list[str] = []
+
+    def fake_tts(text: str, settings: AppSettings, speak_requested: bool) -> TextToSpeechResult:
+        assert speak_requested is True
+        calls.append(text)
+        return TextToSpeechResult(
+            provider_name="fake_tts",
+            provider_available=True,
+            requested=True,
+            spoken=True,
+            log_file=settings.log_dir / "tts.log",
+        )
+
+    report = FastVoiceRunner(
+        settings,
+        provider=FakeProvider("Hey Jarvis"),
+        assistant=SpyAssistant(),  # type: ignore[arg-type]
+        recorder=lambda: ([0.2] * 1600, "Microphone Array"),
+        tts_function=fake_tts,
+        output_func=lambda _message: None,
+    ).run_once()
+
+    assert report.wake_only is True
+    assert calls == []
+    assert report.tts_result is None
+    assert report.timing.tts_ms == 0.0
 
 
 def test_fast_voice_explicit_tts_off_overrides_legacy_enable_flag(tmp_path: Path) -> None:

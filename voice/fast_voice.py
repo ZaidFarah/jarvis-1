@@ -317,6 +317,8 @@ class FastVoiceRunner:
         mode = resolve_fast_voice_tts_mode(self.settings)
         if mode == "off":
             return None, 0.0
+        if response_kind == "ack" and mode != "short_ack_only":
+            return None, 0.0
         if mode == "short_ack_only" and response_kind != "ack":
             return None, 0.0
         if self._stop_requested.is_set():
