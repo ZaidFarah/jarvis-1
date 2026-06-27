@@ -659,6 +659,19 @@ class AppSettings(BaseSettings):
         ),
         validation_alias=AliasChoices("WEBSITE_ALLOWED_SITES", "JARVIS_WEBSITE_ALLOWED_SITES"),
     )
+    developer_mode_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("DEVELOPER_MODE_ENABLED", "JARVIS_DEVELOPER_MODE_ENABLED"),
+    )
+    developer_command_timeout_seconds: int = Field(
+        default=120,
+        ge=10,
+        le=3600,
+        validation_alias=AliasChoices(
+            "DEVELOPER_COMMAND_TIMEOUT_SECONDS",
+            "JARVIS_DEVELOPER_COMMAND_TIMEOUT_SECONDS",
+        ),
+    )
     file_access_enabled: bool = Field(
         default=False,
         validation_alias=AliasChoices("FILE_ACCESS_ENABLED", "JARVIS_FILE_ACCESS_ENABLED"),

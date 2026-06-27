@@ -1186,6 +1186,32 @@ Jarvis can launch only apps listed in `APP_LAUNCHER_ALLOWED_APPS`. If an app
 is missing, not installed, or cannot be resolved, Jarvis reports that locally
 and does not send the command to OpenAI.
 
+## Phase 15.1 Developer Code Mode
+
+- Safe developer helpers for working inside the Jarvis repo.
+- Enable with `DEVELOPER_MODE_ENABLED=true`.
+- Test commands are time-limited with `DEVELOPER_COMMAND_TIMEOUT_SECONDS=120` by default.
+- Assistant commands:
+  - `run tests`
+  - `run pytest`
+  - `run fast tests`
+  - `check git status`
+  - `show git status`
+  - `show last commit`
+  - `open main.py`
+  - `open fast voice file`
+  - `open assistant core`
+  - `open settings`
+  - `open tests folder`
+  - `open jarvis in vs code`
+- `run tests` and `run pytest` execute `python -m pytest -q` locally.
+- `run fast tests` runs a smaller whitelisted test set for quicker checks.
+- `check git status` and `show git status` use `git status --short` only.
+- `show last commit` uses `git log -1 --oneline --decorate`.
+- File and folder open commands are restricted to whitelisted project files and the tests folder.
+- Full command logs are written to `logs/developer.log`.
+- Developer commands are handled locally and are never sent to OpenAI.
+
 ## Website Check
 
 ```powershell

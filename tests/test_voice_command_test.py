@@ -163,7 +163,8 @@ def test_voice_command_report_includes_safe_placeholder_response() -> None:
     assert "detected: yes" in text
     assert "raw command transcription: open settings" in text
     assert "cleaned command: open settings" in text
-    assert "not allowed" in text
+    assert "Opened settings." in text
+    assert "not allowed" not in text
 
 
 def test_voice_command_repairs_broken_transcript_before_assistant_call() -> None:

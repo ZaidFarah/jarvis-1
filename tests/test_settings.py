@@ -105,6 +105,8 @@ def test_openai_settings_defaults_are_safe() -> None:
     assert settings.memory_enabled is True
     assert settings.memory_confirm_names is True
     assert settings.memory_database_path.name == "jarvis_memory.db"
+    assert settings.developer_mode_enabled is True
+    assert settings.developer_command_timeout_seconds == 120
 
 
 def test_conversation_history_settings_read_environment(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -144,6 +146,16 @@ def test_memory_settings_read_environment(monkeypatch: pytest.MonkeyPatch) -> No
     assert settings.memory_enabled is False
     assert settings.memory_confirm_names is False
     assert settings.memory_database_path.name == "custom_memory.db"
+
+
+def test_developer_settings_read_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DEVELOPER_MODE_ENABLED", "false")
+    monkeypatch.setenv("DEVELOPER_COMMAND_TIMEOUT_SECONDS", "45")
+
+    settings = AppSettings(_env_file=None)
+
+    assert settings.developer_mode_enabled is False
+    assert settings.developer_command_timeout_seconds == 45
 
 
 def test_memory_settings_keep_legacy_database_path_name(

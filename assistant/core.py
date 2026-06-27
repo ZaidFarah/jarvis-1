@@ -16,6 +16,7 @@ from security.permissions import PermissionBroker
 from tools.file_access import FileAccess, FileReadResult, FileSummaryResult
 from tools.browser_control import BrowserControl, BrowserSearchResult
 from tools.app_launcher import AppLauncher, canonical_app_name
+from tools.developer_tools import DeveloperCommandResult, DeveloperTools
 from tools.folder_control import (
     FolderControl,
     FolderOpenResult,
@@ -87,6 +88,10 @@ class AssistantCore:
             self.website_launcher = self.browser_control.website_launcher
         else:
             self.website_launcher = None
+        if self.settings.developer_mode_enabled:
+            self.developer_tools = DeveloperTools(self.settings)
+        else:
+            self.developer_tools = None
         if self.settings.file_access_enabled:
             self.file_access = FileAccess(self.settings)
         else:
@@ -230,6 +235,10 @@ class AssistantCore:
         folder_control_response = self._handle_folder_control_command(cleaned)
         if folder_control_response is not None:
             return folder_control_response
+
+        developer_response = self._handle_developer_command(cleaned)
+        if developer_response is not None:
+            return developer_response
 
         browser_search_response = self._handle_browser_search_command(cleaned)
         if browser_search_response is not None:
@@ -1077,6 +1086,40 @@ class AssistantCore:
             error=result.safe_error,
         )
 
+    def _handle_developer_command(self, command: str) -> AssistantResponse | None:
+        if self.developer_tools is None:
+            normalized = " ".join(command.lower().strip().split())
+            if normalized in self._developer_command_names():
+                return AssistantResponse(text="Developer mode is disabled.", accepted=True, source="local")
+            return None
+
+        result = self.developer_tools.handle_command(command)
+        if result is None:
+            return None
+        return AssistantResponse(
+            text=self._developer_command_response_text(result),
+            accepted=result.succeeded,
+            source="developer",
+            error=result.safe_error,
+        )
+
+    @staticmethod
+    def _developer_command_names() -> set[str]:
+        return {
+            "run tests",
+            "run pytest",
+            "run fast tests",
+            "check git status",
+            "show git status",
+            "show last commit",
+            "open main.py",
+            "open fast voice file",
+            "open assistant core",
+            "open settings",
+            "open tests folder",
+            "open jarvis in vs code",
+        }
+
     def _read_file(self, filename: str, folder_name: str) -> AssistantResponse:
         if not self.settings.file_access_enabled or self.file_access is None:
             return AssistantResponse(text="File access is disabled.", accepted=True, source="local")
@@ -1596,6 +1639,14 @@ class AssistantCore:
             return "I couldn't find any recent downloads."
         entries = ", ".join(result.recent_entries)
         return f"Recent downloads: {entries}."
+
+    @staticmethod
+    def _developer_command_response_text(result: DeveloperCommandResult) -> str:
+        if result.safe_error:
+            return result.safe_error
+        if result.text:
+            return result.text
+        return "Developer command completed."
 
     def _screen_vision_enabled(self) -> bool:
         return bool(self.settings.vision_enabled or getattr(self.settings, "screen_vision_enabled", False))
