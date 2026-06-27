@@ -63,6 +63,52 @@ class StubAssistant:
         return Response("handled")
 
 
+class StubDeveloperTools:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def check_git_status(self) -> object:
+        self.calls.append("check_git_status")
+        return self._result("Git status: working tree clean.")
+
+    def show_last_commit(self) -> object:
+        self.calls.append("show_last_commit")
+        return self._result("abc1234 Add developer panel")
+
+    def run_fast_tests(self) -> object:
+        self.calls.append("run_fast_tests")
+        return self._result("Pytest passed: 6 passed in 0.42s")
+
+    def open_main_py(self) -> object:
+        self.calls.append("open_main_py")
+        return self._result("Opened main.py.")
+
+    def open_settings(self) -> object:
+        self.calls.append("open_settings")
+        return self._result("Opened settings.py.")
+
+    def open_tests_folder(self) -> object:
+        self.calls.append("open_tests_folder")
+        return self._result("Opened tests.")
+
+    def open_jarvis_in_vscode(self) -> object:
+        self.calls.append("open_jarvis_in_vscode")
+        return self._result("Opened the Jarvis project in VS Code.")
+
+    @staticmethod
+    def _result(text: str, succeeded: bool = True, safe_error: str | None = None) -> object:
+        return SimpleNamespace(
+            succeeded=succeeded,
+            safe_error=safe_error,
+            text=text,
+        )
+
+
+class StubAssistantWithDeveloperTools(StubAssistant):
+    def __init__(self, developer_tools: StubDeveloperTools) -> None:
+        self.developer_tools = developer_tools
+
+
 def test_voice_loop_gui_state_updates_controls_and_status_fields() -> None:
     app = _app()
     settings = AppSettings(_env_file=None)
@@ -120,6 +166,17 @@ def test_voice_loop_gui_state_updates_controls_and_status_fields() -> None:
     assert window.look_screen_1_button.text() == "Look Screen 1"
     assert window.look_screen_2_button.text() == "Look Screen 2"
     assert window.read_screen_button.text() == "Read Screen"
+    assert window.developer_mode_value.text() == "Enabled"
+    assert window.developer_status_value.text() == "Not checked"
+    assert window.developer_commit_value.text() == "Not checked"
+    assert window.developer_tests_value.text() == "Not run"
+    assert window.developer_git_status_button.text() == "Git Status"
+    assert window.developer_last_commit_button.text() == "Last Commit"
+    assert window.developer_fast_tests_button.text() == "Run Fast Tests"
+    assert window.developer_open_main_button.text() == "Open Main"
+    assert window.developer_open_settings_button.text() == "Open Settings"
+    assert window.developer_open_tests_button.text() == "Open Tests"
+    assert window.developer_open_vscode_button.text() == "Open VS Code"
 
     window._set_voice_loop_running(True)
 
@@ -182,6 +239,63 @@ def test_voice_loop_gui_state_updates_controls_and_status_fields() -> None:
     assert window.backup_create_action is not None
     assert window.backup_list_action is not None
 
+    window.close()
+    app.processEvents()
+
+
+def test_gui_developer_panel_uses_developer_tools_service() -> None:
+    app = _app()
+    tools = StubDeveloperTools()
+    window = JarvisMainWindow(
+        settings=AppSettings(_env_file=None, developer_mode_enabled=True),
+        assistant=StubAssistantWithDeveloperTools(tools),
+    )
+
+    window.developer_git_status()
+    assert tools.calls[-1] == "check_git_status"
+    assert window.developer_status_value.text() == "Git status: working tree clean."
+
+    window.developer_last_commit()
+    assert tools.calls[-1] == "show_last_commit"
+    assert window.developer_commit_value.text() == "abc1234 Add developer panel"
+
+    window.developer_run_fast_tests()
+    assert tools.calls[-1] == "run_fast_tests"
+    assert window.developer_tests_value.text() == "Pytest passed: 6 passed in 0.42s"
+
+    window.developer_open_main()
+    window.developer_open_settings()
+    window.developer_open_tests()
+    window.developer_open_vscode()
+
+    assert tools.calls[-4:] == [
+        "open_main_py",
+        "open_settings",
+        "open_tests_folder",
+        "open_jarvis_in_vscode",
+    ]
+    assert window.voice_response_panel.toPlainText() == "Opened the Jarvis project in VS Code."
+    assert "Fast tests requested" in window.transcript.toPlainText()
+
+    window._allow_close = True
+    window.close()
+    app.processEvents()
+
+
+def test_gui_developer_panel_reports_disabled_mode_without_service() -> None:
+    app = _app()
+    window = JarvisMainWindow(
+        settings=AppSettings(_env_file=None, developer_mode_enabled=False),
+        assistant=StubAssistant(),
+    )
+
+    window.developer_git_status()
+
+    assert window.developer_mode_value.text() == "Disabled"
+    assert window.developer_status_value.text() == "Developer mode is disabled."
+    assert window.voice_response_panel.toPlainText() == "Developer mode is disabled."
+
+    window._allow_close = True
     window.close()
     app.processEvents()
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+from collections.abc import Callable
 from enum import Enum
 from queue import Empty, Queue
 from typing import Any
@@ -40,6 +41,7 @@ from services.notification_service import NotificationService, format_notificati
 from services.startup_service import StartupService, format_startup_action_report, format_startup_check_report
 from gui.settings_window import SettingsWindow
 from gui.log_viewer import LogViewerWindow
+from tools.developer_tools import DeveloperCommandResult, DeveloperTools
 from voice.audio_diagnostics import AudioDiagnostics, format_microphone_test_summary
 from voice.fast_voice import (
     FastVoiceProgress,
@@ -440,6 +442,13 @@ class JarvisMainWindow(QMainWindow):
         self.test_confirmation_button = QPushButton("Test Confirmation")
         self.start_reminder_watch_button = QPushButton("Start Watch")
         self.stop_reminder_watch_button = QPushButton("Stop Watch")
+        self.developer_git_status_button = QPushButton("Git Status")
+        self.developer_last_commit_button = QPushButton("Last Commit")
+        self.developer_fast_tests_button = QPushButton("Run Fast Tests")
+        self.developer_open_main_button = QPushButton("Open Main")
+        self.developer_open_settings_button = QPushButton("Open Settings")
+        self.developer_open_tests_button = QPushButton("Open Tests")
+        self.developer_open_vscode_button = QPushButton("Open VS Code")
         self.send_button = QPushButton("Send")
         self.audio_diagnostics = AudioDiagnostics(settings)
         self.voice_loop_status_value = QLabel("Idle")
@@ -488,6 +497,10 @@ class JarvisMainWindow(QMainWindow):
         self.voice_response_panel = QTextEdit()
         self.voice_command_score_value = QLabel("--")
         self.agent_enabled_value = QLabel("Enabled" if settings.agent_enabled else "Disabled")
+        self.developer_mode_value = QLabel(self._developer_mode_text())
+        self.developer_status_value = QLabel("Not checked")
+        self.developer_commit_value = QLabel("Not checked")
+        self.developer_tests_value = QLabel("Not run")
         self.reminders_check_value = QLabel("Idle")
         self.notification_result_value = QLabel("Idle")
         self.health_result_value = QLabel("Idle")
@@ -585,6 +598,15 @@ class JarvisMainWindow(QMainWindow):
         self.voice_timing_total_value.setObjectName("voiceLoopValue")
         self.voice_timing_slow_value.setObjectName("voiceLoopValue")
         self.agent_enabled_value.setObjectName("voiceLoopValue")
+        for developer_value in (
+            self.developer_mode_value,
+            self.developer_status_value,
+            self.developer_commit_value,
+            self.developer_tests_value,
+        ):
+            developer_value.setObjectName("voiceLoopValue")
+            developer_value.setWordWrap(True)
+            developer_value.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.reminders_check_value.setObjectName("voiceLoopValue")
         self.notification_result_value.setObjectName("voiceLoopValue")
         self.health_result_value.setObjectName("voiceLoopValue")
@@ -707,6 +729,23 @@ class JarvisMainWindow(QMainWindow):
         self.stop_reminder_watch_button.setEnabled(False)
         self.send_button = HUDButton("Send", "primary")
         self.agent_test_button = HUDButton("Agent Test")
+        self.developer_git_status_button = HUDButton("Git Status")
+        self.developer_last_commit_button = HUDButton("Last Commit")
+        self.developer_fast_tests_button = HUDButton("Run Fast Tests")
+        self.developer_open_main_button = HUDButton("Open Main")
+        self.developer_open_settings_button = HUDButton("Open Settings")
+        self.developer_open_tests_button = HUDButton("Open Tests")
+        self.developer_open_vscode_button = HUDButton("Open VS Code")
+        for developer_button in (
+            self.developer_git_status_button,
+            self.developer_last_commit_button,
+            self.developer_fast_tests_button,
+            self.developer_open_main_button,
+            self.developer_open_settings_button,
+            self.developer_open_tests_button,
+            self.developer_open_vscode_button,
+        ):
+            developer_button.setMinimumHeight(34)
 
         left_panel = QFrame()
         left_panel.setObjectName("sidePanel")
@@ -935,6 +974,47 @@ class JarvisMainWindow(QMainWindow):
             vision_layout.addWidget(label, row_index, 0)
             vision_layout.addWidget(value_widget, row_index, 1)
         right_layout.addWidget(vision_card)
+
+        developer_card = QFrame()
+        developer_card.setObjectName("stackCard")
+        developer_layout = QVBoxLayout(developer_card)
+        developer_layout.setContentsMargins(14, 12, 14, 12)
+        developer_layout.setSpacing(8)
+        developer_title = QLabel("DEVELOPER")
+        developer_title.setObjectName("panelTitle")
+        developer_layout.addWidget(developer_title)
+        developer_grid = QGridLayout()
+        developer_grid.setHorizontalSpacing(10)
+        developer_grid.setVerticalSpacing(5)
+        developer_rows = [
+            ("MODE", self.developer_mode_value),
+            ("GIT", self.developer_status_value),
+            ("COMMIT", self.developer_commit_value),
+            ("TESTS", self.developer_tests_value),
+        ]
+        for row_index, (label_text, value_widget) in enumerate(developer_rows):
+            label = QLabel(label_text)
+            label.setObjectName("smallHudLabel")
+            value_widget.setObjectName("voiceLoopValue")
+            developer_grid.addWidget(label, row_index, 0)
+            developer_grid.addWidget(value_widget, row_index, 1)
+        developer_layout.addLayout(developer_grid)
+        developer_button_grid = QGridLayout()
+        developer_button_grid.setHorizontalSpacing(8)
+        developer_button_grid.setVerticalSpacing(6)
+        developer_buttons = [
+            self.developer_git_status_button,
+            self.developer_last_commit_button,
+            self.developer_fast_tests_button,
+            self.developer_open_main_button,
+            self.developer_open_settings_button,
+            self.developer_open_tests_button,
+            self.developer_open_vscode_button,
+        ]
+        for index, button in enumerate(developer_buttons):
+            developer_button_grid.addWidget(button, index // 2, index % 2)
+        developer_layout.addLayout(developer_button_grid)
+        right_layout.addWidget(developer_card)
 
         confidence_card = QFrame()
         confidence_card.setObjectName("stackCard")
@@ -1268,6 +1348,168 @@ class JarvisMainWindow(QMainWindow):
         self.agent_test_button.clicked.connect(self.agent_test)
         self.start_reminder_watch_button.clicked.connect(self.start_reminder_watch)
         self.stop_reminder_watch_button.clicked.connect(self.stop_reminder_watch)
+        self.developer_git_status_button.clicked.connect(self.developer_git_status)
+        self.developer_last_commit_button.clicked.connect(self.developer_last_commit)
+        self.developer_fast_tests_button.clicked.connect(self.developer_run_fast_tests)
+        self.developer_open_main_button.clicked.connect(self.developer_open_main)
+        self.developer_open_settings_button.clicked.connect(self.developer_open_settings)
+        self.developer_open_tests_button.clicked.connect(self.developer_open_tests)
+        self.developer_open_vscode_button.clicked.connect(self.developer_open_vscode)
+
+    def developer_git_status(self) -> None:
+        self._run_developer_panel_action(
+            "Git status",
+            "status",
+            lambda tools: tools.check_git_status(),
+        )
+
+    def developer_last_commit(self) -> None:
+        self._run_developer_panel_action(
+            "Last commit",
+            "commit",
+            lambda tools: tools.show_last_commit(),
+        )
+
+    def developer_run_fast_tests(self) -> None:
+        self._run_developer_panel_action(
+            "Fast tests",
+            "tests",
+            lambda tools: tools.run_fast_tests(),
+        )
+
+    def developer_open_main(self) -> None:
+        self._run_developer_panel_action(
+            "Open main.py",
+            "action",
+            lambda tools: tools.open_main_py(),
+        )
+
+    def developer_open_settings(self) -> None:
+        self._run_developer_panel_action(
+            "Open settings",
+            "action",
+            lambda tools: tools.open_settings(),
+        )
+
+    def developer_open_tests(self) -> None:
+        self._run_developer_panel_action(
+            "Open tests folder",
+            "action",
+            lambda tools: tools.open_tests_folder(),
+        )
+
+    def developer_open_vscode(self) -> None:
+        self._run_developer_panel_action(
+            "Open VS Code",
+            "action",
+            lambda tools: tools.open_jarvis_in_vscode(),
+        )
+
+    def _run_developer_panel_action(
+        self,
+        action_name: str,
+        target: str,
+        handler: Callable[[DeveloperTools], DeveloperCommandResult],
+    ) -> None:
+        self._set_mode("Developer")
+        self._sync_developer_mode_label()
+        self._append_message("Jarvis", f"{action_name} requested...")
+        self.set_status(AssistantStatus.THINKING)
+        if target == "tests":
+            self.developer_tests_value.setText("Running")
+        QApplication.processEvents()
+
+        tools = self._developer_tools_service()
+        if tools is None:
+            message = (
+                "Developer mode is disabled."
+                if not self.settings.developer_mode_enabled
+                else "Developer tools are unavailable."
+            )
+            self._append_message("Jarvis", message)
+            self._set_developer_panel_value(target, message)
+            self.voice_response_panel.setText(message)
+            self.set_status(
+                AssistantStatus.SLEEPING
+                if not self.settings.developer_mode_enabled
+                else AssistantStatus.ERROR
+            )
+            QTimer.singleShot(1200, lambda: self._set_mode("Idle"))
+            return
+
+        try:
+            result = handler(tools)
+        except Exception as exc:  # pragma: no cover - defensive GUI boundary
+            message = f"Developer action failed: {type(exc).__name__}: {exc}"
+            self._append_message("Jarvis", message)
+            self._set_developer_panel_value(target, message)
+            self.voice_response_panel.setText(message)
+            self.set_status(AssistantStatus.ERROR)
+            self._set_mode("Error")
+            return
+
+        text = self._developer_result_text(result)
+        self._append_message("Jarvis", text)
+        self._set_developer_panel_value(target, text)
+        self.voice_response_panel.setText(self._compact_developer_text(text, max_lines=6, max_chars=420))
+        if result.succeeded or text == "Developer mode is disabled.":
+            self.set_status(AssistantStatus.SLEEPING)
+        else:
+            self.set_status(AssistantStatus.ERROR)
+        QTimer.singleShot(1200, lambda: self.set_status(AssistantStatus.SLEEPING))
+        QTimer.singleShot(1200, lambda: self._set_mode("Idle"))
+
+    def _developer_tools_service(self) -> DeveloperTools | None:
+        tools = getattr(self.assistant, "developer_tools", None)
+        if tools is None and self.settings.developer_mode_enabled and isinstance(self.assistant, AssistantCore):
+            tools = DeveloperTools(self.settings)
+            self.assistant.developer_tools = tools
+        return tools
+
+    def _sync_developer_tools_from_settings(self) -> None:
+        if not isinstance(self.assistant, AssistantCore):
+            return
+        if self.settings.developer_mode_enabled:
+            if self.assistant.developer_tools is None:
+                self.assistant.developer_tools = DeveloperTools(self.settings)
+        else:
+            self.assistant.developer_tools = None
+
+    def _sync_developer_mode_label(self) -> None:
+        self.developer_mode_value.setText(self._developer_mode_text())
+
+    def _developer_mode_text(self) -> str:
+        return "Enabled" if self.settings.developer_mode_enabled else "Disabled"
+
+    def _set_developer_panel_value(self, target: str, text: str) -> None:
+        compact = self._compact_developer_text(text)
+        if target == "status":
+            self.developer_status_value.setText(compact)
+        elif target == "commit":
+            self.developer_commit_value.setText(compact)
+        elif target == "tests":
+            self.developer_tests_value.setText(compact)
+
+    @staticmethod
+    def _developer_result_text(result: DeveloperCommandResult) -> str:
+        if result.safe_error:
+            return result.safe_error
+        if result.text:
+            return result.text
+        return "Developer command completed."
+
+    @staticmethod
+    def _compact_developer_text(text: str, max_lines: int = 3, max_chars: int = 180) -> str:
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
+        if not lines:
+            return "--"
+        extra_lines = max(0, len(lines) - max_lines)
+        compact = "\n".join(lines[:max_lines])
+        if extra_lines:
+            compact = f"{compact}\n... +{extra_lines} more"
+        if len(compact) > max_chars:
+            compact = compact[: max_chars - 3].rstrip() + "..."
+        return compact
 
     def _create_tray_icon(self) -> QSystemTrayIcon:
         tray = QSystemTrayIcon(self._make_icon(), self)
@@ -1548,6 +1790,8 @@ class JarvisMainWindow(QMainWindow):
         if result == QDialog.DialogCode.Accepted:
             self._append_message("Jarvis", "Settings saved.")
             self.agent_enabled_value.setText("Enabled" if self.settings.agent_enabled else "Disabled")
+            self._sync_developer_tools_from_settings()
+            self._sync_developer_mode_label()
         else:
             self._append_message("Jarvis", "Settings closed without changes.")
         self._set_mode("Idle")
