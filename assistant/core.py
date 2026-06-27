@@ -24,7 +24,7 @@ from tools.folder_control import (
 from tools.website_launcher import WebsiteLauncher
 from reminders.service import ReminderService
 from services.openai_service import OpenAIService
-from vision.vision_service import ScreenshotResult, VisionOCRResult, VisionService
+from vision.vision_service import ScreenshotResult, VisionAnalysisResult, VisionOCRResult, VisionService
 
 
 @dataclass(frozen=True)
@@ -504,8 +504,9 @@ class AssistantCore:
             return AssistantResponse(text="Screenshot capture is disabled.", accepted=True, source="local")
 
         result = self.vision_service.capture_screenshot()
+        text = self._format_screenshot_response(result)
         return AssistantResponse(
-            text=result.text,
+            text=text,
             accepted=result.success,
             source="vision" if result.success else "local",
             error=result.safe_error,
@@ -516,8 +517,9 @@ class AssistantCore:
             return AssistantResponse(text="Screen vision is disabled.", accepted=True, source="local")
 
         result = self.vision_service.read_screen_text(monitor=monitor)
+        text = self._format_ocr_response(result)
         return AssistantResponse(
-            text=result.text,
+            text=text,
             accepted=result.success,
             source="vision" if result.success else "local",
             error=result.safe_error,
@@ -543,9 +545,10 @@ class AssistantCore:
             result = self.vision_service.analyze_screen(monitor=monitor)
         else:
             result = self.vision_service.read_screen_text(monitor=monitor)
+        text = self._format_analysis_response(result, monitor)
 
         return AssistantResponse(
-            text=result.text,
+            text=text,
             accepted=result.success,
             source="vision" if result.success else "local",
             error=result.safe_error,
@@ -557,6 +560,86 @@ class AssistantCore:
 
         response_text = self.vision_service.list_screens_text()
         return AssistantResponse(text=response_text, accepted=True, source="vision")
+
+    @staticmethod
+    def _format_screenshot_response(result: ScreenshotResult) -> str:
+        lines = [getattr(result, "text", "").strip()]
+        monitor_label = getattr(result, "monitor_label", None)
+        image_size = getattr(result, "image_size", None)
+        screenshot_path = getattr(result, "screenshot_path", None)
+        if monitor_label:
+            lines.append(f"Screen: {monitor_label}")
+        if image_size:
+            lines.append(f"Image size: {image_size[0]}x{image_size[1]}")
+        if screenshot_path:
+            lines.append(f"Screenshot path: {screenshot_path}")
+        return "\n".join(line for line in lines if line)
+
+    def _format_ocr_response(self, result: VisionOCRResult) -> str:
+        lines = [getattr(result, "text", "").strip()]
+        monitor_label = getattr(result, "monitor_label", None)
+        tesseract_path = getattr(result, "tesseract_path", None)
+        image_size = getattr(result, "image_size", None)
+        image_path = getattr(result, "image_path", None)
+        provider = getattr(result, "provider", "tesseract")
+        if monitor_label:
+            lines.append(f"Screen: {monitor_label}")
+        if tesseract_path:
+            lines.append(f"OCR provider: {provider} ({tesseract_path})")
+        else:
+            lines.append(f"OCR provider: {provider}")
+        if image_size:
+            lines.append(f"Image size: {image_size[0]}x{image_size[1]}")
+        if image_path:
+            lines.append(f"Screenshot path: {image_path}")
+        if getattr(result, "safe_error", None) and not getattr(result, "success", True):
+            lines.append(f"Warning: {getattr(result, 'safe_error')}")
+        return "\n".join(line for line in lines if line)
+
+    def _format_analysis_response(self, result: VisionAnalysisResult | VisionOCRResult, monitor: str | int | None) -> str:
+        lines = [getattr(result, "text", "").strip()]
+        monitor_label = getattr(result, "monitor_label", None)
+        image_size = getattr(result, "image_size", None)
+        screenshot_path = getattr(result, "screenshot_path", None) or getattr(result, "image_path", None)
+        screen_label = self._screen_label_from_monitor(monitor, monitor_label)
+        if screen_label:
+            lines.append(f"Screen: {screen_label}")
+        provider = getattr(result, "provider", None)
+        if provider:
+            lines.append(f"Vision provider: {provider}")
+        if image_size:
+            size = image_size
+            lines.append(f"Image size: {size[0]}x{size[1]}")
+        if screenshot_path:
+            lines.append(f"Screenshot path: {screenshot_path}")
+        ocr_text = self._extract_ocr_text(result.text)
+        if ocr_text:
+            lines.append(f"OCR text: {ocr_text}")
+        return "\n".join(line for line in lines if line)
+
+    @staticmethod
+    def _screen_label_from_monitor(monitor: str | int | None, monitor_label: str | None = None) -> str | None:
+        if monitor_label:
+            return monitor_label
+        if monitor is None:
+            return None
+        if isinstance(monitor, int):
+            return f"Screen {monitor}"
+        normalized = str(monitor).strip().lower()
+        if normalized == "primary":
+            return "Primary screen"
+        if normalized.isdigit():
+            return f"Screen {normalized}"
+        return str(monitor)
+
+    @staticmethod
+    def _extract_ocr_text(text: str) -> str | None:
+        normalized = text.strip()
+        if not normalized:
+            return None
+        if "OCR text:" in normalized:
+            return normalized.split("OCR text:", 1)[1].strip() or None
+        return None
 
     @staticmethod
     def _parse_screen_monitor_index(normalized: str) -> int | None:

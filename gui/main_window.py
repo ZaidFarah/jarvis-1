@@ -433,6 +433,10 @@ class JarvisMainWindow(QMainWindow):
         self.launch_notepad_button = QPushButton("Launch Notepad")
         self.open_google_button = QPushButton("Open Google")
         self.list_downloads_button = QPushButton("List Downloads")
+        self.list_screens_button = QPushButton("List Screens")
+        self.look_screen_1_button = QPushButton("Look Screen 1")
+        self.look_screen_2_button = QPushButton("Look Screen 2")
+        self.read_screen_button = QPushButton("Read Screen")
         self.test_confirmation_button = QPushButton("Test Confirmation")
         self.start_reminder_watch_button = QPushButton("Start Watch")
         self.stop_reminder_watch_button = QPushButton("Stop Watch")
@@ -464,6 +468,11 @@ class JarvisMainWindow(QMainWindow):
         self.voice_wake_only_value = QLabel("--")
         self.voice_repair_confidence_value = QLabel("--")
         self.voice_repair_strategy_value = QLabel("--")
+        self.vision_capture_value = QLabel("--")
+        self.vision_path_value = QLabel("--")
+        self.vision_ocr_value = QLabel("--")
+        self.vision_provider_status_value = QLabel("--")
+        self.vision_summary_value = QLabel("--")
         self.voice_wake_score_bar = QProgressBar()
         self.voice_transcript_confidence_bar = QProgressBar()
         self.voice_command_score_bar = QProgressBar()
@@ -688,6 +697,10 @@ class JarvisMainWindow(QMainWindow):
         self.launch_notepad_button = HUDButton("Launch Notepad")
         self.open_google_button = HUDButton("Open Google")
         self.list_downloads_button = HUDButton("List Downloads")
+        self.list_screens_button = HUDButton("List Screens")
+        self.look_screen_1_button = HUDButton("Look Screen 1")
+        self.look_screen_2_button = HUDButton("Look Screen 2")
+        self.read_screen_button = HUDButton("Read Screen")
         self.test_confirmation_button = HUDButton("Test Confirmation")
         self.start_reminder_watch_button = HUDButton("Start Watch")
         self.stop_reminder_watch_button = HUDButton("Stop Watch")
@@ -772,6 +785,10 @@ class JarvisMainWindow(QMainWindow):
         control_layout.addWidget(self.voice_command_button)
         control_layout.addWidget(self.mic_test_button)
         control_layout.addWidget(self.settings_button)
+        control_layout.addWidget(self.list_screens_button)
+        control_layout.addWidget(self.look_screen_1_button)
+        control_layout.addWidget(self.look_screen_2_button)
+        control_layout.addWidget(self.read_screen_button)
         left_layout.addWidget(voice_status_card)
         left_layout.addWidget(voice_control_card)
         left_layout.addStretch(1)
@@ -894,6 +911,30 @@ class JarvisMainWindow(QMainWindow):
         self.voice_response_panel.setText("Jarvis responses will appear here.")
         response_layout.addWidget(self.voice_response_panel)
         right_layout.addWidget(response_card, stretch=2)
+
+        vision_card = QFrame()
+        vision_card.setObjectName("stackCard")
+        vision_layout = QGridLayout(vision_card)
+        vision_layout.setContentsMargins(14, 12, 14, 12)
+        vision_layout.setHorizontalSpacing(10)
+        vision_layout.setVerticalSpacing(6)
+        vision_title = QLabel("SCREEN VISION")
+        vision_title.setObjectName("panelTitle")
+        vision_layout.addWidget(vision_title, 0, 0, 1, 2)
+        vision_rows = [
+            ("CAPTURE", self.vision_capture_value),
+            ("PATH", self.vision_path_value),
+            ("OCR", self.vision_ocr_value),
+            ("PROVIDER", self.vision_provider_status_value),
+            ("SUMMARY", self.vision_summary_value),
+        ]
+        for row_index, (label_text, value_widget) in enumerate(vision_rows, start=1):
+            label = QLabel(label_text)
+            label.setObjectName("smallHudLabel")
+            value_widget.setObjectName("voiceLoopValue")
+            vision_layout.addWidget(label, row_index, 0)
+            vision_layout.addWidget(value_widget, row_index, 1)
+        right_layout.addWidget(vision_card)
 
         confidence_card = QFrame()
         confidence_card.setObjectName("stackCard")
@@ -1218,6 +1259,10 @@ class JarvisMainWindow(QMainWindow):
         self.weather_check_button.clicked.connect(self.weather_check)
         self.open_google_button.clicked.connect(self.open_google)
         self.list_downloads_button.clicked.connect(self.list_downloads)
+        self.list_screens_button.clicked.connect(self.list_screens)
+        self.look_screen_1_button.clicked.connect(self.look_screen_1)
+        self.look_screen_2_button.clicked.connect(self.look_screen_2)
+        self.read_screen_button.clicked.connect(self.read_screen)
         self.vision_check_button.clicked.connect(self.vision_check)
         self.test_confirmation_button.clicked.connect(self.test_confirmation)
         self.agent_test_button.clicked.connect(self.agent_test)
@@ -1332,6 +1377,8 @@ class JarvisMainWindow(QMainWindow):
         try:
             response = self.assistant.handle_command(command)
             self._append_message("Jarvis", response.text)
+            self._update_vision_panel(command, response.text)
+            self.voice_response_panel.setText(self._compact_vision_response_text(response.text) if self._is_vision_command(command) else response.text)
             self.set_status(AssistantStatus.SPEAKING if response.accepted else AssistantStatus.ERROR)
         except Exception as exc:  # pragma: no cover - defensive GUI boundary
             self._append_message("Jarvis", f"Phase 1 error: {exc}")
@@ -1622,6 +1669,39 @@ class JarvisMainWindow(QMainWindow):
             self.set_status(AssistantStatus.SLEEPING if report.is_successful else AssistantStatus.ERROR)
         except Exception as exc:  # pragma: no cover - defensive GUI boundary
             self._append_message("Jarvis", f"Vision check failed: {exc}")
+            self.set_status(AssistantStatus.ERROR)
+            self._set_mode("Error")
+            return
+
+        QTimer.singleShot(1200, lambda: self.set_status(AssistantStatus.SLEEPING))
+        QTimer.singleShot(1200, lambda: self._set_mode("Idle"))
+
+    def list_screens(self) -> None:
+        self._run_screen_vision_command("list screens")
+
+    def look_screen_1(self) -> None:
+        self._run_screen_vision_command("what is on screen 1")
+
+    def look_screen_2(self) -> None:
+        self._run_screen_vision_command("what is on screen 2")
+
+    def read_screen(self) -> None:
+        self._run_screen_vision_command("read my screen")
+
+    def _run_screen_vision_command(self, command: str) -> None:
+        self._set_mode("Vision")
+        self._append_message("Jarvis", f"Running vision command: {command}")
+        self.set_status(AssistantStatus.THINKING)
+        QApplication.processEvents()
+
+        try:
+            response = self.assistant.handle_command(command)
+            self._append_message("Jarvis", response.text)
+            self._update_vision_panel(command, response.text)
+            self.voice_response_panel.setText(self._compact_vision_response_text(response.text))
+            self.set_status(AssistantStatus.SLEEPING if response.accepted else AssistantStatus.ERROR)
+        except Exception as exc:  # pragma: no cover - defensive GUI boundary
+            self._append_message("Jarvis", f"Vision command failed: {exc}")
             self.set_status(AssistantStatus.ERROR)
             self._set_mode("Error")
             return
@@ -2107,7 +2187,7 @@ class JarvisMainWindow(QMainWindow):
         self.voice_interpreted_value.setText(repaired)
         self.voice_loop_last_command_value.setText(repaired)
         self.voice_loop_last_response_value.setText(response)
-        self.voice_response_panel.setText(response)
+        self.voice_response_panel.setText(self._compact_vision_response_text(response) if self._is_vision_command(repaired) else response)
         self.voice_vad_value.setText("yes" if report.vad_crossed else "no")
         self.voice_wake_only_value.setText("yes" if report.wake_only else "no")
         self.voice_repair_strategy_value.setText(repair.strategy if repair else "--")
@@ -2117,6 +2197,7 @@ class JarvisMainWindow(QMainWindow):
         if repair is not None:
             self.voice_repair_confidence_value.setText(f"{repair.confidence * 100:.0f}%")
             self.voice_repair_confidence_bar.setValue(int(round(repair.confidence * 100)))
+        self._update_vision_panel(repaired, response)
 
         self.voice_response_speech_value.setText(
             _fast_voice_tts_status(
@@ -2328,6 +2409,111 @@ class JarvisMainWindow(QMainWindow):
 
     def _append_message(self, speaker: str, message: str) -> None:
         self.transcript.append(f"\n{speaker}: {message}")
+
+    def _update_vision_panel(self, command: str, response_text: str) -> None:
+        if not self._is_vision_command(command):
+            return
+        screen_label = self._vision_screen_label(command)
+        path = self._extract_value(response_text, "Screenshot path")
+        provider = self._extract_value(response_text, "Vision provider") or self._extract_value(response_text, "OCR provider")
+        ocr_status = "Used" if "OCR text:" in response_text or "OCR provider:" in response_text else ("Available" if "OCR" in response_text else "Unknown")
+        summary = self._vision_summary(response_text)
+
+        self.vision_capture_value.setText(screen_label or "--")
+        self.vision_path_value.setText(path or "--")
+        self.vision_ocr_value.setText(ocr_status)
+        self.vision_provider_status_value.setText(provider or "--")
+        self.vision_summary_value.setText(summary or "--")
+
+    def _compact_vision_response_text(self, response_text: str, max_lines: int = 6, max_chars: int = 420) -> str:
+        lines = []
+        for raw_line in response_text.splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            if line.startswith("Screenshot path:") or line.startswith("Image size:") or line.startswith("Screen:"):
+                continue
+            if line.startswith("Vision provider:") or line.startswith("OCR provider:"):
+                continue
+            if line.startswith("OCR text:"):
+                continue
+            lines.append(line)
+        compact = "\n".join(lines[:max_lines]).strip()
+        if len(compact) > max_chars:
+            compact = compact[: max_chars - 1].rstrip() + "…"
+        return compact or response_text.strip()
+
+    @staticmethod
+    def _is_vision_command(command: str) -> bool:
+        normalized = " ".join(command.lower().strip().split())
+        return any(
+            normalized == phrase
+            or normalized.startswith(phrase + " ")
+            for phrase in (
+                "take screenshot",
+                "list screens",
+                "read screen",
+                "read my screen",
+                "read my screen text",
+                "read screen text",
+                "what is on my screen",
+                "look at my screen",
+                "describe my screen",
+                "describe screen",
+                "what is on my primary screen",
+                "what is on screen",
+            )
+        )
+
+    @staticmethod
+    def _vision_screen_label(command: str) -> str | None:
+        normalized = " ".join(command.lower().strip().split())
+        if "screen 1" in normalized:
+            return "Screen 1"
+        if "screen 2" in normalized:
+            return "Screen 2"
+        if "primary screen" in normalized or normalized in {"what is on my screen", "read my screen", "describe my screen", "look at my screen"}:
+            return "Primary screen"
+        if normalized == "list screens":
+            return "All screens"
+        return None
+
+    @staticmethod
+    def _extract_value(text: str, label: str) -> str | None:
+        for line in text.splitlines():
+            normalized = line.strip()
+            prefix = f"{label}:"
+            if normalized.startswith(prefix):
+                return normalized.split(":", 1)[1].strip() or None
+        return None
+
+    @staticmethod
+    def _vision_summary(response_text: str) -> str | None:
+        lines = []
+        for raw_line in response_text.splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            if any(
+                line.startswith(prefix)
+                for prefix in (
+                    "Screenshot path:",
+                    "Image size:",
+                    "Screen:",
+                    "Vision provider:",
+                    "OCR provider:",
+                )
+            ):
+                continue
+            if line.startswith("OCR text:"):
+                continue
+            lines.append(line)
+        if not lines:
+            return None
+        summary = lines[0]
+        if len(summary) > 140:
+            summary = summary[:139].rstrip() + "…"
+        return summary
 
     def _update_wake_diagnostics(self, status: str) -> None:
         values = self._parse_diagnostics(status.removeprefix(WAKE_DIAGNOSTICS_PREFIX))

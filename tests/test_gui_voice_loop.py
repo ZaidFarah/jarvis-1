@@ -40,6 +40,24 @@ class StubAssistant:
                 self.text = text
                 self.accepted = accepted
 
+        normalized = " ".join(command.lower().strip().split())
+        if normalized == "list screens":
+            return Response("Detected screens:\n1. Primary screen\n2. Screen 2", accepted=True)
+        if normalized == "what is on screen 1":
+            return Response(
+                "OpenAI vision answer\n\nScreen: Screen 1\nVision provider: gpt-4o-mini\nScreenshot path: C:/Temp/screen1.png\nOCR text: time 10:30",
+                accepted=True,
+            )
+        if normalized == "what is on screen 2":
+            return Response(
+                "OpenAI vision answer\n\nScreen: Screen 2\nVision provider: gpt-4o-mini\nScreenshot path: C:/Temp/screen2.png\nOCR text: notes",
+                accepted=True,
+            )
+        if normalized == "read my screen":
+            return Response(
+                "Visible text on screen\n\nScreen: Primary screen\nOCR provider: tesseract\nScreenshot path: C:/Temp/screen.png",
+                accepted=True,
+            )
         if command == "check reminders":
             return Response("Due reminders:\n1. stretch at 2026-06-12 18:00", accepted=True)
         return Response("handled")
@@ -98,6 +116,10 @@ def test_voice_loop_gui_state_updates_controls_and_status_fields() -> None:
     assert window.startup_disable_button.text() == "Disable Startup"
     assert window.backup_create_button.text() == "Create Backup"
     assert window.backup_list_button.text() == "List Backups"
+    assert window.list_screens_button.text() == "List Screens"
+    assert window.look_screen_1_button.text() == "Look Screen 1"
+    assert window.look_screen_2_button.text() == "Look Screen 2"
+    assert window.read_screen_button.text() == "Read Screen"
 
     window._set_voice_loop_running(True)
 
@@ -572,6 +594,35 @@ def test_fast_voice_gui_updates_stop_button_for_capture_and_speech() -> None:
     window._handle_fast_voice_status("Interrupted")
     assert window.stop_voice_loop_button.text() == "Stop Voice"
     assert window.voice_detail_value.text() == "Spoken response interrupted"
+
+    window._allow_close = True
+    window.close()
+    app.processEvents()
+
+
+def test_gui_screen_vision_buttons_update_vision_panel() -> None:
+    app = _app()
+    window = JarvisMainWindow(settings=AppSettings(_env_file=None), assistant=StubAssistant())
+
+    window.list_screens()
+    assert window.vision_capture_value.text() == "All screens"
+    assert "Primary screen" in window.voice_response_panel.toPlainText()
+
+    window.look_screen_1()
+    assert window.vision_capture_value.text() == "Screen 1"
+    assert window.vision_path_value.text() == "C:/Temp/screen1.png"
+    assert window.vision_provider_status_value.text() == "gpt-4o-mini"
+    assert window.vision_summary_value.text() == "OpenAI vision answer"
+
+    window.look_screen_2()
+    assert window.vision_capture_value.text() == "Screen 2"
+    assert window.vision_path_value.text() == "C:/Temp/screen2.png"
+
+    window.read_screen()
+    assert window.vision_capture_value.text() == "Primary screen"
+    assert window.vision_ocr_value.text() == "Used"
+    assert window.vision_path_value.text() == "C:/Temp/screen.png"
+    assert "Visible text on screen" in window.voice_response_panel.toPlainText()
 
     window._allow_close = True
     window.close()

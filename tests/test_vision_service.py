@@ -594,7 +594,8 @@ def test_assistant_core_routes_vision_commands(tmp_path: Path) -> None:
     assert "Screenshot saved to" in screenshot_response.text
     assert screen_text_response.source == "vision"
     assert screen_text_response.accepted is True
-    assert screen_text_response.text == "screen text"
+    assert "screen text" in screen_text_response.text
+    assert "OCR provider:" in screen_text_response.text
     assert analyze_response.source == "vision"
     assert analyze_response.accepted is True
     assert "OpenAI vision answer" in analyze_response.text
