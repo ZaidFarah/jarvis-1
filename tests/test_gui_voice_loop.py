@@ -12,6 +12,7 @@ from PySide6.QtWidgets import QApplication
 from config.settings import AppSettings
 import gui.main_window as main_window_module
 from gui.main_window import JarvisMainWindow
+from tools.workflows import WorkflowEngine
 from voice.fast_voice import FastVoiceProgress
 from voice.voice_command_test import NO_COMMAND_DETECTED_MESSAGE
 from voice.voice_loop import (
@@ -109,6 +110,22 @@ class StubAssistantWithDeveloperTools(StubAssistant):
         self.developer_tools = developer_tools
 
 
+class StubAssistantWithWorkflowEngine(StubAssistantWithDeveloperTools):
+    def __init__(self, developer_tools: StubDeveloperTools) -> None:
+        super().__init__(developer_tools)
+        self.workflow_engine = WorkflowEngine(developer_tools)
+
+
+class FailingWorkflowTools(StubDeveloperTools):
+    def run_fast_tests(self) -> object:
+        self.calls.append("run_fast_tests")
+        return self._result(
+            "Pytest failed: 1 failed, 5 passed",
+            succeeded=False,
+            safe_error="Fast tests failed.",
+        )
+
+
 def test_voice_loop_gui_state_updates_controls_and_status_fields() -> None:
     app = _app()
     settings = AppSettings(_env_file=None)
@@ -177,6 +194,10 @@ def test_voice_loop_gui_state_updates_controls_and_status_fields() -> None:
     assert window.developer_open_settings_button.text() == "Open Settings"
     assert window.developer_open_tests_button.text() == "Open Tests"
     assert window.developer_open_vscode_button.text() == "Open VS Code"
+    assert window.workflow_status_value.text() == "Idle"
+    assert window.workflow_steps_value.text() == "No workflow run yet"
+    assert window.workflow_start_coding_button.text() == "Start Coding Session"
+    assert window.workflow_review_today_button.text() == "Review Today's Work"
 
     window._set_voice_loop_running(True)
 
@@ -294,6 +315,61 @@ def test_gui_developer_panel_reports_disabled_mode_without_service() -> None:
     assert window.developer_mode_value.text() == "Disabled"
     assert window.developer_status_value.text() == "Developer mode is disabled."
     assert window.voice_response_panel.toPlainText() == "Developer mode is disabled."
+
+    window._allow_close = True
+    window.close()
+    app.processEvents()
+
+
+def test_gui_workflow_panel_runs_workflows_with_existing_engine() -> None:
+    app = _app()
+    tools = StubDeveloperTools()
+    window = JarvisMainWindow(
+        settings=AppSettings(_env_file=None, developer_mode_enabled=True),
+        assistant=StubAssistantWithWorkflowEngine(tools),
+    )
+
+    window.workflow_start_coding_session()
+
+    assert window.workflow_status_value.text() == "Completed"
+    assert tools.calls == [
+        "open_jarvis_in_vscode",
+        "check_git_status",
+        "run_fast_tests",
+    ]
+    assert "Open Jarvis in VS Code: OK" in window.workflow_steps_value.text()
+    assert "Run fast tests: OK" in window.workflow_steps_value.text()
+    assert "Workflow: Start coding session" in window.voice_response_panel.toPlainText()
+
+    window.workflow_review_todays_work()
+
+    assert window.workflow_status_value.text() == "Completed"
+    assert tools.calls[-3:] == [
+        "check_git_status",
+        "show_last_commit",
+        "run_fast_tests",
+    ]
+    assert "Show last commit: OK" in window.workflow_steps_value.text()
+    assert "Review today's work" in window.voice_response_panel.toPlainText()
+
+    window._allow_close = True
+    window.close()
+    app.processEvents()
+
+
+def test_gui_workflow_panel_reports_failed_workflow() -> None:
+    app = _app()
+    tools = FailingWorkflowTools()
+    window = JarvisMainWindow(
+        settings=AppSettings(_env_file=None, developer_mode_enabled=True),
+        assistant=StubAssistantWithWorkflowEngine(tools),
+    )
+
+    window.workflow_review_todays_work()
+
+    assert window.workflow_status_value.text() == "Failed"
+    assert "Run fast tests: FAILED" in window.workflow_steps_value.text()
+    assert "Status: needs attention" in window.voice_response_panel.toPlainText()
 
     window._allow_close = True
     window.close()

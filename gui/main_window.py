@@ -42,6 +42,7 @@ from services.startup_service import StartupService, format_startup_action_repor
 from gui.settings_window import SettingsWindow
 from gui.log_viewer import LogViewerWindow
 from tools.developer_tools import DeveloperCommandResult, DeveloperTools
+from tools.workflows import WorkflowEngine, WorkflowRunResult, format_workflow_result
 from voice.audio_diagnostics import AudioDiagnostics, format_microphone_test_summary
 from voice.fast_voice import (
     FastVoiceProgress,
@@ -449,6 +450,8 @@ class JarvisMainWindow(QMainWindow):
         self.developer_open_settings_button = QPushButton("Open Settings")
         self.developer_open_tests_button = QPushButton("Open Tests")
         self.developer_open_vscode_button = QPushButton("Open VS Code")
+        self.workflow_start_coding_button = QPushButton("Start Coding Session")
+        self.workflow_review_today_button = QPushButton("Review Today's Work")
         self.send_button = QPushButton("Send")
         self.audio_diagnostics = AudioDiagnostics(settings)
         self.voice_loop_status_value = QLabel("Idle")
@@ -501,6 +504,8 @@ class JarvisMainWindow(QMainWindow):
         self.developer_status_value = QLabel("Not checked")
         self.developer_commit_value = QLabel("Not checked")
         self.developer_tests_value = QLabel("Not run")
+        self.workflow_status_value = QLabel("Idle")
+        self.workflow_steps_value = QLabel("No workflow run yet")
         self.reminders_check_value = QLabel("Idle")
         self.notification_result_value = QLabel("Idle")
         self.health_result_value = QLabel("Idle")
@@ -607,6 +612,13 @@ class JarvisMainWindow(QMainWindow):
             developer_value.setObjectName("voiceLoopValue")
             developer_value.setWordWrap(True)
             developer_value.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        for workflow_value in (
+            self.workflow_status_value,
+            self.workflow_steps_value,
+        ):
+            workflow_value.setObjectName("voiceLoopValue")
+            workflow_value.setWordWrap(True)
+            workflow_value.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.reminders_check_value.setObjectName("voiceLoopValue")
         self.notification_result_value.setObjectName("voiceLoopValue")
         self.health_result_value.setObjectName("voiceLoopValue")
@@ -736,6 +748,8 @@ class JarvisMainWindow(QMainWindow):
         self.developer_open_settings_button = HUDButton("Open Settings")
         self.developer_open_tests_button = HUDButton("Open Tests")
         self.developer_open_vscode_button = HUDButton("Open VS Code")
+        self.workflow_start_coding_button = HUDButton("Start Coding Session")
+        self.workflow_review_today_button = HUDButton("Review Today's Work")
         for developer_button in (
             self.developer_git_status_button,
             self.developer_last_commit_button,
@@ -746,6 +760,11 @@ class JarvisMainWindow(QMainWindow):
             self.developer_open_vscode_button,
         ):
             developer_button.setMinimumHeight(34)
+        for workflow_button in (
+            self.workflow_start_coding_button,
+            self.workflow_review_today_button,
+        ):
+            workflow_button.setMinimumHeight(34)
 
         left_panel = QFrame()
         left_panel.setObjectName("sidePanel")
@@ -1015,6 +1034,36 @@ class JarvisMainWindow(QMainWindow):
             developer_button_grid.addWidget(button, index // 2, index % 2)
         developer_layout.addLayout(developer_button_grid)
         right_layout.addWidget(developer_card)
+
+        workflow_card = QFrame()
+        workflow_card.setObjectName("stackCard")
+        workflow_layout = QVBoxLayout(workflow_card)
+        workflow_layout.setContentsMargins(14, 12, 14, 12)
+        workflow_layout.setSpacing(8)
+        workflow_title = QLabel("WORKFLOWS")
+        workflow_title.setObjectName("panelTitle")
+        workflow_layout.addWidget(workflow_title)
+        workflow_grid = QGridLayout()
+        workflow_grid.setHorizontalSpacing(10)
+        workflow_grid.setVerticalSpacing(5)
+        workflow_rows = [
+            ("STATUS", self.workflow_status_value),
+            ("STEPS", self.workflow_steps_value),
+        ]
+        for row_index, (label_text, value_widget) in enumerate(workflow_rows):
+            label = QLabel(label_text)
+            label.setObjectName("smallHudLabel")
+            value_widget.setObjectName("voiceLoopValue")
+            workflow_grid.addWidget(label, row_index, 0)
+            workflow_grid.addWidget(value_widget, row_index, 1)
+        workflow_layout.addLayout(workflow_grid)
+        workflow_button_grid = QGridLayout()
+        workflow_button_grid.setHorizontalSpacing(8)
+        workflow_button_grid.setVerticalSpacing(6)
+        workflow_button_grid.addWidget(self.workflow_start_coding_button, 0, 0)
+        workflow_button_grid.addWidget(self.workflow_review_today_button, 0, 1)
+        workflow_layout.addLayout(workflow_button_grid)
+        right_layout.addWidget(workflow_card)
 
         confidence_card = QFrame()
         confidence_card.setObjectName("stackCard")
@@ -1355,6 +1404,8 @@ class JarvisMainWindow(QMainWindow):
         self.developer_open_settings_button.clicked.connect(self.developer_open_settings)
         self.developer_open_tests_button.clicked.connect(self.developer_open_tests)
         self.developer_open_vscode_button.clicked.connect(self.developer_open_vscode)
+        self.workflow_start_coding_button.clicked.connect(self.workflow_start_coding_session)
+        self.workflow_review_today_button.clicked.connect(self.workflow_review_todays_work)
 
     def developer_git_status(self) -> None:
         self._run_developer_panel_action(
@@ -1404,6 +1455,66 @@ class JarvisMainWindow(QMainWindow):
             "action",
             lambda tools: tools.open_jarvis_in_vscode(),
         )
+
+    def workflow_start_coding_session(self) -> None:
+        self._run_workflow_panel_action("start coding session")
+
+    def workflow_review_todays_work(self) -> None:
+        self._run_workflow_panel_action("review today's work")
+
+    def _run_workflow_panel_action(self, command: str) -> None:
+        self._set_mode("Workflow")
+        self.workflow_status_value.setText("Running")
+        self.workflow_steps_value.setText("Running workflow...")
+        self._append_message("Jarvis", f"Workflow requested: {command}")
+        self.set_status(AssistantStatus.THINKING)
+        QApplication.processEvents()
+
+        engine = self._workflow_engine_service()
+        if engine is None:
+            message = (
+                "Developer mode is disabled."
+                if not self.settings.developer_mode_enabled
+                else "Workflow engine is unavailable."
+            )
+            self.workflow_status_value.setText("Failed")
+            self.workflow_steps_value.setText(message)
+            self.voice_response_panel.setText(message)
+            self._append_message("Jarvis", message)
+            self.set_status(AssistantStatus.ERROR)
+            self._set_mode("Error")
+            return
+
+        try:
+            result = engine.handle_command(command)
+        except Exception as exc:  # pragma: no cover - defensive GUI boundary
+            message = f"Workflow failed: {type(exc).__name__}: {exc}"
+            self.workflow_status_value.setText("Failed")
+            self.workflow_steps_value.setText(message)
+            self.voice_response_panel.setText(message)
+            self._append_message("Jarvis", message)
+            self.set_status(AssistantStatus.ERROR)
+            self._set_mode("Error")
+            return
+
+        if result is None:
+            message = "Workflow command is not available."
+            self.workflow_status_value.setText("Failed")
+            self.workflow_steps_value.setText(message)
+            self.voice_response_panel.setText(message)
+            self._append_message("Jarvis", message)
+            self.set_status(AssistantStatus.ERROR)
+            self._set_mode("Error")
+            return
+
+        text = format_workflow_result(result)
+        self.workflow_status_value.setText("Completed" if result.succeeded else "Failed")
+        self.workflow_steps_value.setText(self._workflow_step_summary(result))
+        self.voice_response_panel.setText(self._compact_developer_text(text, max_lines=8, max_chars=520))
+        self._append_message("Jarvis", text)
+        self.set_status(AssistantStatus.SLEEPING if result.succeeded else AssistantStatus.ERROR)
+        QTimer.singleShot(1200, lambda: self.set_status(AssistantStatus.SLEEPING))
+        QTimer.singleShot(1200, lambda: self._set_mode("Idle"))
 
     def _run_developer_panel_action(
         self,
@@ -1466,14 +1577,30 @@ class JarvisMainWindow(QMainWindow):
             self.assistant.developer_tools = tools
         return tools
 
+    def _workflow_engine_service(self) -> WorkflowEngine | None:
+        engine = getattr(self.assistant, "workflow_engine", None)
+        if engine is not None:
+            return engine
+        if not isinstance(self.assistant, AssistantCore) or not self.settings.developer_mode_enabled:
+            return None
+        tools = self._developer_tools_service()
+        if tools is None:
+            return None
+        engine = WorkflowEngine(tools)
+        self.assistant.workflow_engine = engine
+        return engine
+
     def _sync_developer_tools_from_settings(self) -> None:
         if not isinstance(self.assistant, AssistantCore):
             return
         if self.settings.developer_mode_enabled:
             if self.assistant.developer_tools is None:
                 self.assistant.developer_tools = DeveloperTools(self.settings)
+            if self.assistant.workflow_engine is None:
+                self.assistant.workflow_engine = WorkflowEngine(self.assistant.developer_tools)
         else:
             self.assistant.developer_tools = None
+            self.assistant.workflow_engine = None
 
     def _sync_developer_mode_label(self) -> None:
         self.developer_mode_value.setText(self._developer_mode_text())
@@ -1497,6 +1624,20 @@ class JarvisMainWindow(QMainWindow):
         if result.text:
             return result.text
         return "Developer command completed."
+
+    @staticmethod
+    def _workflow_step_summary(result: WorkflowRunResult, max_chars: int = 260) -> str:
+        lines = []
+        for step in result.steps:
+            status = "OK" if step.succeeded else "FAILED"
+            compact = " ".join(line.strip() for line in step.result.text.splitlines() if line.strip())
+            if len(compact) > 90:
+                compact = compact[:87].rstrip() + "..."
+            lines.append(f"{step.name}: {status} - {compact or 'No output.'}")
+        summary = "\n".join(lines) or "No steps reported."
+        if len(summary) > max_chars:
+            summary = summary[: max_chars - 3].rstrip() + "..."
+        return summary
 
     @staticmethod
     def _compact_developer_text(text: str, max_lines: int = 3, max_chars: int = 180) -> str:
