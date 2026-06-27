@@ -4,9 +4,11 @@ This roadmap starts after the v0.2.0 stable checkpoint. Items here are direction
 
 ## v0.3.0 Agent Workflows
 
+- Extend the new fixed workflow engine beyond `start coding session` and `review today's work`.
 - Make the optional agent path useful for multi-step but bounded workflows.
 - Keep `AssistantCore` and the existing tool routes as the source of truth for permissions and confirmations.
 - Add workflow state, cancellation, and clearer progress reporting.
+- Add GUI workflow controls only after the backend behavior is stable.
 - Avoid autonomous background execution unless a later phase explicitly approves it.
 
 ## Better TTS

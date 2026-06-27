@@ -17,6 +17,7 @@ from tools.file_access import FileAccess, FileReadResult, FileSummaryResult
 from tools.browser_control import BrowserControl, BrowserSearchResult
 from tools.app_launcher import AppLauncher, canonical_app_name
 from tools.developer_tools import DeveloperCommandResult, DeveloperTools
+from tools.workflows import WorkflowEngine, WorkflowRunResult, format_workflow_result, normalize_workflow_command
 from tools.folder_control import (
     FolderControl,
     FolderOpenResult,
@@ -90,8 +91,10 @@ class AssistantCore:
             self.website_launcher = None
         if self.settings.developer_mode_enabled:
             self.developer_tools = DeveloperTools(self.settings)
+            self.workflow_engine = WorkflowEngine(self.developer_tools)
         else:
             self.developer_tools = None
+            self.workflow_engine = None
         if self.settings.file_access_enabled:
             self.file_access = FileAccess(self.settings)
         else:
@@ -235,6 +238,10 @@ class AssistantCore:
         folder_control_response = self._handle_folder_control_command(cleaned)
         if folder_control_response is not None:
             return folder_control_response
+
+        workflow_response = self._handle_workflow_command(cleaned)
+        if workflow_response is not None:
+            return workflow_response
 
         developer_response = self._handle_developer_command(cleaned)
         if developer_response is not None:
@@ -1086,6 +1093,23 @@ class AssistantCore:
             error=result.safe_error,
         )
 
+    def _handle_workflow_command(self, command: str) -> AssistantResponse | None:
+        if self.workflow_engine is None:
+            normalized = normalize_workflow_command(command)
+            if normalized in WorkflowEngine.command_names():
+                return AssistantResponse(text="Developer mode is disabled.", accepted=True, source="local")
+            return None
+
+        result = self.workflow_engine.handle_command(command)
+        if result is None:
+            return None
+        return AssistantResponse(
+            text=self._workflow_response_text(result),
+            accepted=result.succeeded,
+            source="workflow",
+            error=result.safe_error,
+        )
+
     def _handle_developer_command(self, command: str) -> AssistantResponse | None:
         if self.developer_tools is None:
             normalized = " ".join(command.lower().strip().split())
@@ -1647,6 +1671,10 @@ class AssistantCore:
         if result.text:
             return result.text
         return "Developer command completed."
+
+    @staticmethod
+    def _workflow_response_text(result: WorkflowRunResult) -> str:
+        return format_workflow_result(result)
 
     def _screen_vision_enabled(self) -> bool:
         return bool(self.settings.vision_enabled or getattr(self.settings, "screen_vision_enabled", False))

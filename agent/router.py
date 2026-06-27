@@ -32,6 +32,7 @@ def build_default_tool_registry(settings: AppSettings | None = None) -> dict[str
         "calendar": AgentToolDescriptor("calendar", "Read or create calendar events."),
         "gmail": AgentToolDescriptor("gmail", "Read or manage Gmail drafts and unread mail."),
         "vision": AgentToolDescriptor("vision", "Screenshot, OCR, and OpenAI vision analysis."),
+        "workflows": AgentToolDescriptor("workflows", "Run fixed local multi-step workflows."),
         "chat": AgentToolDescriptor("chat", "Fallback OpenAI chat."),
     }
 
@@ -52,6 +53,8 @@ class AgentRouter:
             return AgentRoute("weather", "Matched weather keywords.", matched_phrase=cleaned)
         if self._matches_reminders(normalized):
             return AgentRoute("reminders", "Matched reminder keywords.", matched_phrase=cleaned)
+        if self._matches_workflows(normalized):
+            return AgentRoute("workflows", "Matched workflow keywords.", matched_phrase=cleaned)
         if self._matches_vision(normalized):
             return AgentRoute("vision", "Matched vision keywords.", matched_phrase=cleaned)
         if self._matches_calendar(normalized):
@@ -84,6 +87,17 @@ class AgentRouter:
             "check reminders",
         )
         return normalized.startswith(reminder_prefixes) if isinstance(reminder_prefixes, tuple) else False
+
+    def _matches_workflows(self, normalized: str) -> bool:
+        cleaned = re.sub(r"[^a-z0-9\s]", " ", normalized.replace("’", "'"))
+        compact = " ".join(cleaned.split())
+        return compact in {
+            "start coding session",
+            "start a coding session",
+            "review todays work",
+            "review today s work",
+            "review today work",
+        }
 
     def _matches_vision(self, normalized: str) -> bool:
         return normalized in {

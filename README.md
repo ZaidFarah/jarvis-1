@@ -17,6 +17,7 @@ This repository is being prepared as the v0.2.0 stable checkpoint. It is not an 
 - Multi-monitor screen vision with screenshot capture, OCR, and optional OpenAI vision analysis after confirmation.
 - Google Calendar and Gmail foundations behind explicit enablement, OAuth setup, permission checks, and confirmations.
 - Developer tools for git status, last commit, fast tests, project file opens, and VS Code open from terminal commands and the GUI Developer panel.
+- Safe local workflow engine for fixed multi-step coding-session and work-review flows built from the existing developer tools.
 - Health, runtime, settings, logs, backup, release, installer, signing, and packaged smoke diagnostics.
 
 ## Setup
@@ -228,7 +229,11 @@ open assistant core
 open settings
 open tests folder
 open jarvis in vs code
+start coding session
+review today's work
 ```
+
+The workflow commands are fixed plans only. `start coding session` opens Jarvis in VS Code, checks git status, runs fast tests, and summarizes the result. `review today's work` checks git status, shows the last commit, runs fast tests, and summarizes the result.
 
 The GUI Developer panel exposes the same safe developer service for git status, last commit, fast tests, project files, the tests folder, and VS Code.
 
@@ -279,7 +284,7 @@ If Gmail or Calendar fails:
 If developer buttons do nothing:
 
 - Confirm `DEVELOPER_MODE_ENABLED=true`.
-- Use the GUI Developer panel or terminal developer commands.
+- Use the GUI Developer panel, terminal developer commands, or the fixed workflow commands.
 - Check `logs/developer.log`.
 - Fast tests are intentionally limited to a whitelisted test subset.
 

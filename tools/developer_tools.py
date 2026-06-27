@@ -79,6 +79,7 @@ class DeveloperTools:
             "tests/test_vision_service.py",
             "tests/test_gui_voice_loop.py",
             "tests/test_developer_tools.py",
+            "tests/test_workflows.py",
         ]
         return self._run_pytest(
             "run fast tests",
