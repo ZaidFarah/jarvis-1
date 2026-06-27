@@ -587,8 +587,8 @@ def main(argv: list[str] | None = None) -> int:
         assistant = _build_cli_assistant(settings)
         response = assistant.handle_command(message)
         tts_result = None
-        if response.accepted and (settings.tts_enabled or _has_flag(args, "--speak")):
-            tts_result = speak_text(response.text, settings, speak_requested=_has_flag(args, "--speak"))
+        if response.accepted and _has_flag(args, "--speak"):
+            tts_result = speak_text(response.text, settings, speak_requested=True)
         print(_format_chat_test_report(message, response, tts_result))
         return 0 if response.accepted and (tts_result is None or tts_result.spoken) else 1
 
