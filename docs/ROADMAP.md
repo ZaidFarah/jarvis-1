@@ -1,8 +1,8 @@
 # Jarvis Roadmap
 
-This roadmap starts after the v0.2.0 stable checkpoint. Items here are directional and should remain behind explicit settings, tests, and permission boundaries.
+This roadmap starts after the v0.3.0 stable checkpoint. Items here are directional and should remain behind explicit settings, tests, and permission boundaries.
 
-## v0.3.0 Agent Workflows
+## v0.4.0 Agent Workflows
 
 - Extend the new fixed workflow engine beyond `start coding session` and `review today's work`.
 - Make the optional agent path useful for multi-step but bounded workflows.
@@ -25,6 +25,13 @@ This roadmap starts after the v0.2.0 stable checkpoint. Items here are direction
 - Continue reducing false accepts from weak, incomplete, or noisy transcripts.
 - Preserve local validation before commands reach OpenAI or tools.
 
+## Faster Local TTS
+
+- Improve local voice responsiveness when OpenAI TTS is disabled or unavailable.
+- Reduce startup and playback latency for the local fallback provider.
+- Keep wake-only acknowledgements short and avoid unnecessary speech.
+- Preserve explicit mode control so GUI testing stays text-first by default.
+
 ## Gmail And Calendar
 
 - Improve setup guidance for OAuth credentials and token scope refreshes.
@@ -38,3 +45,9 @@ This roadmap starts after the v0.2.0 stable checkpoint. Items here are direction
 - Require explicit user confirmation before any click, typing, or window control.
 - Add preview plans before actions are executed.
 - Keep password, banking, credential, and sensitive screens blocked from automation.
+
+## True Agent Workflows
+
+- Expand from fixed local workflows into more composable agent workflows only after the safety model is proven.
+- Keep tool execution bounded, observable, and cancelable.
+- Require permission and confirmation boundaries to remain the default.

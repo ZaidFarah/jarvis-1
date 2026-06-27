@@ -1,18 +1,18 @@
 # Jarvis Architecture
 
-This document summarizes the v0.2.0 checkpoint architecture. Jarvis is organized around one routing core, explicit settings, local diagnostics, and capability modules that stay behind allowlists, permissions, and confirmations.
+This document summarizes the v0.3.0 checkpoint architecture. Jarvis is organized around one routing core, explicit settings, local diagnostics, and capability modules that stay behind allowlists, permissions, and confirmations.
 
 ## Runtime Flow
 
 `main.py` is the CLI entry point. With no CLI flag it creates `JarvisApplication` from `app/application.py`, loads settings, configures logging, builds `AssistantCore`, and starts the PySide6 GUI.
 
-`AssistantCore` in `assistant/core.py` is the central request router. It handles local commands first, then falls back to OpenAI chat when enabled. The optional agent runtime can sit in front of the same tool routes, but it does not bypass the existing permission and confirmation boundaries.
+`AssistantCore` in `assistant/core.py` is the central request router. It handles local commands first, then falls back to OpenAI chat when enabled. The workflow engine routes a fixed set of multi-step local workflows through the same trusted developer tools. The optional agent runtime can sit in front of the same tool routes, but it does not bypass the existing permission and confirmation boundaries.
 
 ## Configuration
 
 `config/settings.py` defines the application configuration with Pydantic Settings. Values come from defaults, `.env`, and environment variables. Secrets and OAuth tokens are never committed and should live only in local `.env` or `credentials/`.
 
-Important defaults for the v0.2.0 checkpoint:
+Important defaults for the v0.3.0 checkpoint:
 
 - GUI voice engine: fast
 - OpenAI: disabled until configured
@@ -49,12 +49,14 @@ Voice commands are validated before they reach OpenAI. Raw speech is retained fo
 `gui/main_window.py` implements the PySide6 red HUD:
 
 - frameless red HUD shell with a central animated assistant core
-- command bar, tray menu, status states, transcript, and response surfaces
+- voice-first controls with only the essential visible actions and a compact command bar
+- command examples plus compact status summaries for screen vision, developer state, and workflow state
+- tray menu, status states, transcript, and response surfaces
 - voice controls for fast voice or legacy voice loop
 - raw, cleaned, and interpreted speech diagnostics
 - confidence bars, VAD, RMS, wake/provider status, and turn timing
-- reminders, notification, health, startup, backup, app, website, folder, screen vision, and developer controls
-- Developer panel for git status, last commit, fast tests, project file opens, tests folder, and VS Code
+- compact developer panel and workflow panel instead of button-heavy control blocks
+- reminders, notification, health, startup, backup, app, website, folder, and screen vision controls exposed through commands and compact summaries
 
 The GUI is presentation and orchestration only. It calls existing services instead of implementing separate backend behavior.
 
@@ -86,7 +88,8 @@ The vision path supports:
 - multi-monitor listing and targeted capture
 - screenshot storage under `data/screenshots/`
 - OCR through the configured OCR provider
-- optional OpenAI vision analysis for screenshots or approved local images
+- resized JPEG OpenAI vision uploads for faster requests
+- timeout-aware OpenAI vision fallback with the original screenshot path preserved
 - secret-screen checks before upload
 - permission and confirmation gates for screenshot capture and image upload
 
@@ -117,11 +120,18 @@ Supported actions are:
 - open selected project files and the tests folder
 - open the project in VS Code when resolvable
 
+`tools/workflows.py` builds on the same service to run fixed local workflows:
+
+- `start coding session`
+- `review today's work`
+
+These workflows are intentionally bounded and remain local-only.
+
 Developer actions are available only when `DEVELOPER_MODE_ENABLED=true`, are time-limited, use explicit argument lists with `shell=False`, and log to `logs/developer.log`.
 
 ## Security Boundary
 
-Jarvis v0.2.0 is intentionally bounded:
+Jarvis v0.3.0 is intentionally bounded:
 
 - no arbitrary assistant-triggered shell commands
 - no autonomous desktop or browser automation

@@ -2,11 +2,11 @@
 
 Jarvis is a Windows desktop AI assistant checkpoint focused on local-first voice, a red HUD GUI, explicit permissions, and safe whitelisted tools.
 
-This repository is being prepared as the v0.2.0 stable checkpoint. It is not an autonomous desktop agent: risky actions are gated, shell access is not exposed through the assistant, and browser/desktop automation is not implemented.
+This repository is being prepared as the v0.3.0 stable checkpoint. It is not an autonomous desktop agent: risky actions are gated, shell access is not exposed through the assistant, and browser/desktop automation is not implemented.
 
 ## Current Features
 
-- PySide6 red HUD GUI with an animated assistant core, command bar, tray menu, voice state, transcript, response, timing, confidence, screen vision, and developer panels.
+- PySide6 red HUD GUI with an animated assistant core, voice-first controls, a compact command bar, tray menu, voice state, transcript, response, timing, screen vision, developer, and workflow panels.
 - Fast GUI voice path with one-command capture, speech repair, local validation, optional OpenAI streaming text, and optional TTS.
 - Legacy wake-based voice loop with wake detection, command retry, follow-up listening, concise voice responses, and turn diagnostics.
 - Speech-to-text support through Faster Whisper when installed, with OpenWakeWord diagnostics and Whisper fuzzy wake fallback.
@@ -14,10 +14,10 @@ This repository is being prepared as the v0.2.0 stable checkpoint. It is not an 
 - Short-term conversation history and SQLite long-term memory for explicit personal facts and preferences.
 - Local reminders with manual checks, optional watcher, optional notifications, and SQLite storage.
 - Safe whitelisted app launching, website opening/search, folder listing, and read-only file access.
-- Multi-monitor screen vision with screenshot capture, OCR, and optional OpenAI vision analysis after confirmation.
+- Multi-monitor screen vision with screenshot capture, OCR, resized OpenAI vision uploads, and timeout-aware fallback after confirmation.
 - Google Calendar and Gmail foundations behind explicit enablement, OAuth setup, permission checks, and confirmations.
 - Developer tools for git status, last commit, fast tests, project file opens, and VS Code open from terminal commands and the GUI Developer panel.
-- Safe local workflow engine for fixed multi-step coding-session and work-review flows built from the existing developer tools.
+- Safe local workflow engine for fixed multi-step coding-session and work-review flows built from the existing developer tools, with a compact workflow panel in the GUI.
 - Health, runtime, settings, logs, backup, release, installer, signing, and packaged smoke diagnostics.
 
 ## Setup
@@ -58,7 +58,7 @@ dist\Jarvis\Jarvis.exe --runtime-check
 
 ## Recommended `.env`
 
-Use `.env.example` as the source of truth. For a stable local v0.2.0-style checkpoint, these are the practical defaults to review first:
+Use `.env.example` as the source of truth. For a stable local v0.3.0-style checkpoint, these are the practical defaults to review first:
 For GUI voice testing, keep `FAST_VOICE_TTS_MODE=off` unless you are explicitly testing spoken output.
 
 ```dotenv
