@@ -165,39 +165,58 @@ def test_voice_loop_gui_state_updates_controls_and_status_fields() -> None:
     assert window.voice_timing_total_value.text() == "--"
     assert window.agent_enabled_value.text() in {"Enabled", "Disabled"}
     assert window.start_voice_loop_button.text() == "Start Listening"
-    assert window.stop_voice_loop_button.text() == "Stop Voice"
+    assert window.stop_voice_loop_button.text() == "Stop / Interrupt"
     assert window.start_voice_loop_button.isEnabled() is True
     assert window.stop_voice_loop_button.isEnabled() is False
-    assert window.chat_test_button.text() == "Chat Test"
-    assert window.weather_check_button.text() == "Weather Check"
-    assert window.vision_check_button.text() == "Vision Check"
-    assert window.agent_test_button.text() == "Agent Test"
-    assert window.health_check_button.text() == "Run Health Check"
     assert window.settings_button.text() == "Settings"
-    assert window.startup_check_button.text() == "Startup Check"
-    assert window.startup_enable_button.text() == "Enable Startup"
-    assert window.startup_disable_button.text() == "Disable Startup"
-    assert window.backup_create_button.text() == "Create Backup"
-    assert window.backup_list_button.text() == "List Backups"
-    assert window.list_screens_button.text() == "List Screens"
-    assert window.look_screen_1_button.text() == "Look Screen 1"
-    assert window.look_screen_2_button.text() == "Look Screen 2"
-    assert window.read_screen_button.text() == "Read Screen"
+    assert window.send_button.text() == "Send"
+    assert window.start_voice_loop_button.parentWidget() is not None
+    assert window.stop_voice_loop_button.parentWidget() is not None
+    assert window.settings_button.parentWidget() is not None
+    assert window.send_button.parentWidget() is not None
+    examples_text = window.command_examples_value.text()
+    assert "list screens" in examples_text
+    assert "what is on screen 1" in examples_text
+    assert "run fast tests" in examples_text
+    assert "start coding session" in examples_text
+    assert "review today's work" in examples_text
+    for collapsed_button in (
+        window.chat_test_button,
+        window.weather_check_button,
+        window.vision_check_button,
+        window.agent_test_button,
+        window.health_check_button,
+        window.startup_check_button,
+        window.startup_enable_button,
+        window.startup_disable_button,
+        window.backup_create_button,
+        window.backup_list_button,
+        window.list_screens_button,
+        window.look_screen_1_button,
+        window.look_screen_2_button,
+        window.read_screen_button,
+        window.mic_test_button,
+        window.voice_command_button,
+    ):
+        assert collapsed_button.parentWidget() is None
     assert window.developer_mode_value.text() == "Enabled"
     assert window.developer_status_value.text() == "Not checked"
     assert window.developer_commit_value.text() == "Not checked"
     assert window.developer_tests_value.text() == "Not run"
-    assert window.developer_git_status_button.text() == "Git Status"
-    assert window.developer_last_commit_button.text() == "Last Commit"
-    assert window.developer_fast_tests_button.text() == "Run Fast Tests"
-    assert window.developer_open_main_button.text() == "Open Main"
-    assert window.developer_open_settings_button.text() == "Open Settings"
-    assert window.developer_open_tests_button.text() == "Open Tests"
-    assert window.developer_open_vscode_button.text() == "Open VS Code"
+    for developer_button in (
+        window.developer_git_status_button,
+        window.developer_last_commit_button,
+        window.developer_fast_tests_button,
+        window.developer_open_main_button,
+        window.developer_open_settings_button,
+        window.developer_open_tests_button,
+        window.developer_open_vscode_button,
+    ):
+        assert developer_button.parentWidget() is None
     assert window.workflow_status_value.text() == "Idle"
     assert window.workflow_steps_value.text() == "No workflow run yet"
-    assert window.workflow_start_coding_button.text() == "Start Coding Session"
-    assert window.workflow_review_today_button.text() == "Review Today's Work"
+    assert window.workflow_start_coding_button.parentWidget() is None
+    assert window.workflow_review_today_button.parentWidget() is None
 
     window._set_voice_loop_running(True)
 
@@ -782,7 +801,7 @@ def test_fast_voice_gui_updates_stop_button_for_capture_and_speech() -> None:
     assert "cannot stop active playback" in window.voice_detail_value.text()
 
     window._handle_fast_voice_status("Interrupted")
-    assert window.stop_voice_loop_button.text() == "Stop Voice"
+    assert window.stop_voice_loop_button.text() == "Stop / Interrupt"
     assert window.voice_detail_value.text() == "Spoken response interrupted"
 
     window._allow_close = True

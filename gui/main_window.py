@@ -229,7 +229,7 @@ class OrbWidget(QWidget):
         self._pulse = 0
         self._sweep = 0
         self._density = 1.0
-        self.setFixedSize(410, 410)
+        self.setFixedSize(450, 450)
 
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._tick)
@@ -422,7 +422,7 @@ class JarvisMainWindow(QMainWindow):
         self.mic_test_button = QPushButton("Mic Test")
         self.voice_command_button = QPushButton("Voice Test")
         self.start_voice_loop_button = QPushButton("Start Voice")
-        self.stop_voice_loop_button = QPushButton("Stop Voice")
+        self.stop_voice_loop_button = QPushButton("Stop / Interrupt")
         self.check_reminders_button = QPushButton("Check Reminders")
         self.notification_test_button = QPushButton("Test Notification")
         self.health_check_button = QPushButton("Run Health Check")
@@ -506,6 +506,12 @@ class JarvisMainWindow(QMainWindow):
         self.developer_tests_value = QLabel("Not run")
         self.workflow_status_value = QLabel("Idle")
         self.workflow_steps_value = QLabel("No workflow run yet")
+        self.command_examples_value = QLabel(
+            "Voice: start listening\n"
+            "Vision: list screens | what is on screen 1\n"
+            "Developer: show git status | run fast tests\n"
+            "Workflows: start coding session | review today's work"
+        )
         self.reminders_check_value = QLabel("Idle")
         self.notification_result_value = QLabel("Idle")
         self.health_result_value = QLabel("Idle")
@@ -603,6 +609,9 @@ class JarvisMainWindow(QMainWindow):
         self.voice_timing_total_value.setObjectName("voiceLoopValue")
         self.voice_timing_slow_value.setObjectName("voiceLoopValue")
         self.agent_enabled_value.setObjectName("voiceLoopValue")
+        self.command_examples_value.setObjectName("smallHudBody")
+        self.command_examples_value.setWordWrap(True)
+        self.command_examples_value.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         for developer_value in (
             self.developer_mode_value,
             self.developer_status_value,
@@ -714,7 +723,7 @@ class JarvisMainWindow(QMainWindow):
             "Start Listening" if self.settings.gui_voice_engine == "fast" else "Start Voice"
         )
         self.start_voice_loop_button = HUDButton(start_voice_text, "primary")
-        self.stop_voice_loop_button = HUDButton("Stop Voice", "danger")
+        self.stop_voice_loop_button = HUDButton("Stop / Interrupt", "danger")
         self.stop_voice_loop_button.setEnabled(False)
         self.check_reminders_button = HUDButton("Check Reminders")
         self.notification_test_button = HUDButton("Test Notification")
@@ -840,15 +849,19 @@ class JarvisMainWindow(QMainWindow):
         control_layout.addWidget(control_title)
         control_layout.addWidget(self.start_voice_loop_button)
         control_layout.addWidget(self.stop_voice_loop_button)
-        control_layout.addWidget(self.voice_command_button)
-        control_layout.addWidget(self.mic_test_button)
         control_layout.addWidget(self.settings_button)
-        control_layout.addWidget(self.list_screens_button)
-        control_layout.addWidget(self.look_screen_1_button)
-        control_layout.addWidget(self.look_screen_2_button)
-        control_layout.addWidget(self.read_screen_button)
+        command_examples_card = QFrame()
+        command_examples_card.setObjectName("stackCard")
+        command_examples_layout = QVBoxLayout(command_examples_card)
+        command_examples_layout.setContentsMargins(14, 12, 14, 12)
+        command_examples_layout.setSpacing(8)
+        command_examples_title = QLabel("COMMAND EXAMPLES")
+        command_examples_title.setObjectName("panelTitle")
+        command_examples_layout.addWidget(command_examples_title)
+        command_examples_layout.addWidget(self.command_examples_value)
         left_layout.addWidget(voice_status_card)
         left_layout.addWidget(voice_control_card)
+        left_layout.addWidget(command_examples_card)
         left_layout.addStretch(1)
 
         center_panel = QFrame()
@@ -931,31 +944,6 @@ class JarvisMainWindow(QMainWindow):
         transcript_layout.addWidget(self.transcript)
         right_layout.addWidget(transcript_card, stretch=3)
 
-        clean_card = QFrame()
-        clean_card.setObjectName("stackCard")
-        clean_layout = QVBoxLayout(clean_card)
-        clean_layout.setContentsMargins(14, 12, 14, 12)
-        clean_layout.setSpacing(8)
-        clean_title = QLabel("CLEAN COMMAND")
-        clean_title.setObjectName("panelTitle")
-        clean_layout.addWidget(clean_title)
-        raw_label = QLabel("RAW TRANSCRIPT")
-        raw_label.setObjectName("smallHudLabel")
-        clean_layout.addWidget(raw_label)
-        self.voice_raw_speech_value.setObjectName("smallHudBody")
-        clean_layout.addWidget(self.voice_raw_speech_value)
-        cleaned_label = QLabel("CLEANED")
-        cleaned_label.setObjectName("smallHudLabel")
-        clean_layout.addWidget(cleaned_label)
-        self.voice_cleaned_value.setObjectName("cleanCommandValue")
-        clean_layout.addWidget(self.voice_cleaned_value)
-        repaired_label = QLabel("REPAIRED")
-        repaired_label.setObjectName("smallHudLabel")
-        clean_layout.addWidget(repaired_label)
-        self.voice_interpreted_value.setObjectName("cleanCommandValue")
-        clean_layout.addWidget(self.voice_interpreted_value)
-        right_layout.addWidget(clean_card)
-
         response_card = QFrame()
         response_card.setObjectName("stackCard")
         response_layout = QVBoxLayout(response_card)
@@ -1018,21 +1006,6 @@ class JarvisMainWindow(QMainWindow):
             developer_grid.addWidget(label, row_index, 0)
             developer_grid.addWidget(value_widget, row_index, 1)
         developer_layout.addLayout(developer_grid)
-        developer_button_grid = QGridLayout()
-        developer_button_grid.setHorizontalSpacing(8)
-        developer_button_grid.setVerticalSpacing(6)
-        developer_buttons = [
-            self.developer_git_status_button,
-            self.developer_last_commit_button,
-            self.developer_fast_tests_button,
-            self.developer_open_main_button,
-            self.developer_open_settings_button,
-            self.developer_open_tests_button,
-            self.developer_open_vscode_button,
-        ]
-        for index, button in enumerate(developer_buttons):
-            developer_button_grid.addWidget(button, index // 2, index % 2)
-        developer_layout.addLayout(developer_button_grid)
         right_layout.addWidget(developer_card)
 
         workflow_card = QFrame()
@@ -1057,72 +1030,7 @@ class JarvisMainWindow(QMainWindow):
             workflow_grid.addWidget(label, row_index, 0)
             workflow_grid.addWidget(value_widget, row_index, 1)
         workflow_layout.addLayout(workflow_grid)
-        workflow_button_grid = QGridLayout()
-        workflow_button_grid.setHorizontalSpacing(8)
-        workflow_button_grid.setVerticalSpacing(6)
-        workflow_button_grid.addWidget(self.workflow_start_coding_button, 0, 0)
-        workflow_button_grid.addWidget(self.workflow_review_today_button, 0, 1)
-        workflow_layout.addLayout(workflow_button_grid)
         right_layout.addWidget(workflow_card)
-
-        confidence_card = QFrame()
-        confidence_card.setObjectName("stackCard")
-        confidence_layout = QGridLayout(confidence_card)
-        confidence_layout.setContentsMargins(14, 12, 14, 12)
-        confidence_layout.setHorizontalSpacing(10)
-        confidence_layout.setVerticalSpacing(8)
-        confidence_title = QLabel("CONFIDENCE")
-        confidence_title.setObjectName("panelTitle")
-        confidence_layout.addWidget(confidence_title, 0, 0, 1, 2)
-        confidence_rows = [
-            ("WAKE SCORE", self.voice_wake_score_value, self.voice_wake_score_bar),
-            ("TRANSCRIPT", None, self.voice_transcript_confidence_bar),
-            (
-                "CAPTURE PROGRESS"
-                if self.settings.gui_voice_engine == "fast"
-                else "COMMAND SCORE",
-                self.voice_command_score_value,
-                self.voice_command_score_bar,
-            ),
-            ("REPAIR", self.voice_repair_confidence_value, self.voice_repair_confidence_bar),
-        ]
-        for row_index, (label_text, value_widget, bar_widget) in enumerate(confidence_rows, start=1):
-            label = QLabel(label_text)
-            label.setObjectName("smallHudLabel")
-            confidence_layout.addWidget(label, row_index * 2 - 1, 0)
-            if value_widget is not None:
-                value_widget.setObjectName("voiceLoopValue")
-                confidence_layout.addWidget(value_widget, row_index * 2 - 1, 1)
-            confidence_layout.addWidget(bar_widget, row_index * 2, 0, 1, 2)
-        right_layout.addWidget(confidence_card)
-
-        provider_card = QFrame()
-        provider_card.setObjectName("stackCard")
-        provider_layout = QGridLayout(provider_card)
-        provider_layout.setContentsMargins(14, 12, 14, 12)
-        provider_layout.setHorizontalSpacing(10)
-        provider_layout.setVerticalSpacing(6)
-        provider_title = QLabel("PROVIDER STATUS")
-        provider_title.setObjectName("panelTitle")
-        provider_layout.addWidget(provider_title, 0, 0, 1, 2)
-        provider_rows = [
-            ("STT ENGINE", self.voice_provider_value),
-            ("STT MODEL", self.voice_stt_model_value),
-            ("STT DEVICE", self.voice_stt_device_value),
-            ("WAKE PROVIDER", self.voice_wake_provider_value),
-            ("TTS ENGINE", self.voice_tts_provider_value),
-            ("TTS STATUS", self.voice_response_speech_value),
-            ("VOICE MODE", self.voice_response_mode_value),
-            ("VAD CROSSED", self.voice_vad_value),
-            ("WAKE ONLY", self.voice_wake_only_value),
-        ]
-        for row_index, (label_text, value_widget) in enumerate(provider_rows, start=1):
-            label = QLabel(label_text)
-            label.setObjectName("smallHudLabel")
-            value_widget.setObjectName("voiceLoopValue")
-            provider_layout.addWidget(label, row_index, 0)
-            provider_layout.addWidget(value_widget, row_index, 1)
-        right_layout.addWidget(provider_card)
 
         command_bar = QFrame()
         command_bar.setObjectName("commandBar")
@@ -1132,9 +1040,6 @@ class JarvisMainWindow(QMainWindow):
         self.command_input.setObjectName("commandInput")
         command_bar_layout.addWidget(self.command_input, stretch=4)
         command_bar_layout.addWidget(self.send_button)
-        command_bar_layout.addWidget(self.mic_test_button)
-        command_bar_layout.addWidget(self.voice_command_button)
-        command_bar_layout.addWidget(self.chat_test_button)
 
         footer = QFrame()
         footer.setObjectName("footerBar")
@@ -1152,7 +1057,7 @@ class JarvisMainWindow(QMainWindow):
         content_row = QHBoxLayout()
         content_row.setSpacing(14)
         content_row.addWidget(left_panel, stretch=2)
-        content_row.addWidget(center_panel, stretch=3)
+        content_row.addWidget(center_panel, stretch=4)
         content_row.addWidget(right_panel, stretch=2)
 
         layout = QVBoxLayout(shell)
@@ -2465,7 +2370,7 @@ class JarvisMainWindow(QMainWindow):
         elif status in {"Thinking", "Responding"}:
             self.stop_voice_loop_button.setText("Interrupt")
         else:
-            self.stop_voice_loop_button.setText("Stop Voice")
+            self.stop_voice_loop_button.setText("Stop / Interrupt")
         if status == "Capture cancelled":
             self.voice_detail_value.setText("Microphone capture cancelled")
         elif status == "Interrupted":
@@ -2736,7 +2641,7 @@ class JarvisMainWindow(QMainWindow):
         self.start_voice_loop_button.setEnabled(not running)
         self.stop_voice_loop_button.setEnabled(running)
         if not running:
-            self.stop_voice_loop_button.setText("Stop Voice")
+            self.stop_voice_loop_button.setText("Stop / Interrupt")
         if self.start_voice_loop_action is not None:
             self.start_voice_loop_action.setEnabled(not running)
         if self.stop_voice_loop_action is not None:
