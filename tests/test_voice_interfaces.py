@@ -12,6 +12,9 @@ from voice.stt import (
     InterfaceOnlySpeechToTextProvider,
     OpenAISpeechToTextProvider,
     create_speech_to_text_provider,
+    read_wav_samples,
+    transcribe_audio_file,
+    write_wav_file,
 )
 from voice.tts import Pyttsx3TextToSpeechProvider
 from voice.vad import RmsVoiceActivityDetector
@@ -204,6 +207,53 @@ def test_openai_stt_provider_reports_missing_key() -> None:
     assert provider.available is False
     with pytest.raises(RuntimeError, match="OPENAI_API_KEY"):
         provider.transcribe([0.1], sample_rate=16000)
+
+
+def test_openai_stt_provider_transcribes_existing_wav_file(tmp_path) -> None:
+    audio_path = write_wav_file(tmp_path / "sample.wav", [0.1, -0.2, 0.0], 16000)
+    captured: dict[str, object] = {}
+
+    class FakeTranscriptions:
+        def create(self, **kwargs):
+            captured.update(kwargs)
+            assert kwargs["file"].read() == audio_path.read_bytes()
+            return {"text": "same audio", "confidence": 0.72}
+
+    class FakeAudio:
+        transcriptions = FakeTranscriptions()
+
+    class FakeClient:
+        audio = FakeAudio()
+
+    provider = OpenAISpeechToTextProvider(
+        api_key="sk-test",
+        model_name="gpt-4o-mini-transcribe",
+        client_factory=lambda api_key: FakeClient(),
+    )
+
+    result = provider.transcribe_file(audio_path)
+
+    assert result.text == "same audio"
+    assert result.confidence == 0.72
+    assert captured["model"] == "gpt-4o-mini-transcribe"
+
+
+def test_transcribe_audio_file_decodes_wav_for_sample_based_provider(tmp_path) -> None:
+    audio_path = write_wav_file(tmp_path / "sample.wav", [0.25, -0.25], 16000)
+
+    class FakeProvider:
+        name = "fake_stt"
+        available = True
+
+        def transcribe(self, samples, sample_rate: int) -> TranscriptionResult:
+            assert sample_rate == 16000
+            assert samples == read_wav_samples(audio_path)[0]
+            return TranscriptionResult(text="decoded audio", confidence=0.8)
+
+    result = transcribe_audio_file(FakeProvider(), audio_path)
+
+    assert result.text == "decoded audio"
+    assert result.confidence == 0.8
 
 
 def test_stt_fallback_provider_uses_fallback_when_primary_fails() -> None:

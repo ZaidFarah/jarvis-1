@@ -32,7 +32,8 @@ Diagnostics live mostly under `diagnostics/` and expose CLI checks for health, s
 The `voice/` package owns the audio and speech stack:
 
 - `audio_diagnostics.py`: microphone discovery and RMS checks.
-- `stt.py`: speech-to-text provider factory, including Faster Whisper support.
+- `stt.py`: speech-to-text provider factory, including Faster Whisper and OpenAI STT support.
+- `stt_benchmark.py`: records one shared WAV sample or consumes an existing WAV, then compares STT providers against that same audio without running arbitrary shell commands.
 - `tts.py`: OpenAI TTS and local `pyttsx3` fallback.
 - `wake.py`, `wake_provider.py`, `openwakeword.py`, `wake_diagnostics.py`: wake phrase matching, wake provider selection, and diagnostics.
 - `command_validation.py`: local rejection of empty, filler, punctuation-only, short, and incomplete commands.

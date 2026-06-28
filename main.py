@@ -69,6 +69,7 @@ from reminders.scheduler import ReminderWatcher
 from voice.audio_diagnostics import AudioDiagnostics, format_audio_check_report
 from voice.command_capture import format_command_capture_report, run_command_capture_test
 from voice.fast_voice import FastVoiceRunner, format_fast_voice_report, run_fast_command_test
+from voice.stt_benchmark import STTBenchmarkRunner, format_stt_benchmark_report
 from voice.tts import TextToSpeechResult, format_tts_result, speak_text
 from voice.transcription_diagnostics import TranscriptionDiagnostics, format_transcription_report
 from voice.voice_command_test import (
@@ -272,6 +273,12 @@ def main(argv: list[str] | None = None) -> int:
         report = TranscriptionDiagnostics(settings).run_transcribe_test()
         print(format_transcription_report(report))
         return 0 if report.is_successful else 1
+
+    if "--stt-benchmark" in args or "--stt-benchmark-file" in args:
+        settings = load_settings()
+        configure_logging(settings, console=False)
+        audio_path = _message_after_flag(args, "--stt-benchmark-file") if "--stt-benchmark-file" in args else None
+        return _run_stt_benchmark(settings, audio_path)
 
     if "--command-capture-test" in args:
         settings = load_settings()
@@ -906,6 +913,21 @@ def _run_agent_chat_test(settings, user_input: str) -> int:
     response = assistant.handle_command(user_input)
     print(_format_agent_chat_test_report(user_input, response, settings.agent_enabled), flush=True)
     return 0 if response.accepted else 1
+
+
+def _run_stt_benchmark(settings, audio_path: str | None = None) -> int:
+    if audio_path is not None and not audio_path:
+        print("Please provide a WAV file path for --stt-benchmark-file.", flush=True)
+        return 1
+
+    try:
+        report = STTBenchmarkRunner(settings).run(audio_path)
+    except Exception as exc:
+        print(f"Jarvis STT benchmark failed: {type(exc).__name__}: {exc}", flush=True)
+        return 1
+
+    print(format_stt_benchmark_report(report), flush=True)
+    return 0 if report.is_successful else 1
 
 
 def _run_vision_analyze(settings, image_path: str) -> int:

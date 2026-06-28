@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import wave
 from collections.abc import Callable, Sequence
+from pathlib import Path
 from typing import Any
 
 from config.settings import AppSettings
@@ -152,6 +153,19 @@ class OpenAISpeechToTextProvider:
             raise RuntimeError(f"OpenAI STT is unavailable{detail}.")
 
         audio_file = _samples_to_wav_file(samples, sample_rate)
+        return self._transcribe_file_object(audio_file)
+
+    def transcribe_file(self, audio_path: str | Path) -> TranscriptionResult:
+        if not self.api_key:
+            raise RuntimeError("OPENAI_API_KEY is required for OpenAI STT.")
+        if self._client_factory is None:
+            detail = f" ({self._import_error})" if self._import_error else ""
+            raise RuntimeError(f"OpenAI STT is unavailable{detail}.")
+
+        with Path(audio_path).open("rb") as audio_file:
+            return self._transcribe_file_object(audio_file)
+
+    def _transcribe_file_object(self, audio_file: Any) -> TranscriptionResult:
         client = self._client_factory(api_key=self.api_key)
         response = client.audio.transcriptions.create(
             model=self.model_name,
@@ -221,6 +235,55 @@ def _create_base_speech_to_text_provider(settings: AppSettings, provider: str):
     raise ValueError(f"Unsupported STT provider: {settings.speech_to_text_provider}")
 
 
+def transcribe_audio_file(provider: Any, audio_path: str | Path) -> TranscriptionResult:
+    transcribe_file = getattr(provider, "transcribe_file", None)
+    if callable(transcribe_file):
+        return transcribe_file(audio_path)
+
+    samples, sample_rate = read_wav_samples(audio_path)
+    return provider.transcribe(samples, sample_rate)
+
+
+def read_wav_samples(audio_path: str | Path) -> tuple[list[float], int]:
+    path = Path(audio_path)
+    with wave.open(str(path), "rb") as wav_file:
+        channels = wav_file.getnchannels()
+        sample_width = wav_file.getsampwidth()
+        sample_rate = wav_file.getframerate()
+        frame_count = wav_file.getnframes()
+        raw_frames = wav_file.readframes(frame_count)
+
+    if channels < 1:
+        raise ValueError("WAV file has no audio channels.")
+    if sample_width != 2:
+        raise ValueError("Only 16-bit PCM WAV files are supported for STT benchmark.")
+
+    values = [
+        int.from_bytes(raw_frames[index : index + 2], byteorder="little", signed=True) / 32768.0
+        for index in range(0, len(raw_frames), 2)
+    ]
+    if channels == 1:
+        return values, sample_rate
+
+    mono_samples: list[float] = []
+    for index in range(0, len(values), channels):
+        frame = values[index : index + channels]
+        if frame:
+            mono_samples.append(sum(frame) / len(frame))
+    return mono_samples, sample_rate
+
+
+def write_wav_file(audio_path: str | Path, samples: Sequence[float], sample_rate: int) -> Path:
+    path = Path(audio_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with wave.open(str(path), "wb") as wav_file:
+        wav_file.setnchannels(1)
+        wav_file.setsampwidth(2)
+        wav_file.setframerate(sample_rate)
+        wav_file.writeframes(_samples_to_pcm16_bytes(samples))
+    return path
+
+
 def _transcription_confidence(segments: Sequence[object], language_probability: object | None) -> float | None:
     if language_probability is not None:
         try:
@@ -250,15 +313,19 @@ def _samples_to_wav_file(samples: Sequence[float], sample_rate: int) -> io.Bytes
         wav_file.setnchannels(1)
         wav_file.setsampwidth(2)
         wav_file.setframerate(sample_rate)
-        frames = bytearray()
-        for sample in samples:
-            clamped = max(-1.0, min(1.0, float(sample)))
-            value = int(clamped * 32767) if clamped >= 0 else int(clamped * 32768)
-            frames.extend(value.to_bytes(2, byteorder="little", signed=True))
-        wav_file.writeframes(bytes(frames))
+        wav_file.writeframes(_samples_to_pcm16_bytes(samples))
     buffer.seek(0)
     buffer.name = "jarvis-stt.wav"  # type: ignore[attr-defined]
     return buffer
+
+
+def _samples_to_pcm16_bytes(samples: Sequence[float]) -> bytes:
+    frames = bytearray()
+    for sample in samples:
+        clamped = max(-1.0, min(1.0, float(sample)))
+        value = int(clamped * 32767) if clamped >= 0 else int(clamped * 32768)
+        frames.extend(value.to_bytes(2, byteorder="little", signed=True))
+    return bytes(frames)
 
 
 def _extract_openai_transcription_text(response: object) -> str:

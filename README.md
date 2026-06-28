@@ -79,6 +79,7 @@ FAST_VOICE_CONCISE_RESPONSES=true
 STT_PROVIDER=faster_whisper
 STT_FALLBACK_PROVIDER=faster_whisper
 OPENAI_STT_MODEL=gpt-4o-mini-transcribe
+STT_BENCHMARK_SECONDS=5.0
 WHISPER_MODEL=base.en
 WHISPER_DEVICE=cpu
 WHISPER_COMPUTE_TYPE=int8
@@ -148,6 +149,8 @@ Voice and audio:
 python main.py --audio-check
 python main.py --voice-health-check
 python main.py --transcribe-test
+python main.py --stt-benchmark
+python main.py --stt-benchmark-file "logs\audio\sample.wav"
 python main.py --wake-provider-check
 python main.py --openwakeword-test
 python main.py --command-capture-test

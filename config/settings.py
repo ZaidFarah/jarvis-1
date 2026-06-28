@@ -320,6 +320,12 @@ class AppSettings(BaseSettings):
         default="gpt-4o-mini-transcribe",
         validation_alias=AliasChoices("OPENAI_STT_MODEL", "JARVIS_OPENAI_STT_MODEL"),
     )
+    stt_benchmark_seconds: float = Field(
+        default=5.0,
+        ge=0.5,
+        le=60.0,
+        validation_alias=AliasChoices("STT_BENCHMARK_SECONDS", "JARVIS_STT_BENCHMARK_SECONDS"),
+    )
     whisper_model: str = Field(
         default="base.en",
         validation_alias=AliasChoices("WHISPER_MODEL", "JARVIS_WHISPER_MODEL"),
