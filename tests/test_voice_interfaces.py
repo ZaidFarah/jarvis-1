@@ -1,11 +1,18 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from config.settings import AppSettings
 from voice.interfaces import TranscriptionResult
-from voice.stt import InterfaceOnlySpeechToTextProvider
-from voice.stt import FasterWhisperSpeechToTextProvider, create_speech_to_text_provider
+from voice.stt import (
+    FallbackSpeechToTextProvider,
+    FasterWhisperSpeechToTextProvider,
+    InterfaceOnlySpeechToTextProvider,
+    OpenAISpeechToTextProvider,
+    create_speech_to_text_provider,
+)
 from voice.tts import Pyttsx3TextToSpeechProvider
 from voice.vad import RmsVoiceActivityDetector
 
@@ -43,6 +50,22 @@ def test_stt_factory_can_select_interface_only_provider() -> None:
     provider = create_speech_to_text_provider(settings)
 
     assert isinstance(provider, InterfaceOnlySpeechToTextProvider)
+
+
+def test_stt_factory_can_select_openai_with_faster_whisper_fallback() -> None:
+    settings = AppSettings(
+        _env_file=None,
+        speech_to_text_provider="openai-stt",
+        stt_fallback_provider="faster-whisper",
+        openai_api_key="sk-test",
+    )
+
+    provider = create_speech_to_text_provider(settings)
+
+    assert isinstance(provider, FallbackSpeechToTextProvider)
+    assert isinstance(provider.primary, OpenAISpeechToTextProvider)
+    assert isinstance(provider.fallback, FasterWhisperSpeechToTextProvider)
+    assert provider.name == "openai_stt"
 
 
 def test_faster_whisper_provider_reports_missing_dependency() -> None:
@@ -132,6 +155,87 @@ def test_faster_whisper_provider_reuses_loaded_model() -> None:
     assert second.text == "status report"
     assert calls[0]["beam_size"] == 1
     assert first.confidence is not None
+
+
+def test_openai_stt_provider_transcribes_wav_audio() -> None:
+    captured: dict[str, object] = {}
+
+    class FakeTranscriptions:
+        def create(self, **kwargs):
+            captured.update(kwargs)
+            audio = kwargs["file"].read()
+            assert audio.startswith(b"RIFF")
+            assert b"WAVE" in audio[:16]
+            return SimpleNamespace(
+                text="hello jarvis",
+                confidence=0.87,
+                duration=1.1,
+                language="en",
+            )
+
+    class FakeAudio:
+        transcriptions = FakeTranscriptions()
+
+    class FakeClient:
+        audio = FakeAudio()
+
+    provider = OpenAISpeechToTextProvider(
+        api_key="sk-test",
+        model_name="gpt-4o-mini-transcribe",
+        client_factory=lambda api_key: FakeClient(),
+    )
+
+    result = provider.transcribe([0.1, -0.1, 0.0], sample_rate=16000)
+
+    assert result.text == "hello jarvis"
+    assert result.confidence == 0.87
+    assert result.duration_seconds == 1.1
+    assert result.language == "en"
+    assert captured["model"] == "gpt-4o-mini-transcribe"
+
+
+def test_openai_stt_provider_reports_missing_key() -> None:
+    provider = OpenAISpeechToTextProvider(
+        api_key="",
+        model_name="gpt-4o-mini-transcribe",
+        client_factory=lambda api_key: object(),
+    )
+
+    assert provider.available is False
+    with pytest.raises(RuntimeError, match="OPENAI_API_KEY"):
+        provider.transcribe([0.1], sample_rate=16000)
+
+
+def test_stt_fallback_provider_uses_fallback_when_primary_fails() -> None:
+    class FailingProvider:
+        name = "openai_stt"
+        available = True
+
+        def warm_up(self) -> bool:
+            return True
+
+        def transcribe(self, samples, sample_rate: int) -> TranscriptionResult:
+            del samples, sample_rate
+            raise RuntimeError("network failed")
+
+    class FallbackProvider:
+        name = "faster_whisper"
+        available = True
+
+        def warm_up(self) -> bool:
+            return True
+
+        def transcribe(self, samples, sample_rate: int) -> TranscriptionResult:
+            assert sample_rate == 16000
+            assert samples == [0.1]
+            return TranscriptionResult(text="fallback transcript", confidence=0.7)
+
+    provider = FallbackSpeechToTextProvider(FailingProvider(), FallbackProvider())
+
+    result = provider.transcribe([0.1], sample_rate=16000)
+
+    assert result.text == "fallback transcript"
+    assert result.confidence == 0.7
 
 
 def test_pyttsx3_provider_exposes_availability_without_speaking() -> None:

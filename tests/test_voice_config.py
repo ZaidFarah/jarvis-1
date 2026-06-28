@@ -46,6 +46,9 @@ def test_voice_settings_defaults_are_lightweight() -> None:
         "Respond in one short sentence. Be direct unless the user asks for detail."
     )
     assert settings.speech_to_text_provider == "faster_whisper"
+    assert settings.stt_fallback_provider == "faster_whisper"
+    assert settings.openai_stt_model == "gpt-4o-mini-transcribe"
+    assert settings.stt_model_name == "base.en"
     assert settings.whisper_model == "base.en"
     assert settings.whisper_device == "cpu"
     assert settings.whisper_compute_type == "int8"
@@ -239,14 +242,19 @@ def test_gui_voice_engine_validation() -> None:
 
 
 def test_stt_settings_read_environment(monkeypatch) -> None:
-    monkeypatch.setenv("STT_PROVIDER", "interface-only")
+    monkeypatch.setenv("STT_PROVIDER", "openai-stt")
+    monkeypatch.setenv("STT_FALLBACK_PROVIDER", "interface-only")
+    monkeypatch.setenv("OPENAI_STT_MODEL", " gpt-test-transcribe ")
     monkeypatch.setenv("WHISPER_MODEL", "tiny.en")
     monkeypatch.setenv("WHISPER_DEVICE", "cpu")
     monkeypatch.setenv("WHISPER_COMPUTE_TYPE", "float32")
 
     settings = AppSettings(_env_file=None)
 
-    assert settings.speech_to_text_provider == "interface-only"
+    assert settings.speech_to_text_provider == "openai-stt"
+    assert settings.stt_fallback_provider == "interface-only"
+    assert settings.openai_stt_model == "gpt-test-transcribe"
+    assert settings.stt_model_name == "gpt-test-transcribe"
     assert settings.whisper_model == "tiny.en"
     assert settings.whisper_device == "cpu"
     assert settings.whisper_compute_type == "float32"

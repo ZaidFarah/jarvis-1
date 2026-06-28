@@ -9,7 +9,7 @@ This repository is being prepared as the v0.3.0 stable checkpoint. It is not an 
 - PySide6 red HUD GUI with an animated assistant core, voice-first controls, a compact command bar, tray menu, voice state, transcript, response, timing, screen vision, developer, and workflow panels.
 - Fast GUI voice path with one-command capture, speech repair, local validation, optional OpenAI streaming text, and optional TTS.
 - Legacy wake-based voice loop with wake detection, command retry, follow-up listening, concise voice responses, and turn diagnostics.
-- Speech-to-text support through Faster Whisper when installed, with OpenWakeWord diagnostics and Whisper fuzzy wake fallback.
+- Speech-to-text support through Faster Whisper by default, with an OpenAI STT provider foundation and Faster Whisper fallback.
 - Text-to-speech support through OpenAI TTS or local `pyttsx3`, disabled by default for GUI fast voice.
 - Short-term conversation history and SQLite long-term memory for explicit personal facts and preferences.
 - Local reminders with manual checks, optional watcher, optional notifications, and SQLite storage.
@@ -77,6 +77,8 @@ FAST_VOICE_STREAM_OPENAI=true
 FAST_VOICE_CONCISE_RESPONSES=true
 
 STT_PROVIDER=faster_whisper
+STT_FALLBACK_PROVIDER=faster_whisper
+OPENAI_STT_MODEL=gpt-4o-mini-transcribe
 WHISPER_MODEL=base.en
 WHISPER_DEVICE=cpu
 WHISPER_COMPUTE_TYPE=int8

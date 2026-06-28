@@ -244,7 +244,7 @@ class WakeDiagnostics:
             provider_name=provider_name,
             provider_available=provider_available,
             wake_provider=wake_provider,
-            model_name=self.settings.whisper_model,
+            model_name=self.settings.stt_model_name,
             sample_rate=self.settings.voice_sample_rate,
             listen_seconds=listen_seconds,
             max_rms=max_rms,

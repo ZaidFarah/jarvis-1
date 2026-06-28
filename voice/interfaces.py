@@ -30,6 +30,9 @@ class SpeechToTextProvider(Protocol):
     name: str
     available: bool
 
+    def warm_up(self) -> bool:
+        """Prepare the provider for lower-latency transcription when supported."""
+
     def transcribe(self, samples: Sequence[float], sample_rate: int) -> TranscriptionResult:
         """Transcribe audio samples into text."""
 

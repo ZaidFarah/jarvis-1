@@ -20,7 +20,8 @@ This roadmap starts after the v0.3.0 stable checkpoint. Items here are direction
 
 ## Better STT Providers
 
-- Improve provider selection and health checks.
+- Expand on the Faster Whisper plus OpenAI STT provider foundation.
+- Improve provider selection, health checks, fallback reporting, and model guidance.
 - Add clearer model/device guidance for CPU and GPU setups.
 - Continue reducing false accepts from weak, incomplete, or noisy transcripts.
 - Preserve local validation before commands reach OpenAI or tools.

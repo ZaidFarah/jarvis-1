@@ -55,13 +55,13 @@ class TranscriptionDiagnostics:
         self.stt_logger.info(
             "Running STT diagnostic provider={} model={} device={} compute_type={}",
             provider.name,
-            self.settings.whisper_model,
+            self.settings.stt_model_name,
             self.settings.whisper_device,
             self.settings.whisper_compute_type,
         )
 
         if not provider.available:
-            message = "Faster Whisper is not available. Install faster-whisper and run the test again."
+            message = f"STT provider '{provider.name}' is not available. Check provider configuration and dependencies."
             self.stt_logger.error(message)
             errors.append(message)
             return self._report(provider.name, provider.available, max_rms, vad_crossed, "", errors)
@@ -107,7 +107,7 @@ class TranscriptionDiagnostics:
         return TranscriptionDiagnosticReport(
             provider_name=provider_name,
             provider_available=provider_available,
-            model_name=self.settings.whisper_model,
+            model_name=self.settings.stt_model_name,
             device=self.settings.whisper_device,
             compute_type=self.settings.whisper_compute_type,
             sample_rate=self.settings.voice_sample_rate,

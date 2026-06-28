@@ -460,7 +460,7 @@ class JarvisMainWindow(QMainWindow):
         self.voice_state_value = QLabel("Sleeping")
         self.voice_detail_value = QLabel("Waiting for wake phrase")
         self.voice_provider_value = QLabel(self.settings.speech_to_text_provider)
-        self.voice_stt_model_value = QLabel(self.settings.whisper_model)
+        self.voice_stt_model_value = QLabel(self.settings.stt_model_name)
         self.voice_stt_device_value = QLabel(f"{self.settings.whisper_device} / {self.settings.whisper_compute_type}")
         self.voice_wake_provider_value = QLabel(self.settings.wake_provider)
         self.voice_tts_provider_value = QLabel(self.settings.tts_provider)

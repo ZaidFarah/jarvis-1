@@ -1,7 +1,9 @@
 from __future__ import annotations
 
-from collections.abc import Callable
-from typing import Sequence
+import io
+import wave
+from collections.abc import Callable, Sequence
+from typing import Any
 
 from config.settings import AppSettings
 from voice.interfaces import TranscriptionResult
@@ -110,8 +112,104 @@ class FasterWhisperSpeechToTextProvider:
         return self._model
 
 
+class OpenAISpeechToTextProvider:
+    """OpenAI speech-to-text provider for recorded microphone samples."""
+
+    name = "openai_stt"
+
+    def __init__(
+        self,
+        api_key: str,
+        model_name: str,
+        client_factory: Callable[..., object] | None = None,
+        import_error: Exception | None = None,
+    ) -> None:
+        self.api_key = api_key
+        self.model_name = model_name
+        self._client_factory = client_factory
+        self._import_error = import_error
+
+        if self._client_factory is None and self._import_error is None:
+            try:
+                from openai import OpenAI
+            except Exception as exc:  # pragma: no cover - depends on local installation
+                self._import_error = exc
+            else:
+                self._client_factory = OpenAI
+
+    @property
+    def available(self) -> bool:
+        return bool(self.api_key) and self._client_factory is not None
+
+    def warm_up(self) -> bool:
+        return self.available
+
+    def transcribe(self, samples: Sequence[float], sample_rate: int) -> TranscriptionResult:
+        if not self.api_key:
+            raise RuntimeError("OPENAI_API_KEY is required for OpenAI STT.")
+        if self._client_factory is None:
+            detail = f" ({self._import_error})" if self._import_error else ""
+            raise RuntimeError(f"OpenAI STT is unavailable{detail}.")
+
+        audio_file = _samples_to_wav_file(samples, sample_rate)
+        client = self._client_factory(api_key=self.api_key)
+        response = client.audio.transcriptions.create(
+            model=self.model_name,
+            file=audio_file,
+        )
+        text = _extract_openai_transcription_text(response)
+        if not text:
+            raise RuntimeError("OpenAI STT returned an empty transcription.")
+        return TranscriptionResult(
+            text=text,
+            confidence=_extract_openai_transcription_confidence(response),
+            duration_seconds=_extract_optional_float(response, "duration"),
+            language=_extract_optional_str(response, "language"),
+        )
+
+
+class FallbackSpeechToTextProvider:
+    """Try the selected provider first and fall back to a local provider on failure."""
+
+    def __init__(self, primary: Any, fallback: Any) -> None:
+        self.primary = primary
+        self.fallback = fallback
+        self.name = primary.name
+
+    @property
+    def available(self) -> bool:
+        return bool(getattr(self.primary, "available", False) or getattr(self.fallback, "available", False))
+
+    def warm_up(self) -> bool:
+        if getattr(self.primary, "available", False):
+            return bool(self.primary.warm_up())
+        return bool(self.fallback.warm_up())
+
+    def transcribe(self, samples: Sequence[float], sample_rate: int) -> TranscriptionResult:
+        if getattr(self.primary, "available", False):
+            try:
+                return self.primary.transcribe(samples, sample_rate)
+            except Exception:
+                if not getattr(self.fallback, "available", False):
+                    raise
+        return self.fallback.transcribe(samples, sample_rate)
+
+
 def create_speech_to_text_provider(settings: AppSettings):
     provider = settings.speech_to_text_provider.replace("-", "_")
+    if provider == "openai_stt":
+        primary = OpenAISpeechToTextProvider(
+            api_key=settings.openai_api_key,
+            model_name=settings.openai_stt_model,
+        )
+        fallback_name = settings.stt_fallback_provider.replace("-", "_")
+        if fallback_name and fallback_name != "openai_stt":
+            return FallbackSpeechToTextProvider(primary, _create_base_speech_to_text_provider(settings, fallback_name))
+        return primary
+    return _create_base_speech_to_text_provider(settings, provider)
+
+
+def _create_base_speech_to_text_provider(settings: AppSettings, provider: str):
     if provider == "faster_whisper":
         return FasterWhisperSpeechToTextProvider(
             model_name=settings.whisper_model,
@@ -144,3 +242,69 @@ def _transcription_confidence(segments: Sequence[object], language_probability: 
 
     average_logprob = sum(scored_segments) / len(scored_segments)
     return max(0.0, min(1.0, (average_logprob + 1.5) / 1.5))
+
+
+def _samples_to_wav_file(samples: Sequence[float], sample_rate: int) -> io.BytesIO:
+    buffer = io.BytesIO()
+    with wave.open(buffer, "wb") as wav_file:
+        wav_file.setnchannels(1)
+        wav_file.setsampwidth(2)
+        wav_file.setframerate(sample_rate)
+        frames = bytearray()
+        for sample in samples:
+            clamped = max(-1.0, min(1.0, float(sample)))
+            value = int(clamped * 32767) if clamped >= 0 else int(clamped * 32768)
+            frames.extend(value.to_bytes(2, byteorder="little", signed=True))
+        wav_file.writeframes(bytes(frames))
+    buffer.seek(0)
+    buffer.name = "jarvis-stt.wav"  # type: ignore[attr-defined]
+    return buffer
+
+
+def _extract_openai_transcription_text(response: object) -> str:
+    if isinstance(response, dict):
+        return str(response.get("text", "")).strip()
+    return str(getattr(response, "text", "") or "").strip()
+
+
+def _extract_openai_transcription_confidence(response: object) -> float | None:
+    direct = _extract_optional_float(response, "confidence")
+    if direct is not None:
+        return max(0.0, min(1.0, direct))
+
+    segments = _extract_response_value(response, "segments")
+    if not isinstance(segments, Sequence):
+        return None
+    scores: list[float] = []
+    for segment in segments:
+        avg_logprob = _extract_optional_float(segment, "avg_logprob")
+        if avg_logprob is not None:
+            scores.append(avg_logprob)
+    if not scores:
+        return None
+    average_logprob = sum(scores) / len(scores)
+    return max(0.0, min(1.0, (average_logprob + 1.5) / 1.5))
+
+
+def _extract_optional_float(response: object, name: str) -> float | None:
+    value = _extract_response_value(response, name)
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _extract_optional_str(response: object, name: str) -> str | None:
+    value = _extract_response_value(response, name)
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _extract_response_value(response: object, name: str) -> object | None:
+    if isinstance(response, dict):
+        return response.get(name)
+    return getattr(response, name, None)

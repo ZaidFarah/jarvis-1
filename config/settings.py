@@ -312,6 +312,14 @@ class AppSettings(BaseSettings):
         default="faster_whisper",
         validation_alias=AliasChoices("STT_PROVIDER", "JARVIS_STT_PROVIDER", "JARVIS_SPEECH_TO_TEXT_PROVIDER"),
     )
+    stt_fallback_provider: str = Field(
+        default="faster_whisper",
+        validation_alias=AliasChoices("STT_FALLBACK_PROVIDER", "JARVIS_STT_FALLBACK_PROVIDER"),
+    )
+    openai_stt_model: str = Field(
+        default="gpt-4o-mini-transcribe",
+        validation_alias=AliasChoices("OPENAI_STT_MODEL", "JARVIS_OPENAI_STT_MODEL"),
+    )
     whisper_model: str = Field(
         default="base.en",
         validation_alias=AliasChoices("WHISPER_MODEL", "JARVIS_WHISPER_MODEL"),
@@ -1062,12 +1070,20 @@ class AppSettings(BaseSettings):
     def expand_calendar_paths(cls, value: Path) -> Path:
         return _resolve_config_path(value)
 
-    @field_validator("speech_to_text_provider", "tts_provider", "whisper_device", "whisper_compute_type")
+    @field_validator("speech_to_text_provider", "stt_fallback_provider", "tts_provider", "whisper_device", "whisper_compute_type")
     @classmethod
     def normalize_provider_name(cls, value: str) -> str:
         cleaned = value.strip().lower()
         if not cleaned:
             raise ValueError("Provider name cannot be empty.")
+        return cleaned
+
+    @field_validator("openai_stt_model")
+    @classmethod
+    def normalize_openai_stt_model(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("OpenAI STT model cannot be empty.")
         return cleaned
 
     @field_validator("voice_input_device")
@@ -1326,6 +1342,13 @@ class AppSettings(BaseSettings):
                     pass
                 rules.append((source, target))
         return rules
+
+    @property
+    def stt_model_name(self) -> str:
+        provider = self.speech_to_text_provider.replace("-", "_")
+        if provider == "openai_stt":
+            return self.openai_stt_model
+        return self.whisper_model
 
     @property
     def has_openai_api_key(self) -> bool:
