@@ -17,6 +17,7 @@ from voice.fast_voice import (
     FastVoiceRunner,
     format_fast_voice_report,
     resolve_fast_input_device,
+    resolve_fast_voice_capture_mode,
     select_fast_voice_silence_ms,
 )
 from voice.interfaces import TranscriptionResult
@@ -86,6 +87,7 @@ def test_fast_voice_runs_one_repaired_command_through_assistant(tmp_path: Path) 
     assert report.is_successful is True
     assert any(item == "Jarvis: Systems nominal." for item in output)
     for field in (
+        "capture_mode=",
         "capture_ms=",
         "audio_record_ms=",
         "audio_prepare_ms=",
@@ -607,6 +609,7 @@ def test_gui_capture_override_does_not_slow_terminal_default(tmp_path: Path) -> 
         voice_vad_threshold=0.02,
         fast_voice_record_seconds=4.0,
         fast_voice_max_seconds=1.0,
+        gui_fast_voice_capture_mode="adaptive",
     )
     terminal_sd = FakeSoundDevice([])
     gui_sd = FakeSoundDevice([])
@@ -658,6 +661,20 @@ def test_fast_voice_capture_metric_uses_audio_record_time(tmp_path: Path) -> Non
     assert report.timing.audio_record_ms == 1600.0
     assert report.timing.audio_prepare_ms == 1676.0
     assert report.timing.stt_warmup_ms == 0.0
+    assert report.timing.capture_mode == "adaptive"
+
+
+def test_fast_voice_resolves_capture_modes(tmp_path: Path) -> None:
+    settings = AppSettings(
+        _env_file=None,
+        log_dir=tmp_path / "logs",
+        fast_voice_capture_mode="fixed-short",
+        gui_fast_voice_capture_mode="benchmark-quality",
+    )
+
+    assert resolve_fast_voice_capture_mode(settings) == "fixed_short"
+    assert resolve_fast_voice_capture_mode(settings, gui=True) == "benchmark_quality"
+    assert resolve_fast_voice_capture_mode(settings, "adaptive", gui=True) == "adaptive"
 
 
 def test_fast_capture_keeps_only_configured_preroll_before_speech(tmp_path: Path) -> None:
@@ -746,6 +763,7 @@ def test_gui_fast_capture_extends_active_long_question_past_soft_limit(
         voice_vad_threshold=0.02,
         fast_voice_record_seconds=4.0,
         fast_voice_long_command_silence_ms=450,
+        gui_fast_voice_capture_mode="adaptive",
     )
     pre_speech_chunks = 3
     speech_chunks = 28
@@ -785,6 +803,7 @@ def test_gui_fast_capture_treats_steady_background_as_end_silence(
         gui_fast_voice_hard_max_seconds=3.0,
         gui_fast_voice_end_silence_ms=350,
         gui_fast_voice_noise_gate_multiplier=1.8,
+        gui_fast_voice_capture_mode="adaptive",
     )
     pre_speech_chunks = 3
     speech_chunks = 8
@@ -821,6 +840,7 @@ def test_gui_fast_capture_uses_configured_hard_max(tmp_path: Path) -> None:
         voice_vad_threshold=0.01,
         fast_voice_record_seconds=4.0,
         gui_fast_voice_hard_max_seconds=3.0,
+        gui_fast_voice_capture_mode="adaptive",
     )
     sd = FakeSoundDevice([0.2] * 60)
     runner = FastVoiceRunner(
@@ -838,6 +858,75 @@ def test_gui_fast_capture_uses_configured_hard_max(tmp_path: Path) -> None:
     assert sd.stream.read_count == 38
     assert capture.vad_crossed is True
     assert capture.trailing_silence_ms == 0.0
+
+
+def test_benchmark_quality_capture_waits_for_safe_silence_after_short_command(
+    tmp_path: Path,
+) -> None:
+    settings = AppSettings(
+        _env_file=None,
+        log_dir=tmp_path / "logs",
+        voice_input_device="Microphone Array",
+        voice_vad_threshold=0.02,
+        fast_voice_record_seconds=4.0,
+        fast_voice_max_seconds=1.0,
+        gui_fast_voice_capture_mode="benchmark_quality",
+    )
+    pre_speech_chunks = 3
+    speech_chunks = 4
+    expected_silence_chunks = 11
+    sd = FakeSoundDevice(
+        [0.01] * pre_speech_chunks
+        + [0.2] * speech_chunks
+        + [0.01] * 30
+    )
+    runner = FastVoiceRunner(
+        settings,
+        provider=FakeProvider("what's on screen one"),
+        assistant=SpyAssistant(),  # type: ignore[arg-type]
+        sounddevice_module=sd,
+        capture_max_seconds=2.0,
+        strict_command_validation=True,
+        output_func=lambda _message: None,
+    )
+
+    capture = runner._capture_until_silence()
+
+    assert capture.capture_mode == "benchmark_quality"
+    assert sd.stream.read_count == pre_speech_chunks + speech_chunks + expected_silence_chunks
+    assert capture.speech_ms == pytest.approx(speech_chunks * 80.0)
+    assert capture.trailing_silence_ms == pytest.approx(expected_silence_chunks * 80.0)
+
+
+def test_benchmark_quality_capture_uses_three_second_window_when_no_speech(
+    tmp_path: Path,
+) -> None:
+    settings = AppSettings(
+        _env_file=None,
+        log_dir=tmp_path / "logs",
+        voice_input_device="Microphone Array",
+        voice_vad_threshold=0.02,
+        fast_voice_record_seconds=4.0,
+        fast_voice_max_seconds=1.0,
+        gui_fast_voice_capture_mode="benchmark_quality",
+    )
+    sd = FakeSoundDevice([0.01] * 60)
+    runner = FastVoiceRunner(
+        settings,
+        provider=FakeProvider(""),
+        assistant=SpyAssistant(),  # type: ignore[arg-type]
+        sounddevice_module=sd,
+        capture_max_seconds=2.0,
+        strict_command_validation=True,
+        output_func=lambda _message: None,
+    )
+
+    capture = runner._capture_until_silence()
+
+    assert capture.capture_mode == "benchmark_quality"
+    assert sd.stream.read_count == 38
+    assert capture.vad_crossed is False
+    assert capture.vad_wait_ms == pytest.approx(3040.0)
 
 
 def test_fast_voice_uses_fast_specific_assistant_handler(tmp_path: Path) -> None:

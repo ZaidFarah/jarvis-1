@@ -883,6 +883,7 @@ def test_gui_start_voice_selects_fast_engine_and_stop_requests_shutdown(monkeypa
     assert callable(window.fast_voice_runner.kwargs["progress_callback"])
     assert callable(window.fast_voice_runner.kwargs["response_chunk_callback"])
     assert window.fast_voice_runner.kwargs["capture_max_seconds"] == 2.0
+    assert window.fast_voice_runner.kwargs["capture_mode"] == "benchmark_quality"
 
     window._run_fast_voice_worker()
     assert window.fast_voice_runner.max_turns == 1

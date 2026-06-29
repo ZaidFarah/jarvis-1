@@ -41,7 +41,7 @@ The `voice/` package owns the audio and speech stack:
 - `command_capture.py`: one-shot command capture diagnostics.
 - `voice_command_test.py`: controlled wake-and-command test path.
 - `voice_loop.py`: wake-based loop with retry, follow-up listening, status events, optional TTS, and timing diagnostics.
-- `fast_voice.py`: low-latency one-command GUI/CLI path with VAD progress, speech repair, validation, OpenAI routing, optional streaming text, and optional TTS.
+- `fast_voice.py`: low-latency one-command GUI/CLI path with selectable capture modes, VAD progress, speech repair, validation, OpenAI routing, optional streaming text, and optional TTS.
 
 Voice commands are validated before they reach OpenAI. Raw speech is retained for diagnostics, but invalid or low-confidence text is not routed as a command.
 

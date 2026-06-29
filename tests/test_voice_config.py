@@ -14,6 +14,7 @@ def test_voice_settings_defaults_are_lightweight() -> None:
     assert settings.gui_fast_voice_hard_max_seconds == 3.0
     assert settings.gui_fast_voice_end_silence_ms == 350
     assert settings.gui_fast_voice_noise_gate_multiplier == 1.8
+    assert settings.gui_fast_voice_capture_mode == "benchmark_quality"
     assert settings.voice_sample_rate == 16000
     assert settings.voice_channels == 1
     assert settings.voice_input_device == ""
@@ -27,6 +28,7 @@ def test_voice_settings_defaults_are_lightweight() -> None:
     assert settings.voice_vad_silence_ms == 650
     assert settings.fast_voice_enabled is True
     assert settings.fast_voice_activation == "enter"
+    assert settings.fast_voice_capture_mode == "adaptive"
     assert settings.fast_voice_record_seconds == 4.0
     assert settings.fast_voice_max_seconds == 1.8
     assert settings.fast_voice_min_speech_ms == 300
@@ -149,6 +151,7 @@ def test_voice_settings_read_environment(monkeypatch) -> None:
     monkeypatch.setenv("GUI_FAST_VOICE_HARD_MAX_SECONDS", "3.4")
     monkeypatch.setenv("GUI_FAST_VOICE_END_SILENCE_MS", "420")
     monkeypatch.setenv("GUI_FAST_VOICE_NOISE_GATE_MULTIPLIER", "2.2")
+    monkeypatch.setenv("GUI_FAST_VOICE_CAPTURE_MODE", "benchmark-quality")
     monkeypatch.setenv("VOICE_SAMPLE_RATE", "22050")
     monkeypatch.setenv("VOICE_INPUT_DEVICE", "  USB Microphone  ")
     monkeypatch.setenv("VOICE_HEALTH_SPEECH_SECONDS", "7.5")
@@ -159,6 +162,7 @@ def test_voice_settings_read_environment(monkeypatch) -> None:
     monkeypatch.setenv("VOICE_VAD_SILENCE_MS", "500")
     monkeypatch.setenv("FAST_VOICE_ENABLED", "false")
     monkeypatch.setenv("FAST_VOICE_ACTIVATION", "direct")
+    monkeypatch.setenv("FAST_VOICE_CAPTURE_MODE", "fixed-short")
     monkeypatch.setenv("FAST_VOICE_RECORD_SECONDS", "3.5")
     monkeypatch.setenv("FAST_VOICE_MAX_SECONDS", "2.75")
     monkeypatch.setenv("FAST_VOICE_MIN_SPEECH_MS", "260")
@@ -186,6 +190,7 @@ def test_voice_settings_read_environment(monkeypatch) -> None:
     assert settings.gui_fast_voice_hard_max_seconds == 3.4
     assert settings.gui_fast_voice_end_silence_ms == 420
     assert settings.gui_fast_voice_noise_gate_multiplier == 2.2
+    assert settings.gui_fast_voice_capture_mode == "benchmark_quality"
     assert settings.voice_sample_rate == 22050
     assert settings.voice_input_device == "USB Microphone"
     assert settings.voice_health_speech_seconds == 7.5
@@ -196,6 +201,7 @@ def test_voice_settings_read_environment(monkeypatch) -> None:
     assert settings.voice_vad_silence_ms == 500
     assert settings.fast_voice_enabled is False
     assert settings.fast_voice_activation == "direct"
+    assert settings.fast_voice_capture_mode == "fixed_short"
     assert settings.fast_voice_record_seconds == 3.5
     assert settings.fast_voice_max_seconds == 2.75
     assert settings.fast_voice_min_speech_ms == 260
@@ -233,6 +239,16 @@ def test_fast_voice_activation_aliases_and_validation() -> None:
     assert AppSettings(_env_file=None, fast_voice_activation="immediate").fast_voice_activation == "direct"
     with pytest.raises(ValueError, match="Unsupported fast voice activation"):
         AppSettings(_env_file=None, fast_voice_activation="wake")
+
+
+def test_fast_voice_capture_mode_validation() -> None:
+    assert AppSettings(_env_file=None, fast_voice_capture_mode="fixed-short").fast_voice_capture_mode == "fixed_short"
+    assert (
+        AppSettings(_env_file=None, gui_fast_voice_capture_mode="benchmark-quality").gui_fast_voice_capture_mode
+        == "benchmark_quality"
+    )
+    with pytest.raises(ValueError, match="Unsupported fast voice capture mode"):
+        AppSettings(_env_file=None, fast_voice_capture_mode="instant")
 
 
 def test_gui_voice_engine_validation() -> None:

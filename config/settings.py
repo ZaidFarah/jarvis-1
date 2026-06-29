@@ -135,6 +135,10 @@ class AppSettings(BaseSettings):
             "JARVIS_GUI_FAST_VOICE_NOISE_GATE_MULTIPLIER",
         ),
     )
+    gui_fast_voice_capture_mode: str = Field(
+        default="benchmark_quality",
+        validation_alias=AliasChoices("GUI_FAST_VOICE_CAPTURE_MODE", "JARVIS_GUI_FAST_VOICE_CAPTURE_MODE"),
+    )
     voice_sample_rate: int = Field(
         default=16000,
         ge=8000,
@@ -202,6 +206,10 @@ class AppSettings(BaseSettings):
     fast_voice_activation: str = Field(
         default="enter",
         validation_alias=AliasChoices("FAST_VOICE_ACTIVATION", "JARVIS_FAST_VOICE_ACTIVATION"),
+    )
+    fast_voice_capture_mode: str = Field(
+        default="adaptive",
+        validation_alias=AliasChoices("FAST_VOICE_CAPTURE_MODE", "JARVIS_FAST_VOICE_CAPTURE_MODE"),
     )
     fast_voice_record_seconds: float = Field(
         default=4.0,
@@ -1105,6 +1113,14 @@ class AppSettings(BaseSettings):
         cleaned = aliases.get(cleaned, cleaned)
         if cleaned not in {"enter", "clap", "direct"}:
             raise ValueError(f"Unsupported fast voice activation: {value}")
+        return cleaned
+
+    @field_validator("fast_voice_capture_mode", "gui_fast_voice_capture_mode")
+    @classmethod
+    def normalize_fast_voice_capture_mode(cls, value: str) -> str:
+        cleaned = value.strip().lower().replace("-", "_")
+        if cleaned not in {"adaptive", "fixed_short", "benchmark_quality"}:
+            raise ValueError(f"Unsupported fast voice capture mode: {value}")
         return cleaned
 
     @field_validator("fast_voice_tts_mode")

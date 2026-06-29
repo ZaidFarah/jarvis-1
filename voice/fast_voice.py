@@ -40,12 +40,18 @@ FAST_GUI_MISHEARD_RESPONSE = FAST_GUI_REJECTED_RESPONSE
 FAST_GUI_MIN_TRANSCRIPT_CONFIDENCE = 0.35
 FAST_GUI_WEAK_COMMANDS = {"you", "okay", "for me"}
 FAST_GUI_INCOMPLETE_COMMANDS = {"tell me"}
+FAST_VOICE_CAPTURE_MODES = {"adaptive", "fixed_short", "benchmark_quality"}
+BENCHMARK_QUALITY_CAPTURE_SECONDS = 3.0
+BENCHMARK_QUALITY_MIN_AFTER_TRIGGER_MS = 1200
+BENCHMARK_QUALITY_SILENCE_MS = 600
+BENCHMARK_QUALITY_PREROLL_MS = 400
 
 
 @dataclass(frozen=True)
 class FastCaptureResult:
     samples: list[float]
     input_device: str
+    capture_mode: str = "adaptive"
     vad_wait_ms: float = 0.0
     speech_ms: float = 0.0
     trailing_silence_ms: float = 0.0
@@ -73,6 +79,7 @@ class FastVoiceProgress:
 
 @dataclass(frozen=True)
 class FastVoiceTiming:
+    capture_mode: str = "adaptive"
     capture_ms: float = 0.0
     audio_record_ms: float = 0.0
     audio_prepare_ms: float = 0.0
@@ -88,6 +95,7 @@ class FastVoiceTiming:
     def format(self) -> str:
         return " ".join(
             (
+                f"capture_mode={self.capture_mode}",
                 f"capture_ms={self.capture_ms:.1f}",
                 f"audio_record_ms={self.audio_record_ms:.1f}",
                 f"audio_prepare_ms={self.audio_prepare_ms:.1f}",
@@ -165,6 +173,7 @@ class FastVoiceRunner:
         progress_callback: Callable[[FastVoiceProgress], None] | None = None,
         response_chunk_callback: Callable[[str], None] | None = None,
         capture_max_seconds: float | None = None,
+        capture_mode: str | None = None,
         strict_command_validation: bool = False,
     ) -> None:
         self.settings = settings
@@ -183,6 +192,11 @@ class FastVoiceRunner:
         self.response_chunk_callback = response_chunk_callback
         self.capture_max_seconds = capture_max_seconds
         self.strict_command_validation = strict_command_validation
+        self.capture_mode = resolve_fast_voice_capture_mode(
+            settings,
+            capture_mode,
+            gui=strict_command_validation,
+        )
         self.log_file = self.settings.log_dir / "fast_voice.log"
         self.fast_logger = logger.bind(fast_voice=True)
         self._stt_warm_attempted = False
@@ -359,7 +373,7 @@ class FastVoiceRunner:
         transcribe_ms = 0.0
         openai_ms = 0.0
         tts_ms = 0.0
-        capture_result = FastCaptureResult([], input_device)
+        capture_result = FastCaptureResult([], input_device, capture_mode=self.capture_mode)
         validation = self._validate("")
 
         if not self.provider.available:
@@ -395,7 +409,7 @@ class FastVoiceRunner:
                     capture_result = recorded
                 else:
                     samples, input_device = recorded
-                    capture_result = FastCaptureResult(samples, input_device)
+                    capture_result = FastCaptureResult(samples, input_device, capture_mode=self.capture_mode)
             else:
                 capture_result = self._capture_until_silence()
             samples = capture_result.samples
@@ -733,6 +747,7 @@ class FastVoiceRunner:
             )
         sample_rate = self.settings.voice_sample_rate
         channels = self.settings.voice_channels
+        capture_mode = self.capture_mode
         window_ms = min(self.settings.voice_vad_window_ms, 80)
         chunk_frames = max(1, int(sample_rate * window_ms / 1000.0))
         capture_max_seconds = (
@@ -740,6 +755,8 @@ class FastVoiceRunner:
             if self.capture_max_seconds is not None
             else self.settings.fast_voice_max_seconds
         )
+        if capture_mode == "benchmark_quality":
+            capture_max_seconds = max(capture_max_seconds, BENCHMARK_QUALITY_CAPTURE_SECONDS)
         max_seconds = min(
             self.settings.fast_voice_record_seconds,
             capture_max_seconds,
@@ -753,6 +770,14 @@ class FastVoiceRunner:
             if self.strict_command_validation
             else max_seconds
         )
+        if capture_mode == "benchmark_quality":
+            hard_max_seconds = max(
+                hard_max_seconds,
+                min(
+                    self.settings.fast_voice_record_seconds,
+                    BENCHMARK_QUALITY_CAPTURE_SECONDS + 0.5,
+                ),
+            )
         hard_max_seconds = max(max_seconds, hard_max_seconds)
         hard_max_frames = max(soft_max_frames, int(sample_rate * hard_max_seconds))
         selected_silence_ms = self.settings.fast_voice_silence_ms
@@ -760,10 +785,18 @@ class FastVoiceRunner:
             1,
             int(sample_rate * self.settings.fast_voice_min_speech_ms / 1000.0),
         )
+        if capture_mode == "benchmark_quality":
+            minimum_speech_frames = max(
+                minimum_speech_frames,
+                int(sample_rate * BENCHMARK_QUALITY_MIN_AFTER_TRIGGER_MS / 1000.0),
+            )
+        preroll_ms = self.settings.fast_voice_preroll_ms
+        if capture_mode == "benchmark_quality":
+            preroll_ms = max(preroll_ms, BENCHMARK_QUALITY_PREROLL_MS)
         preroll_sample_limit = int(
             sample_rate
             * channels
-            * self.settings.fast_voice_preroll_ms
+            * preroll_ms
             / 1000.0
         )
         preroll_samples: deque[float] = deque(maxlen=preroll_sample_limit)
@@ -871,11 +904,9 @@ class FastVoiceRunner:
                     selected_silence_ms = select_fast_voice_silence_ms(
                         self.settings,
                         speech_span_ms,
+                        capture_mode=capture_mode,
+                        gui=self.strict_command_validation,
                     )
-                    if self.strict_command_validation:
-                        selected_silence_ms = (
-                            self.settings.gui_fast_voice_end_silence_ms
-                        )
                     silence_frames_needed = max(
                         1,
                         int(sample_rate * selected_silence_ms / 1000.0),
@@ -915,9 +946,10 @@ class FastVoiceRunner:
         trailing_silence_ms = (trailing_silence_frames / sample_rate) * 1000.0
 
         self.fast_logger.info(
-            "Fast capture device={} samples={} triggered={} soft_max_seconds={} "
+            "Fast capture mode={} device={} samples={} triggered={} soft_max_seconds={} "
             "hard_max_seconds={} silence_ms={} continuation_threshold={:.6f} "
             "audio_record_ms={:.1f} audio_prepare_ms={:.1f}",
+            capture_mode,
             device_name,
             len(samples),
             triggered,
@@ -931,6 +963,7 @@ class FastVoiceRunner:
         return FastCaptureResult(
             samples=samples,
             input_device=device_name,
+            capture_mode=capture_mode,
             vad_wait_ms=vad_wait_ms,
             speech_ms=speech_ms,
             trailing_silence_ms=trailing_silence_ms,
@@ -1147,8 +1180,9 @@ class FastVoiceRunner:
         unintelligible_audio: bool = False,
         capture_result: FastCaptureResult | None = None,
     ) -> FastVoiceReport:
-        capture_result = capture_result or FastCaptureResult([], input_device)
+        capture_result = capture_result or FastCaptureResult([], input_device, capture_mode=self.capture_mode)
         timing = FastVoiceTiming(
+            capture_mode=capture_result.capture_mode,
             capture_ms=capture_ms,
             audio_record_ms=float(capture_result.audio_record_ms or 0.0),
             audio_prepare_ms=capture_result.audio_prepare_ms,
@@ -1197,12 +1231,38 @@ def run_fast_command_test(
     return FastVoiceRunner(settings, assistant=assistant).run_once()
 
 
-def select_fast_voice_silence_ms(settings: AppSettings, speech_ms: float) -> int:
+def select_fast_voice_silence_ms(
+    settings: AppSettings,
+    speech_ms: float,
+    *,
+    capture_mode: str = "adaptive",
+    gui: bool = False,
+) -> int:
+    if capture_mode == "benchmark_quality":
+        base_silence_ms = settings.gui_fast_voice_end_silence_ms if gui else settings.fast_voice_long_command_silence_ms
+        return max(base_silence_ms, BENCHMARK_QUALITY_SILENCE_MS)
+    if capture_mode == "fixed_short":
+        return settings.fast_voice_silence_ms
+    if gui:
+        return settings.gui_fast_voice_end_silence_ms
     if not settings.fast_voice_fast_stop_enabled:
         return settings.fast_voice_silence_ms
     if speech_ms <= SHORT_COMMAND_SPEECH_MS:
         return settings.fast_voice_short_command_silence_ms
     return settings.fast_voice_long_command_silence_ms
+
+
+def resolve_fast_voice_capture_mode(
+    settings: AppSettings,
+    override: str | None = None,
+    *,
+    gui: bool = False,
+) -> str:
+    value = override or (settings.gui_fast_voice_capture_mode if gui else settings.fast_voice_capture_mode)
+    cleaned = value.strip().lower().replace("-", "_")
+    if cleaned not in FAST_VOICE_CAPTURE_MODES:
+        raise ValueError(f"Unsupported fast voice capture mode: {value}")
+    return cleaned
 
 
 def resolve_fast_input_device(sd: Any, preferred: str) -> tuple[int, str]:

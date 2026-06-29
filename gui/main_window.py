@@ -2271,6 +2271,7 @@ class JarvisMainWindow(QMainWindow):
                 else None
             ),
             capture_max_seconds=self.settings.gui_fast_voice_max_seconds,
+            capture_mode=self.settings.gui_fast_voice_capture_mode,
             strict_command_validation=True,
         )
         self.voice_loop_status_value.setText("Starting")
